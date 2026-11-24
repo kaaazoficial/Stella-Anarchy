@@ -118,13 +118,24 @@ class Store:
                 """
             )
 
-    def cleanup_expired(self, now: float | None = None) -> int:
-        cutoff = (time.time() if now is None else now) - WARNING_RETENTION_DAYS * 86400
+    def cleanup_expired(self, now: float | None = None) -> dict[str, int]:
+        stamp = time.time() if now is None else float(now)
+        warning_cutoff = stamp - WARNING_RETENTION_DAYS * 86400
+        daily_cutoff = stamp - 7 * 86400
+        event_cutoff = stamp - 30 * 86400
+        poll_cutoff = stamp - 30 * 86400
         with self._session(self.connect()) as db:
-            cursor = db.execute(
-                "DELETE FROM moderation_warnings WHERE created_at < ?", (cutoff,)
+            counts = {}
+            statements = (
+                ("warnings", "DELETE FROM moderation_warnings WHERE created_at < ?", warning_cutoff),
+                ("activity", "DELETE FROM activity_daily WHERE day_key < date(?, 'unixepoch')", daily_cutoff),
+                ("events", "DELETE FROM community_events WHERE starts_at < ?", event_cutoff),
+                ("polls", "DELETE FROM polls WHERE created_at < ?", poll_cutoff),
             )
-            return max(0, cursor.rowcount)
+            for label, sql, value in statements:
+                cursor = db.execute(sql, (value,))
+                counts[label] = max(0, cursor.rowcount)
+            return counts
 
     def add_warning(
         self, room_id: str, target_uid: str, target_name: str,
