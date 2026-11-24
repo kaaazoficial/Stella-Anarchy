@@ -62,6 +62,59 @@ class Store:
                     updated_at REAL NOT NULL,
                     PRIMARY KEY(room_id, setting_key)
                 );
+
+                CREATE TABLE IF NOT EXISTS polls (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    room_id TEXT NOT NULL,
+                    creator_uid TEXT NOT NULL,
+                    question TEXT NOT NULL,
+                    options_json TEXT NOT NULL,
+                    created_at REAL NOT NULL,
+                    closed INTEGER NOT NULL DEFAULT 0
+                );
+                CREATE INDEX IF NOT EXISTS idx_polls_room ON polls(room_id, id DESC);
+                CREATE TABLE IF NOT EXISTS poll_votes (
+                    poll_id INTEGER NOT NULL REFERENCES polls(id) ON DELETE CASCADE,
+                    voter_uid TEXT NOT NULL,
+                    option_index INTEGER NOT NULL,
+                    created_at REAL NOT NULL,
+                    PRIMARY KEY(poll_id, voter_uid)
+                );
+                CREATE TABLE IF NOT EXISTS community_events (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    room_id TEXT NOT NULL,
+                    creator_uid TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    starts_at REAL NOT NULL,
+                    location TEXT NOT NULL DEFAULT '',
+                    description TEXT NOT NULL DEFAULT '',
+                    created_at REAL NOT NULL,
+                    closed INTEGER NOT NULL DEFAULT 0
+                );
+                CREATE INDEX IF NOT EXISTS idx_events_room ON community_events(room_id, starts_at);
+                CREATE TABLE IF NOT EXISTS event_rsvps (
+                    event_id INTEGER NOT NULL REFERENCES community_events(id) ON DELETE CASCADE,
+                    user_uid TEXT NOT NULL,
+                    nickname TEXT NOT NULL,
+                    created_at REAL NOT NULL,
+                    PRIMARY KEY(event_id, user_uid)
+                );
+                CREATE TABLE IF NOT EXISTS activity_daily (
+                    room_id TEXT NOT NULL,
+                    user_uid TEXT NOT NULL,
+                    day_key TEXT NOT NULL,
+                    message_count INTEGER NOT NULL DEFAULT 0,
+                    PRIMARY KEY(room_id, user_uid, day_key)
+                );
+                CREATE TABLE IF NOT EXISTS auto_replies (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    room_id TEXT NOT NULL,
+                    trigger_text TEXT NOT NULL,
+                    response_text TEXT NOT NULL,
+                    created_at REAL NOT NULL,
+                    enabled INTEGER NOT NULL DEFAULT 1
+                );
+                CREATE INDEX IF NOT EXISTS idx_auto_replies_room ON auto_replies(room_id, enabled);
                 """
             )
 
@@ -129,3 +182,187 @@ class Store:
                    setting_value=excluded.setting_value,updated_at=excluded.updated_at""",
                 (str(room_id), str(key), str(value), time.time()),
             )
+
+
+    def create_poll(self, room_id: str, creator_uid: str, question: str, options: list[str]) -> int:
+        import json
+        if not 2 <= len(options) <= 8:
+            raise ValueError("A poll must have between 2 and 8 options.")
+        now = time.time()
+        with self._session(self.connect()) as db:
+            cursor = db.execute(
+                "INSERT INTO polls(room_id,creator_uid,question,options_json,created_at) VALUES(?,?,?,?,?)",
+                (str(room_id), str(creator_uid), str(question)[:240], json.dumps(options, ensure_ascii=False), now),
+            )
+            return int(cursor.lastrowid)
+
+    def get_poll(self, room_id: str, poll_id: int) -> dict[str, Any] | None:
+        import json
+        with self._session(self.connect()) as db:
+            row = db.execute(
+                "SELECT * FROM polls WHERE id=? AND room_id=?",
+                (int(poll_id), str(room_id)),
+            ).fetchone()
+            if not row:
+                return None
+            result = dict(row)
+            result["options"] = json.loads(result.pop("options_json"))
+            votes = db.execute(
+                "SELECT option_index,COUNT(*) AS total FROM poll_votes WHERE poll_id=? GROUP BY option_index",
+                (int(poll_id),),
+            ).fetchall()
+            result["results"] = {int(item["option_index"]): int(item["total"]) for item in votes}
+            result["total_votes"] = sum(result["results"].values())
+            return result
+
+    def list_polls(self, room_id: str, limit: int = 10) -> list[dict[str, Any]]:
+        with self._session(self.connect()) as db:
+            rows = db.execute(
+                "SELECT id,question,closed,created_at FROM polls WHERE room_id=? ORDER BY id DESC LIMIT ?",
+                (str(room_id), max(1, min(20, int(limit)))),
+            ).fetchall()
+            return [dict(row) for row in rows]
+
+    def vote_poll(self, room_id: str, poll_id: int, voter_uid: str, option_index: int) -> str:
+        now = time.time()
+        with self._session(self.connect()) as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute(
+                "SELECT options_json,closed FROM polls WHERE id=? AND room_id=?",
+                (int(poll_id), str(room_id)),
+            ).fetchone()
+            if not row:
+                return "missing"
+            if row["closed"]:
+                return "closed"
+            import json
+            options = json.loads(row["options_json"])
+            if option_index < 0 or option_index >= len(options):
+                return "invalid_option"
+            db.execute(
+                """INSERT INTO poll_votes(poll_id,voter_uid,option_index,created_at)
+                   VALUES(?,?,?,?) ON CONFLICT(poll_id,voter_uid) DO UPDATE SET
+                   option_index=excluded.option_index,created_at=excluded.created_at""",
+                (int(poll_id), str(voter_uid), int(option_index), now),
+            )
+            return "ok"
+
+    def close_poll(self, room_id: str, poll_id: int, requester_uid: str, is_admin: bool = False) -> str:
+        with self._session(self.connect()) as db:
+            row = db.execute(
+                "SELECT creator_uid,closed FROM polls WHERE id=? AND room_id=?",
+                (int(poll_id), str(room_id)),
+            ).fetchone()
+            if not row:
+                return "missing"
+            if row["closed"]:
+                return "closed"
+            if str(row["creator_uid"]) != str(requester_uid) and not is_admin:
+                return "denied"
+            db.execute("UPDATE polls SET closed=1 WHERE id=?", (int(poll_id),))
+            return "ok"
+
+    def create_event(
+        self, room_id: str, creator_uid: str, title: str, starts_at: float,
+        location: str = "", description: str = "",
+    ) -> int:
+        with self._session(self.connect()) as db:
+            cursor = db.execute(
+                """INSERT INTO community_events
+                   (room_id,creator_uid,title,starts_at,location,description,created_at)
+                   VALUES(?,?,?,?,?,?,?)""",
+                (str(room_id), str(creator_uid), str(title)[:120], float(starts_at),
+                 str(location)[:160], str(description)[:400], time.time()),
+            )
+            return int(cursor.lastrowid)
+
+    def list_events(self, room_id: str, limit: int = 10) -> list[dict[str, Any]]:
+        with self._session(self.connect()) as db:
+            rows = db.execute(
+                """SELECT e.id,e.title,e.starts_at,e.location,e.description,e.closed,
+                          COUNT(r.user_uid) AS attendees
+                   FROM community_events e LEFT JOIN event_rsvps r ON r.event_id=e.id
+                   WHERE e.room_id=? AND e.closed=0
+                   GROUP BY e.id ORDER BY e.starts_at LIMIT ?""",
+                (str(room_id), max(1, min(20, int(limit)))),
+            ).fetchall()
+            return [dict(row) for row in rows]
+
+    def rsvp_event(self, room_id: str, event_id: int, user_uid: str, nickname: str) -> str:
+        with self._session(self.connect()) as db:
+            row = db.execute(
+                "SELECT id,closed FROM community_events WHERE id=? AND room_id=?",
+                (int(event_id), str(room_id)),
+            ).fetchone()
+            if not row:
+                return "missing"
+            if row["closed"]:
+                return "closed"
+            db.execute(
+                """INSERT INTO event_rsvps(event_id,user_uid,nickname,created_at)
+                   VALUES(?,?,?,?) ON CONFLICT(event_id,user_uid) DO UPDATE SET
+                   nickname=excluded.nickname,created_at=excluded.created_at""",
+                (int(event_id), str(user_uid), str(nickname)[:80], time.time()),
+            )
+            return "ok"
+
+    def close_event(self, room_id: str, event_id: int, requester_uid: str, is_admin: bool = False) -> str:
+        with self._session(self.connect()) as db:
+            row = db.execute(
+                "SELECT creator_uid,closed FROM community_events WHERE id=? AND room_id=?",
+                (int(event_id), str(room_id)),
+            ).fetchone()
+            if not row:
+                return "missing"
+            if row["closed"]:
+                return "closed"
+            if str(row["creator_uid"]) != str(requester_uid) and not is_admin:
+                return "denied"
+            db.execute("UPDATE community_events SET closed=1 WHERE id=?", (int(event_id),))
+            return "ok"
+
+    def record_activity(self, room_id: str, user_uid: str, now: float | None = None) -> None:
+        from datetime import datetime, timezone
+        stamp = time.time() if now is None else float(now)
+        day = datetime.fromtimestamp(stamp, timezone.utc).date().isoformat()
+        with self._session(self.connect()) as db:
+            db.execute(
+                """INSERT INTO activity_daily(room_id,user_uid,day_key,message_count)
+                   VALUES(?,?,?,1) ON CONFLICT(room_id,user_uid,day_key) DO UPDATE SET
+                   message_count=activity_daily.message_count+1""",
+                (str(room_id), str(user_uid), day),
+            )
+
+    def activity_summary(self, room_id: str, limit: int = 10) -> list[dict[str, Any]]:
+        with self._session(self.connect()) as db:
+            rows = db.execute(
+                """SELECT user_uid,SUM(message_count) AS total_messages
+                   FROM activity_daily WHERE room_id=?
+                   GROUP BY user_uid ORDER BY total_messages DESC LIMIT ?""",
+                (str(room_id), max(1, min(20, int(limit)))),
+            ).fetchall()
+            return [dict(row) for row in rows]
+
+    def add_auto_reply(self, room_id: str, trigger_text: str, response_text: str) -> int:
+        with self._session(self.connect()) as db:
+            cursor = db.execute(
+                "INSERT INTO auto_replies(room_id,trigger_text,response_text,created_at) VALUES(?,?,?,?)",
+                (str(room_id), str(trigger_text).strip()[:80], str(response_text).strip()[:500], time.time()),
+            )
+            return int(cursor.lastrowid)
+
+    def auto_reply_rules(self, room_id: str) -> list[dict[str, Any]]:
+        with self._session(self.connect()) as db:
+            rows = db.execute(
+                "SELECT id,trigger_text,response_text FROM auto_replies WHERE room_id=? AND enabled=1 ORDER BY id DESC LIMIT 30",
+                (str(room_id),),
+            ).fetchall()
+            return [dict(row) for row in rows]
+
+    def remove_auto_reply(self, room_id: str, rule_id: int) -> bool:
+        with self._session(self.connect()) as db:
+            cursor = db.execute(
+                "DELETE FROM auto_replies WHERE room_id=? AND id=?",
+                (str(room_id), int(rule_id)),
+            )
+            return cursor.rowcount > 0
