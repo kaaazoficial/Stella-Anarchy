@@ -1,17 +1,26 @@
 from __future__ import annotations
 
+import hashlib
 import logging
 import random
 import re
 import time
 from collections import defaultdict, deque
+from datetime import datetime, timezone
 from typing import Any
 
 from stella.config import Settings
+from stella.language import split_arguments
+from stella.moderation import inspect_links, sanitize_reason
 from stella.platform import AnarchyClient
+from stella.services import StellaServices
 from stella.storage import Store
 
 log = logging.getLogger("stella.bot")
+
+MAX_TRACKED_USERS = 5000
+ANTISPAM_WINDOW_SECONDS = 8
+ANTISPAM_WARNING_COOLDOWN = 60
 
 
 class StellaBot:
@@ -19,9 +28,11 @@ class StellaBot:
         self.settings = settings
         self.store = store
         self.platform = platform
-        # Transient anti-spam counters contain hashes, never message text, and are RAM-only.
+        self.services = StellaServices()
+        # Only hashes and timestamps are held here. Message text is not retained.
         self._recent: dict[tuple[str, str], deque[tuple[float, str]]] = defaultdict(deque)
         self._warned_until: dict[tuple[str, str], float] = {}
+        self._auto_reply_cooldown: dict[tuple[str, int], float] = {}
 
     @staticmethod
     def _author(message: dict[str, Any]) -> tuple[str, str]:
@@ -35,17 +46,18 @@ class StellaBot:
 
     async def _reply(self, room_id: str, text: str, message: dict[str, Any]) -> None:
         reply_id = message.get("messageId") or message.get("id")
-        await self.platform.send_message(str(room_id), text, reply_id=str(reply_id) if reply_id else None)
+        await self.platform.send_message(
+            str(room_id), str(text)[:7000],
+            reply_id=str(reply_id) if reply_id else None,
+        )
 
     async def handle_event(self, event: dict[str, Any]) -> None:
         event_type = str(event.get("type") or "").strip().casefold()
         room_id = str(event.get("threadId") or event.get("thread_id") or "").strip()
         if not room_id:
             return
-        if event_type in {"room.end", "room.kicked"}:
-            self._recent = defaultdict(deque, {
-                key: value for key, value in self._recent.items() if key[0] != room_id
-            })
+        if event_type in {"room.end", "room.kicked", "thread.removed"}:
+            self._forget_room(room_id)
             return
         if event_type not in {"message", "message.created", "message_create"}:
             return
@@ -54,11 +66,10 @@ class StellaBot:
             return
         uid, name = self._author(message)
         content = str(message.get("content") or "").strip()
-        if not uid or not content:
-            return
-        if self._is_bot_message(message):
+        if not uid or not content or self._is_bot_message(message):
             return
 
+        self.store.record_activity(room_id, uid)
         blocked, reason = self._check_antispam(room_id, uid, content)
         if blocked:
             if reason:
@@ -67,39 +78,71 @@ class StellaBot:
                 )
                 await self._reply(
                     room_id,
-                    f"⚠️ {name}, detecté actividad repetitiva. Se registró una advertencia #{warning_id}. Si crees que es un error, contacta al equipo de moderación.",
+                    f"⚠️ {name}, detecté actividad repetitiva. Se registró una advertencia #{warning_id}.",
                     message,
                 )
             return
 
         prefix = self.settings.command_prefix
-        if not content.startswith(prefix):
+        if content.startswith(prefix):
+            await self._command(room_id, uid, name, content[len(prefix):].strip(), message)
             return
-        await self._command(room_id, uid, name, content[len(prefix):].strip(), message)
+        await self._check_auto_replies(room_id, content, message)
 
     @staticmethod
     def _is_bot_message(message: dict[str, Any]) -> bool:
         author = message.get("author") or {}
         return bool(author.get("isBot") or author.get("bot"))
 
+    def _forget_room(self, room_id: str) -> None:
+        for mapping in (self._recent, self._warned_until, self._auto_reply_cooldown):
+            for key in list(mapping):
+                if key[0] == room_id:
+                    mapping.pop(key, None)
+
     def _check_antispam(self, room_id: str, uid: str, content: str) -> tuple[bool, str | None]:
         if self.store.get_setting(room_id, "antispam_enabled", "1") != "1":
             return False, None
         now = time.monotonic()
         key = (room_id, uid)
+        if key not in self._recent and len(self._recent) >= MAX_TRACKED_USERS:
+            oldest = min(self._recent, key=lambda item: self._recent[item][0][0] if self._recent[item] else now)
+            self._recent.pop(oldest, None)
+            self._warned_until.pop(oldest, None)
         queue = self._recent[key]
-        digest = __import__("hashlib").sha256(content.casefold().encode("utf-8")).hexdigest()
-        while queue and now - queue[0][0] > 8:
+        digest = hashlib.sha256(content.casefold().encode("utf-8")).hexdigest()
+        while queue and now - queue[0][0] > ANTISPAM_WINDOW_SECONDS:
             queue.popleft()
         queue.append((now, digest))
         repeats = sum(1 for _, item in queue if item == digest)
         if len(queue) > 7 or repeats >= 4:
             if self._warned_until.get(key, 0) <= now:
-                self._warned_until[key] = now + 60
+                self._warned_until[key] = now + ANTISPAM_WARNING_COOLDOWN
                 queue.clear()
                 return True, "Antispam automático: demasiados mensajes o contenido repetido."
             return True, None
+        # Remove empty and expired identities instead of retaining every user ever seen.
+        for tracked in list(self._recent):
+            if tracked != key and not self._recent[tracked]:
+                self._recent.pop(tracked, None)
+                self._warned_until.pop(tracked, None)
+        for tracked, expiry in list(self._warned_until.items()):
+            if expiry <= now and tracked not in self._recent:
+                self._warned_until.pop(tracked, None)
         return False, None
+
+    async def _check_auto_replies(self, room_id: str, content: str, message: dict[str, Any]) -> None:
+        normalized = " ".join(content.casefold().split())
+        now = time.monotonic()
+        for rule in self.store.auto_reply_rules(room_id):
+            trigger = " ".join(str(rule["trigger_text"]).casefold().split())
+            if trigger and normalized == trigger:
+                key = (room_id, int(rule["id"]))
+                if self._auto_reply_cooldown.get(key, 0) > now:
+                    continue
+                self._auto_reply_cooldown[key] = now + 15
+                await self._reply(room_id, str(rule["response_text"]), message)
+                return
 
     async def _command(
         self, room_id: str, uid: str, name: str, raw: str, message: dict[str, Any]
@@ -109,69 +152,77 @@ class StellaBot:
         parts = raw.split(maxsplit=1)
         command = parts[0].casefold()
         args = parts[1].strip() if len(parts) > 1 else ""
-
-        if command in {"ayuda", "help", "comandos"}:
-            await self._reply(room_id, self._help(), message)
-        elif command in {"ping"}:
-            await self._reply(room_id, "Pong. Stella está activa.", message)
-        elif command in {"miuid", "uid"}:
-            await self._reply(room_id, f"Tu UID de Anarchy es: {uid}", message)
-        elif command in {"azar"}:
-            await self._random(room_id, args, message)
-        elif command in {"estado", "status"}:
-            if not self._is_admin(uid):
-                await self._reply(room_id, "No tienes permiso para consultar el estado administrativo.", message)
-                return
-            await self._reply(room_id, "Stella está operativa. Los datos de moderación se conservan durante un máximo de 90 días.", message)
-        elif command in {"advertir", "warn"}:
-            await self._warn(room_id, uid, name, args, message)
-        elif command in {"advertencias", "warnings"}:
-            await self._warnings(room_id, uid, args, message)
-        elif command in {"quitaradvertencia", "unwarn"}:
-            await self._unwarn(room_id, uid, args, message)
-        elif command == "antispam":
-            await self._antispam(room_id, uid, args, message)
-        else:
+        routes = {
+            "ayuda": self._help_command, "help": self._help_command, "comandos": self._help_command,
+            "ping": self._ping, "miuid": self._uid, "uid": self._uid,
+            "azar": self._random, "frase": self._quote,
+            "estado": self._status, "status": self._status,
+            "advertir": self._warn, "warn": self._warn,
+            "advertencias": self._warnings, "warnings": self._warnings,
+            "quitaradvertencia": self._unwarn, "unwarn": self._unwarn,
+            "antispam": self._antispam,
+            "encuesta": self._poll, "poll": self._poll,
+            "evento": self._event, "event": self._event,
+            "actividad": self._activity,
+            "respuesta": self._auto_reply, "respuestas": self._auto_reply,
+            "traducir": self._translate, "translate": self._translate,
+            "ia": self._ai,
+            "investigar": self._research, "investigate": self._research,
+            "analizar": self._inspect,
+        }
+        handler = routes.get(command)
+        if handler is None:
             await self._reply(room_id, f"No reconozco ese comando. Usa {self.settings.command_prefix}ayuda.", message)
+            return
+        await handler(room_id, uid, name, args, message)
 
-    def _help(self) -> str:
-        p = self.settings.command_prefix
-        return (
-            "✦ STELLA · COMANDOS\n"
-            f"{p}ayuda — muestra esta ayuda\n"
-            f"{p}ping — comprueba que estoy activa\n"
-            f"{p}miuid — muestra tu UID de Anarchy\n"
-            f"{p}azar <mín> <máx> — número aleatorio\n"
-            f"{p}azar dado — lanza un dado\n"
-            f"{p}azar moneda — lanza una moneda\n"
-            f"{p}advertir <UID> | <motivo> — registra una advertencia (moderación)\n"
-            f"{p}advertencias [UID] — consulta advertencias (moderación)\n"
-            f"{p}quitaradvertencia <ID> — retira una advertencia activa (moderación)\n"
-            f"{p}antispam activar|desactivar — configura el filtro (administración)"
+    async def _help_command(self, room_id, uid, name, args, message):
+        await self._reply(room_id, self._help(), message)
+
+    async def _ping(self, room_id, uid, name, args, message):
+        await self._reply(room_id, "Pong. Stella está activa.", message)
+
+    async def _uid(self, room_id, uid, name, args, message):
+        await self._reply(room_id, f"Tu UID de Anarchy es: {uid}", message)
+
+    async def _status(self, room_id, uid, name, args, message):
+        if not self._is_admin(uid):
+            await self._reply(room_id, "No tienes permiso para consultar el estado administrativo.", message)
+            return
+        await self._reply(
+            room_id,
+            "Stella está operativa. Moderación: 90 días; actividad: 7 días; encuestas y eventos: 30 días tras su creación o fecha.",
+            message,
         )
 
-    async def _random(self, room_id: str, args: str, message: dict[str, Any]) -> None:
+    async def _random(self, room_id, uid, name, args, message):
         mode = args.casefold().strip()
         if mode in {"dado", "dice"}:
-            result = str(random.randint(1, 6))
-            label = "🎲"
+            result, label = str(random.randint(1, 6)), "🎲"
         elif mode in {"moneda", "coin"}:
-            result = random.choice(["cara", "cruz"])
-            label = "🪙"
+            result, label = random.choice(["cara", "cruz"]), "🪙"
         else:
             values = re.findall(r"-?\d+", mode)
             if len(values) != 2:
-                await self._reply(room_id, f"Uso: {self.settings.command_prefix}azar <mín> <máx>, o {self.settings.command_prefix}azar dado/moneda.", message)
+                await self._reply(room_id, f"Uso: {self.settings.command_prefix}azar <mín> <máx>, dado o moneda.", message)
                 return
             low, high = map(int, values)
             if low > high or high - low > 1_000_000_000:
                 await self._reply(room_id, "Indica un rango válido de hasta mil millones.", message)
                 return
-            result = str(random.randint(low, high))
-            label = "🎯"
+            result, label = str(random.randint(low, high)), "🎯"
         await self._reply(room_id, f"{label} Resultado: {result}", message)
 
-    async def _warn(self, room_id: str, moderator_uid: str, moderator_name: str, args: str, message: dict[str, Any]) -> None:
+    async def _quote(self, room_id, uid, name, args, message):
+        phrases = [
+            "No todo progreso hace ruido; a veces consiste en seguir intentándolo.",
+            "La constancia convierte los pasos pequeños en distancia recorrida.",
+            "Escuchar antes de responder también es una forma de respeto.",
+            "Una comunidad se construye con la participación de quienes la cuidan.",
+        ]
+        await self._reply(room_id, random.choice(phrases), message)
+
+    async def _warn(self, room_id, moderator_uid, moderator_name, args, message):
         if not self._is_admin(moderator_uid):
             await self._reply(room_id, "Solo el equipo administrativo puede registrar advertencias.", message)
             return
@@ -182,11 +233,11 @@ class StellaBot:
             return
         warning_id = self.store.add_warning(
             room_id, target_uid, target_uid, moderator_uid, moderator_name,
-            reason.strip() if separator and reason.strip() else "Sin motivo indicado",
+            sanitize_reason(reason if separator else ""),
         )
-        await self._reply(room_id, f"Advertencia #{warning_id} registrada para UID {target_uid}. Esto queda como registro interno; no elimina ni silencia mensajes en Anarchy.", message)
+        await self._reply(room_id, f"Advertencia #{warning_id} registrada para UID {target_uid}. Es un registro interno: no elimina ni silencia mensajes en Anarchy.", message)
 
-    async def _warnings(self, room_id: str, requester_uid: str, args: str, message: dict[str, Any]) -> None:
+    async def _warnings(self, room_id, requester_uid, name, args, message):
         if not self._is_admin(requester_uid):
             await self._reply(room_id, "Solo el equipo administrativo puede consultar advertencias.", message)
             return
@@ -197,11 +248,11 @@ class StellaBot:
             return
         lines = ["⚖️ REGISTRO DE MODERACIÓN"]
         for row in records[:10]:
-            status = "activa" if row["active"] else "retirada"
-            lines.append(f"#{row['id']} · {row['target_name']} · {status} · {row['reason']}")
+            state = "activa" if row["active"] else "retirada"
+            lines.append(f"#{row['id']} · {row['target_name']} · {state} · {row['reason']}")
         await self._reply(room_id, "\n".join(lines), message)
 
-    async def _unwarn(self, room_id: str, moderator_uid: str, args: str, message: dict[str, Any]) -> None:
+    async def _unwarn(self, room_id, moderator_uid, name, args, message):
         if not self._is_admin(moderator_uid):
             await self._reply(room_id, "Solo el equipo administrativo puede retirar advertencias.", message)
             return
@@ -215,7 +266,7 @@ class StellaBot:
         else:
             await self._reply(room_id, "No encontré una advertencia activa con ese ID en esta sala.", message)
 
-    async def _antispam(self, room_id: str, uid: str, args: str, message: dict[str, Any]) -> None:
+    async def _antispam(self, room_id, uid, name, args, message):
         if not self._is_admin(uid):
             await self._reply(room_id, "Solo el equipo administrativo puede configurar el antispam.", message)
             return
@@ -229,3 +280,210 @@ class StellaBot:
         else:
             response = f"Uso: {self.settings.command_prefix}antispam activar|desactivar"
         await self._reply(room_id, response, message)
+
+    async def _poll(self, room_id, uid, name, args, message):
+        parts = args.split(maxsplit=1)
+        action = parts[0].casefold() if parts else ""
+        rest = parts[1] if len(parts) > 1 else ""
+        if action in {"crear", "create"}:
+            values = split_arguments(rest)
+            if len(values) < 3 or not values[0]:
+                await self._reply(room_id, f"Uso: {self.settings.command_prefix}encuesta crear Pregunta | opción 1 | opción 2 [| ...]", message)
+                return
+            question, options = values[0], [v for v in values[1:9] if v]
+            try:
+                poll_id = self.store.create_poll(room_id, uid, question, options)
+            except ValueError:
+                await self._reply(room_id, "Una encuesta necesita entre 2 y 8 opciones.", message)
+                return
+            await self._reply(room_id, f"📊 Encuesta #{poll_id}: {question}\n" + "\n".join(f"{i+1}. {option}" for i, option in enumerate(options)) + f"\nVota con {self.settings.command_prefix}encuesta votar {poll_id} <número>.", message)
+        elif action in {"votar", "vote"}:
+            values = rest.split()
+            try:
+                poll_id, option = int(values[0]), int(values[1]) - 1
+            except (ValueError, IndexError):
+                await self._reply(room_id, f"Uso: {self.settings.command_prefix}encuesta votar <ID> <opción>", message)
+                return
+            result = self.store.vote_poll(room_id, poll_id, uid, option)
+            labels = {"ok": "Tu voto quedó registrado. Puedes cambiarlo mientras la encuesta siga abierta.", "missing": "No encontré esa encuesta en esta sala.", "closed": "Esa encuesta ya está cerrada.", "invalid_option": "Esa opción no existe."}
+            await self._reply(room_id, labels.get(result, "No pude registrar el voto."), message)
+        elif action in {"resultado", "resultados", "results"}:
+            try:
+                poll_id = int(rest.strip())
+            except ValueError:
+                await self._reply(room_id, "Uso: !encuesta resultados <ID>", message)
+                return
+            poll = self.store.get_poll(room_id, poll_id)
+            if not poll:
+                await self._reply(room_id, "No encontré esa encuesta en esta sala.", message)
+                return
+            lines = [f"📊 {poll['question']} · {poll['total_votes']} votos"]
+            for index, option in enumerate(poll["options"]):
+                count = poll["results"].get(index, 0)
+                lines.append(f"{index+1}. {option}: {count}")
+            lines.append("Estado: cerrada" if poll["closed"] else "Estado: abierta")
+            await self._reply(room_id, "\n".join(lines), message)
+        elif action in {"cerrar", "close"}:
+            try:
+                poll_id = int(rest.strip())
+            except ValueError:
+                await self._reply(room_id, "Uso: !encuesta cerrar <ID>", message)
+                return
+            result = self.store.close_poll(room_id, poll_id, uid, self._is_admin(uid))
+            labels = {"ok": "Encuesta cerrada.", "missing": "No encontré esa encuesta.", "closed": "La encuesta ya estaba cerrada.", "denied": "Solo quien creó la encuesta o un administrador puede cerrarla."}
+            await self._reply(room_id, labels.get(result, "No pude cerrar la encuesta."), message)
+        elif action in {"lista", "listar", "list"}:
+            polls = self.store.list_polls(room_id)
+            await self._reply(room_id, "\n".join([ "📊 ENCUESTAS" ] + [f"#{p['id']} · {p['question']} · {'cerrada' if p['closed'] else 'abierta'}" for p in polls]) if polls else "No hay encuestas en esta sala.", message)
+        else:
+            await self._reply(room_id, f"Uso: {self.settings.command_prefix}encuesta crear|votar|resultados|cerrar|lista ...", message)
+
+    async def _event(self, room_id, uid, name, args, message):
+        parts = args.split(maxsplit=1)
+        action = parts[0].casefold() if parts else ""
+        rest = parts[1] if len(parts) > 1 else ""
+        if action in {"crear", "create"}:
+            values = split_arguments(rest)
+            if len(values) < 2:
+                await self._reply(room_id, f"Uso: {self.settings.command_prefix}evento crear 2026-12-01T19:00:00-03:00 | Título | Lugar | Descripción", message)
+                return
+            try:
+                starts = datetime.fromisoformat(values[0].replace("Z", "+00:00"))
+                if starts.tzinfo is None:
+                    raise ValueError("timezone required")
+                title = values[1]
+                location = values[2] if len(values) > 2 else ""
+                description = values[3] if len(values) > 3 else ""
+                event_id = self.store.create_event(room_id, uid, title, starts.timestamp(), location, description)
+            except ValueError:
+                await self._reply(room_id, "La fecha debe ser ISO 8601 e incluir zona horaria, por ejemplo 2026-12-01T19:00:00-03:00.", message)
+                return
+            await self._reply(room_id, f"📅 Evento #{event_id} creado: {title}\nFecha: {starts.isoformat()}\nLugar: {location or 'Por definir'}\nApúntate con {self.settings.command_prefix}evento apuntarse {event_id}.", message)
+        elif action in {"lista", "listar", "list"}:
+            events = self.store.list_events(room_id)
+            if not events:
+                await self._reply(room_id, "No hay eventos próximos registrados en esta sala.", message)
+                return
+            lines = ["📅 PRÓXIMOS EVENTOS"]
+            for event in events:
+                date_label = datetime.fromtimestamp(float(event["starts_at"]), timezone.utc).astimezone().isoformat(timespec="minutes")
+                lines.append(f"#{event['id']} · {event['title']} · {date_label} · {event['attendees']} asistentes · {event['location']}")
+            await self._reply(room_id, "\n".join(lines), message)
+        elif action in {"apuntarse", "asistir", "rsvp"}:
+            try:
+                event_id = int(rest.strip())
+            except ValueError:
+                await self._reply(room_id, "Uso: !evento apuntarse <ID>", message)
+                return
+            result = self.store.rsvp_event(room_id, event_id, uid, name)
+            labels = {"ok": "Tu asistencia quedó registrada.", "missing": "No encontré ese evento en esta sala.", "closed": "Ese evento está cerrado."}
+            await self._reply(room_id, labels.get(result, "No pude registrar tu asistencia."), message)
+        elif action in {"cerrar", "close"}:
+            try:
+                event_id = int(rest.strip())
+            except ValueError:
+                await self._reply(room_id, "Uso: !evento cerrar <ID>", message)
+                return
+            result = self.store.close_event(room_id, event_id, uid, self._is_admin(uid))
+            labels = {"ok": "Evento cerrado.", "missing": "No encontré ese evento.", "closed": "El evento ya estaba cerrado.", "denied": "Solo quien creó el evento o un administrador puede cerrarlo."}
+            await self._reply(room_id, labels.get(result, "No pude cerrar el evento."), message)
+        else:
+            await self._reply(room_id, f"Uso: {self.settings.command_prefix}evento crear|lista|apuntarse|cerrar ...", message)
+
+    async def _activity(self, room_id, uid, name, args, message):
+        if not self._is_admin(uid):
+            await self._reply(room_id, "Solo el equipo administrativo puede consultar la actividad.", message)
+            return
+        rows = self.store.activity_summary(room_id)
+        if not rows:
+            await self._reply(room_id, "Todavía no hay actividad agregada en los últimos siete días.", message)
+            return
+        lines = ["📈 ACTIVIDAD · ÚLTIMOS SIETE DÍAS"]
+        lines.extend(f"{index}. UID {row['user_uid']}: {row['total_messages']} mensajes" for index, row in enumerate(rows, 1))
+        await self._reply(room_id, "\n".join(lines), message)
+
+    async def _auto_reply(self, room_id, uid, name, args, message):
+        if not self._is_admin(uid):
+            await self._reply(room_id, "Solo el equipo administrativo puede configurar respuestas automáticas.", message)
+            return
+        parts = args.split(maxsplit=1)
+        action = parts[0].casefold() if parts else ""
+        rest = parts[1] if len(parts) > 1 else ""
+        if action in {"añadir", "agregar", "add"}:
+            values = split_arguments(rest, 2)
+            if len(values) < 2 or not values[0] or not values[1]:
+                await self._reply(room_id, "Uso: !respuesta añadir palabra o frase | respuesta", message)
+                return
+            rule_id = self.store.add_auto_reply(room_id, values[0], values[1])
+            await self._reply(room_id, f"Respuesta automática #{rule_id} creada. Se activa cuando el mensaje coincide exactamente con el disparador.", message)
+        elif action in {"quitar", "eliminar", "remove"}:
+            try:
+                rule_id = int(rest.strip())
+            except ValueError:
+                await self._reply(room_id, "Uso: !respuesta quitar <ID>", message)
+                return
+            await self._reply(room_id, "Respuesta eliminada." if self.store.remove_auto_reply(room_id, rule_id) else "No encontré esa respuesta.", message)
+        elif action in {"lista", "listar", "list"}:
+            rules = self.store.auto_reply_rules(room_id)
+            lines = ["🤖 RESPUESTAS AUTOMÁTICAS"] + [f"#{r['id']} · {r['trigger_text']} → {r['response_text']}" for r in rules]
+            await self._reply(room_id, "\n".join(lines), message)
+        else:
+            await self._reply(room_id, "Uso: !respuesta añadir|quitar|lista ...", message)
+
+    async def _translate(self, room_id, uid, name, args, message):
+        language, separator, text = args.partition("|")
+        if not separator:
+            await self._reply(room_id, f"Uso: {self.settings.command_prefix}traducir <idioma> | <texto>", message)
+            return
+        await self._reply(room_id, await self.services.translate(language, text), message)
+
+    async def _ai(self, room_id, uid, name, args, message):
+        if not args:
+            await self._reply(room_id, f"Uso: {self.settings.command_prefix}ia <consulta>. La petición no se guarda como historial.", message)
+            return
+        answer = await self.services.ask(
+            args,
+            system="Eres Stella, un asistente útil para una comunidad. Responde en el idioma del usuario, con precisión y sin fingir que ejecutaste acciones.",
+        )
+        await self._reply(room_id, answer, message)
+
+    async def _research(self, room_id, uid, name, args, message):
+        results = await self.services.research(args)
+        if not results:
+            await self._reply(room_id, "No pude obtener resultados de búsqueda. Inténtalo de nuevo más tarde.", message)
+            return
+        lines = [f"🔎 RESULTADOS DE INVESTIGACIÓN · {args[:180]}"]
+        for index, item in enumerate(results[:5], 1):
+            lines.append(f"{index}. {item['title']}\n{item['domain']}\n{item['url']}")
+            if item["snippet"]:
+                lines.append(item["snippet"])
+        await self._reply(room_id, "\n".join(lines), message)
+
+    async def _inspect(self, room_id, uid, name, args, message):
+        findings = inspect_links(args)
+        if not findings:
+            await self._reply(room_id, "No encontré enlaces en el texto indicado. Uso: !analizar <texto o enlaces>", message)
+            return
+        lines = ["🔗 REVISIÓN PRELIMINAR DE ENLACES"]
+        for item in findings:
+            lines.append(f"{item['risk'].upper()} · {item.get('domain', item['url'])}: {item['reason']}")
+        lines.append("Esto es una revisión superficial del formato y dominio, no una garantía de seguridad.")
+        await self._reply(room_id, "\n".join(lines), message)
+
+    def _help(self) -> str:
+        p = self.settings.command_prefix
+        return (
+            "✦ STELLA · COMANDOS\n"
+            "GENERAL\n"
+            f"{p}ayuda · {p}ping · {p}miuid · {p}azar <mín> <máx> · {p}azar dado/moneda · {p}frase\n"
+            "COMUNIDAD\n"
+            f"{p}encuesta crear Pregunta | opción 1 | opción 2\n"
+            f"{p}encuesta votar <ID> <número> · {p}encuesta resultados <ID> · {p}encuesta cerrar <ID> · {p}encuesta lista\n"
+            f"{p}evento crear <fecha ISO con zona> | título | lugar | descripción\n"
+            f"{p}evento lista · {p}evento apuntarse <ID> · {p}evento cerrar <ID>\n"
+            "HERRAMIENTAS\n"
+            f"{p}ia <consulta> · {p}traducir <idioma> | <texto> · {p}investigar <tema> · {p}analizar <enlaces>\n"
+            "MODERACIÓN Y ADMINISTRACIÓN\n"
+            f"{p}advertir <UID> | <motivo> · {p}advertencias [UID] · {p}quitaradvertencia <ID>\n"
+            f"{p}antispam activar|desactivar · {p}actividad · {p}respuesta añadir|quitar|lista"
+        )
