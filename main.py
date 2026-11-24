@@ -33,6 +33,7 @@ MAX_WEBHOOK_BODY_BYTES = 256 * 1024
 SIGNATURE_TOLERANCE_SECONDS = 300
 SEEN_EVENTS_LIMIT = 3000
 seen_events: OrderedDict[str, float] = OrderedDict()
+last_retention_cleanup = 0.0
 
 
 @asynccontextmanager
@@ -97,6 +98,10 @@ async def receive_webhook(request: Request) -> dict[str, bool]:
     now = time.monotonic()
     while seen_events and now - next(iter(seen_events.values())) > 900:
         seen_events.popitem(last=False)
+    global last_retention_cleanup
+    if now - last_retention_cleanup >= 3600:
+        store.cleanup_expired()
+        last_retention_cleanup = now
     key = _event_key(event, raw)
     if key in seen_events:
         seen_events.move_to_end(key)
