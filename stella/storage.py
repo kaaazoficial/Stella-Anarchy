@@ -22,8 +22,20 @@ class Store:
         db.execute("PRAGMA journal_mode=WAL")
         return db
 
+    @staticmethod
+    def _session(connection: sqlite3.Connection):
+        class Session:
+            def __enter__(self):
+                return connection.__enter__()
+            def __exit__(self, exc_type, exc, traceback):
+                try:
+                    return connection.__exit__(exc_type, exc, traceback)
+                finally:
+                    connection.close()
+        return Session()
+
     def initialize(self) -> None:
-        with self.connect() as db:
+        with self._session(self.connect()) as db:
             db.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS moderation_warnings (
@@ -55,7 +67,7 @@ class Store:
 
     def cleanup_expired(self, now: float | None = None) -> int:
         cutoff = (time.time() if now is None else now) - WARNING_RETENTION_DAYS * 86400
-        with self.connect() as db:
+        with self._session(self.connect()) as db:
             cursor = db.execute(
                 "DELETE FROM moderation_warnings WHERE created_at < ?", (cutoff,)
             )
@@ -65,7 +77,7 @@ class Store:
         self, room_id: str, target_uid: str, target_name: str,
         moderator_uid: str, moderator_name: str, reason: str,
     ) -> int:
-        with self.connect() as db:
+        with self._session(self.connect()) as db:
             cursor = db.execute(
                 """INSERT INTO moderation_warnings
                    (room_id,target_uid,target_name,moderator_uid,moderator_name,reason,created_at)
@@ -88,11 +100,11 @@ class Store:
             query += " AND target_uid=?"
             params.append(str(target_uid))
         query += " ORDER BY id DESC LIMIT 15"
-        with self.connect() as db:
+        with self._session(self.connect()) as db:
             return [dict(row) for row in db.execute(query, params).fetchall()]
 
     def remove_warning(self, room_id: str, warning_id: int, moderator_uid: str) -> bool:
-        with self.connect() as db:
+        with self._session(self.connect()) as db:
             cursor = db.execute(
                 """UPDATE moderation_warnings
                    SET active=0, removed_at=?, removed_by=?
@@ -102,7 +114,7 @@ class Store:
             return cursor.rowcount > 0
 
     def get_setting(self, room_id: str, key: str, default: str) -> str:
-        with self.connect() as db:
+        with self._session(self.connect()) as db:
             row = db.execute(
                 "SELECT setting_value FROM room_settings WHERE room_id=? AND setting_key=?",
                 (str(room_id), str(key)),
@@ -110,7 +122,7 @@ class Store:
             return str(row["setting_value"]) if row else default
 
     def set_setting(self, room_id: str, key: str, value: str) -> None:
-        with self.connect() as db:
+        with self._session(self.connect()) as db:
             db.execute(
                 """INSERT INTO room_settings(room_id,setting_key,setting_value,updated_at)
                    VALUES(?,?,?,?) ON CONFLICT(room_id,setting_key) DO UPDATE SET
