@@ -38,14 +38,14 @@ def test_warning_records_expire_after_ninety_days(tmp_path: Path):
     store = Store(tmp_path / "stella.sqlite3")
     store.initialize()
     old = time.time() - 91 * 86400
-    with store.connect() as db:
+    with store._session(store.connect()) as db:
         db.execute(
             """INSERT INTO moderation_warnings
                (room_id,target_uid,target_name,moderator_uid,moderator_name,reason,created_at)
                VALUES('room','u1','User','admin','Admin','old',?)""",
             (old,),
         )
-    assert store.cleanup_expired() == 1
+    assert store.cleanup_expired()["warnings"] == 1
     assert store.warnings("room") == []
 
 
