@@ -104,6 +104,20 @@ class StellaBot:
         if self.store.get_setting(room_id, "antispam_enabled", "1") != "1":
             return False, None
         now = time.monotonic()
+        # Expire every user's recent hashes globally, not only on their next message.
+        for tracked, queue in list(self._recent.items()):
+            while queue and now - queue[0][0] > ANTISPAM_WINDOW_SECONDS:
+                queue.popleft()
+            if not queue:
+                self._recent.pop(tracked, None)
+                self._warned_until.pop(tracked, None)
+        for tracked, expiry in list(self._warned_until.items()):
+            if expiry <= now:
+                self._warned_until.pop(tracked, None)
+        for tracked, expiry in list(self._auto_reply_cooldown.items()):
+            if expiry <= now:
+                self._auto_reply_cooldown.pop(tracked, None)
+
         key = (room_id, uid)
         if key not in self._recent and len(self._recent) >= MAX_TRACKED_USERS:
             oldest = min(self._recent, key=lambda item: self._recent[item][0][0] if self._recent[item] else now)
@@ -138,6 +152,12 @@ class StellaBot:
             trigger = " ".join(str(rule["trigger_text"]).casefold().split())
             if trigger and normalized == trigger:
                 key = (room_id, int(rule["id"]))
+                if len(self._auto_reply_cooldown) >= 3000:
+                    self._auto_reply_cooldown = {
+                        existing: expiry
+                        for existing, expiry in self._auto_reply_cooldown.items()
+                        if expiry > now
+                    }
                 if self._auto_reply_cooldown.get(key, 0) > now:
                     continue
                 self._auto_reply_cooldown[key] = now + 15
@@ -354,7 +374,10 @@ class StellaBot:
                 title = values[1]
                 location = values[2] if len(values) > 2 else ""
                 description = values[3] if len(values) > 3 else ""
-                event_id = self.store.create_event(room_id, uid, title, starts.timestamp(), location, description)
+                event_timestamp = starts.timestamp()
+                if event_timestamp <= time.time() or event_timestamp > time.time() + 180 * 86400:
+                    raise ValueError("event date must be within the next 180 days")
+                event_id = self.store.create_event(room_id, uid, title, event_timestamp, location, description)
             except ValueError:
                 await self._reply(room_id, "La fecha debe ser ISO 8601 e incluir zona horaria, por ejemplo 2026-12-01T19:00:00-03:00.", message)
                 return
