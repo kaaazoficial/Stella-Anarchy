@@ -1,36 +1,56 @@
 # Stella — Anarchy Community Bot
 
-Stella is an independent Python bot for Anarchy Apps. It has its own codebase, configuration, storage and deployment. It is not a renamed copy of Katheryne.
+Stella is an independent Python bot for Anarchy Apps. It has its own codebase, configuration, storage and deployment. It is not a renamed copy of Katheryne and does not include Genshin Impact commands or integrations.
 
-## Included in this first implementation
+## Current feature set
 
-- Signed Anarchy webhook receiver with timestamp validation, HMAC-SHA256 verification, payload limits and in-memory event de-duplication.
-- Anarchy API client for sending messages.
-- Commands: `!ayuda`, `!ping`, `!miuid`, `!azar`.
+- Signed Anarchy webhook receiver with timestamp validation, HMAC-SHA256 verification, streamed payload limits, 15-minute in-memory event de-duplication and bounded caches.
+- Anarchy API client for sending chat messages and replies.
+- General commands: `!ayuda`, `!ping`, `!miuid`, `!azar`, `!frase`.
 - Moderation records: `!advertir`, `!advertencias`, `!quitaradvertencia`.
-- Per-room anti-spam toggle: `!antispam activar|desactivar`.
+- Room anti-spam configuration: `!antispam activar|desactivar`.
+- Polls with voting, vote changes, results and closure: `!encuesta crear|votar|resultados|cerrar|lista`.
+- Community events with date/time, location, RSVPs and closure: `!evento crear|lista|apuntarse|cerrar`.
+- Aggregate activity reports for administrators: `!actividad`.
+- Exact-match automatic replies, configured by administrators: `!respuesta añadir|quitar|lista`.
+- Preliminary link inspection: `!analizar`.
+- Optional AI assistant, translation and web search: `!ia`, `!traducir`, `!investigar`.
 - Exact UID-based administrator permissions.
-- SQLite persistence for moderation records and room configuration only.
 
-## Privacy and retention
+## Privacy, data and retention
 
-Stella does not save message contents, conversation histories, personal profiles, or long-term user memory. Anti-spam fingerprints and counters exist only in process memory. Moderation records are operational data and are automatically deleted after 90 days. Room configuration remains until an administrator changes it or the database is removed.
+Stella does not save message contents, conversation histories, personal profiles or long-term user memory. Prompts sent to the optional AI provider are processed for that request and are not written to Stella's database; the provider's own retention policy still applies.
 
-The Anarchy API does not expose a documented ability for a bot to delete or mute another member's messages. A warning is therefore an internal moderation record, not a platform-enforced punishment.
+Only these operational records are stored in SQLite:
+- Moderation warnings: 90 days.
+- Aggregate per-user daily message counts: 7 days.
+- Polls and their voter identifiers: 30 days after poll creation.
+- Events and attendee identifiers: 30 days after the event date.
+- Room settings, polls/event definitions while current, and automatic-reply rules: retained as community configuration until deleted or the database is removed.
+
+Anti-spam fingerprints, recent command state, webhook de-duplication and cooldowns remain in RAM and are bounded/expired. SQLite cleanup runs at startup and at least hourly while the process receives events.
+
+The Anarchy API's bot messaging capabilities do not mean the bot can delete or mute another member's messages. A warning is an internal moderation record, not a platform-enforced punishment. Link inspection is heuristic and does not certify that a destination is safe.
 
 ## Configuration
 
-Set these environment variables in the hosting provider:
+Set these variables in the hosting provider. Never commit real credentials.
 
 | Variable | Required | Purpose |
 |---|---:|---|
-| `ANARCHY_BOT_TOKEN` | Yes | Bot API token |
-| `ANARCHY_WEBHOOK_SECRET` | Yes | HMAC webhook secret |
-| `ADMIN_UIDS` | No | Comma/semicolon/newline-separated administrator UIDs |
+| `ANARCHY_BOT_TOKEN` | Yes | Anarchy bot API token |
+| `ANARCHY_WEBHOOK_SECRET` | Yes | HMAC webhook signing secret |
+| `ADMIN_UIDS` | No | Administrator UIDs separated by comma, semicolon or newline |
 | `COMMAND_PREFIX` | No | Command prefix; defaults to `!` |
+| `ANARCHY_API_BASE` | No | Anarchy API base URL |
 | `DATA_DIR` | No | SQLite directory; defaults to `./data` |
+| `AI_API_KEY` | No | API key for an OpenAI-compatible AI provider |
+| `AI_BASE_URL` | No | Provider's compatible API base URL |
+| `AI_MODEL` | No | Provider model name |
 
-Do not commit real credentials. See [`.env.example`](.env.example).
+AI, translation and provider-based research require `AI_API_KEY` only for the AI and translation commands. Web search uses DuckDuckGo's HTML search endpoint and may be unavailable if the provider blocks the request.
+
+See [`.env.example`](.env.example) for safe empty placeholders.
 
 ## Run locally
 
@@ -39,24 +59,33 @@ python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements-dev.txt
 cp .env.example .env
+# Put credentials in your local environment; do not commit .env.
 uvicorn main:app --reload
 ```
 
 The app exposes `GET /health` and receives Anarchy webhooks at `POST /webhook` (also `POST /`).
 
-## Render
+## Connect Anarchy
 
-The included Blueprint targets the existing `stella-anarchy` Free web service in Ohio. Configure the required environment variables in Render before connecting the Anarchy webhook to `https://YOUR-SERVICE.onrender.com/webhook`.
+Set the bot's webhook URL to:
 
-Free Render services can sleep when idle. A sleeping service may take time to wake for a webhook; use a paid always-on plan if the bot later requires uninterrupted response times.
+```
+https://YOUR-SERVICE.onrender.com/webhook
+```
+
+Use the matching webhook secret configured for the bot in Anarchy. Stella validates `X-Anarchy-Bot-Timestamp` and `X-Anarchy-Bot-Signature` using HMAC-SHA256 over `timestamp + "." + raw_body`.
+
+## Render deployment
+
+The included `render.yaml` targets the `stella-anarchy` Free web service in Ohio. Free Render web services can sleep when idle and have ephemeral local filesystems; SQLite data can be lost during restarts or deploys. This build intentionally avoids requiring paid persistent storage. If durable moderation/configuration data is required later, move the store to a managed PostgreSQL database.
 
 ## Development
 
-Run tests with:
+Install and run:
 
 ```bash
 pip install -r requirements-dev.txt
 pytest -q
 ```
 
-Stella is intentionally a clean foundation. More community modules should be added independently and tested before enabling them in production.
+GitHub Actions runs the same test suite on pushes and pull requests.
