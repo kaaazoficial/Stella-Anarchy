@@ -16,6 +16,7 @@ def _uid_set(value: str) -> frozenset[str]:
 @dataclass(frozen=True)
 class Settings:
     bot_token: str
+    community_bot_token: str
     webhook_secret: str
     admin_uids: frozenset[str]
     command_prefix: str
@@ -29,6 +30,7 @@ class Settings:
         data_dir.mkdir(parents=True, exist_ok=True)
         return cls(
             bot_token=os.getenv("ANARCHY_BOT_TOKEN", "").strip(),
+            community_bot_token=os.getenv("ANARCHY_COMMUNITY_BOT_TOKEN", "").strip(),
             webhook_secret=os.getenv("ANARCHY_WEBHOOK_SECRET", "").strip(),
             admin_uids=_uid_set(os.getenv("ADMIN_UIDS", "")),
             command_prefix=os.getenv("COMMAND_PREFIX", "!").strip() or "!",

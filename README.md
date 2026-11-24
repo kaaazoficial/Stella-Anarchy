@@ -14,7 +14,11 @@ Stella is an independent Python bot for Anarchy Apps. It has its own codebase, c
 - Aggregate activity reports for administrators: `!actividad`.
 - Exact-match automatic replies, configured by administrators: `!respuesta añadir|quitar|lista`.
 - Preliminary link inspection: `!analizar`.
-- Optional AI assistant, translation and web search: `!ia`, `!traducir`, `!investigar`.
+- Gemini-first AI with Groq fallback, using the same models as Katheryne: Gemini `gemini-3.5-flash-lite` and Groq `openai/gpt-oss-20b`. Commands: `!ia`, `!ia estado`, `!traducir`, `!investigar`.
+- LiveKit voice-room connection for active Anarchy calls: `!join`, `!salirsala`, `!voz`.
+- Text-to-speech with Edge TTS, Spanish voices, speed and volume controls: `!leer`, `!noleer`, `!tts voces`, `!tts voz`, `!tts velocidad`, `!tts volumen`.
+- Music DJ with open-license music catalogues (Internet Archive and Jamendo where configured), exact result selection, bounded queues, pause/resume/skip/stop and volume: `!dj buscar`, `!dj reproducir`, `!dj encolar`, `!dj cola`, `!dj pausa`, `!dj reanudar`, `!dj saltar`, `!dj detener`.
+- Music is not downloaded from YouTube or arbitrary URLs. Tracks must come from the supported catalogues and pass source/license validation.
 - Exact UID-based administrator permissions.
 
 ## Privacy, data and retention
@@ -44,11 +48,20 @@ Set these variables in the hosting provider. Never commit real credentials.
 | `COMMAND_PREFIX` | No | Command prefix; defaults to `!` |
 | `ANARCHY_API_BASE` | No | Anarchy API base URL |
 | `DATA_DIR` | No | SQLite directory; defaults to `./data` |
-| `AI_API_KEY` | No | API key for an OpenAI-compatible AI provider |
-| `AI_BASE_URL` | No | Provider's compatible API base URL |
-| `AI_MODEL` | No | Provider model name |
+| `GEMINI_API_KEY` | No | Gemini primary provider key |
+| `GEMINI_MODEL` | No | Defaults to `gemini-3.5-flash-lite` |
+| `GEMINI_API_URL` | No | Gemini API base URL |
+| `GROQ_API_KEY` | No | Groq fallback provider key |
+| `GROQ_MODEL` | No | Defaults to `openai/gpt-oss-20b` |
+| `GROQ_API_URL` | No | Groq Responses API base URL |
+| `STELLA_AI_PRIMARY_PROVIDER` | No | `gemini` (default) or `groq` |
+| `ANARCHY_COMMUNITY_BOT_TOKEN` | No | Optional separate token for LiveKit voice endpoints; defaults to the bot token |
+| `JAMENDO_CLIENT_ID` | No | Optional Jamendo catalogue access |
+| `TTS_VOICE` | No | Defaults to Chilean Spanish Catalina |
 
-AI, translation and provider-based research require `AI_API_KEY` only for the AI and translation commands. Web search uses DuckDuckGo's HTML search endpoint and may be unavailable if the provider blocks the request.
+AI uses Gemini first and automatically tries Groq if Gemini fails. Both provider keys are optional, but at least one is required for `!ia` and `!traducir`. The AI provider response is not saved in Stella's SQLite database and Stella does not maintain conversation history. The external providers' own processing and retention policies still apply. Web search uses DuckDuckGo's HTML search endpoint and may be unavailable if the provider blocks the request.
+
+Voice commands require an active Anarchy call and working LiveKit credentials from the Anarchy voice API. TTS additionally requires Edge TTS, PyAV and NumPy. Music playback uses only validated tracks from the supported open-license catalogues; the optional Jamendo source requires `JAMENDO_CLIENT_ID`. Voice rooms, TTS queues, music queues, search selections and downloaded audio are temporary and are removed on room exit or process shutdown.
 
 See [`.env.example`](.env.example) for safe empty placeholders.
 
@@ -57,6 +70,7 @@ See [`.env.example`](.env.example) for safe empty placeholders.
 ```bash
 python -m venv .venv
 source .venv/bin/activate
+pip install -r requirements.txt
 pip install -r requirements-dev.txt
 cp .env.example .env
 # Put credentials in your local environment; do not commit .env.

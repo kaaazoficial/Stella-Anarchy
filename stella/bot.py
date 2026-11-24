@@ -9,11 +9,13 @@ from collections import defaultdict, deque
 from datetime import datetime, timezone
 from typing import Any
 
+from stella.ai import StellaAI
 from stella.config import Settings
 from stella.language import split_arguments
 from stella.moderation import inspect_links, sanitize_reason
 from stella.platform import AnarchyClient
 from stella.services import StellaServices
+from stella.music_voice import MusicVoice
 from stella.storage import Store
 
 log = logging.getLogger("stella.bot")
@@ -29,6 +31,15 @@ class StellaBot:
         self.store = store
         self.platform = platform
         self.services = StellaServices()
+        self.ai = StellaAI()
+        community_token = settings.community_bot_token or settings.bot_token
+        self.voice_platform = (
+            AnarchyClient(settings.api_base, community_token)
+            if community_token and community_token != settings.bot_token
+            else platform
+        )
+        self.voice = MusicVoice(self.voice_platform)
+        self.voice.ai = self.ai
         # Only hashes and timestamps are held here. Message text is not retained.
         self._recent: dict[tuple[str, str], deque[tuple[float, str]]] = defaultdict(deque)
         self._warned_until: dict[tuple[str, str], float] = {}
@@ -58,6 +69,8 @@ class StellaBot:
             return
         if event_type in {"room.end", "room.kicked", "thread.removed"}:
             self._forget_room(room_id)
+            await self.voice.leave_room(room_id, request_leave=False)
+            self.voice.search_results.pop(room_id, None)
             return
         if event_type not in {"message", "message.created", "message_create"}:
             return
@@ -87,6 +100,8 @@ class StellaBot:
         if content.startswith(prefix):
             await self._command(room_id, uid, name, content[len(prefix):].strip(), message)
             return
+        if not content.startswith(self.settings.command_prefix):
+            await self.voice.enqueue_speech(room_id, f"{name}: {content}")
         await self._check_auto_replies(room_id, content, message)
 
     @staticmethod
@@ -189,11 +204,16 @@ class StellaBot:
             "ia": self._ai,
             "investigar": self._research, "investigate": self._research,
             "analizar": self._inspect,
+            "join": self._voice_command, "salirsala": self._voice_command,
+            "leer": self._voice_command, "noleer": self._voice_command,
+            "voz": self._voice_command, "tts": self._voice_command,
+            "dj": self._voice_command, "reproducir": self._voice_command,
         }
         handler = routes.get(command)
         if handler is None:
             await self._reply(room_id, f"No reconozco ese comando. Usa {self.settings.command_prefix}ayuda.", message)
             return
+        message["_stella_command"] = command
         await handler(room_id, uid, name, args, message)
 
     async def _help_command(self, room_id, uid, name, args, message):
@@ -458,17 +478,36 @@ class StellaBot:
         if not separator:
             await self._reply(room_id, f"Uso: {self.settings.command_prefix}traducir <idioma> | <texto>", message)
             return
-        await self._reply(room_id, await self.services.translate(language, text), message)
+        await self._reply(room_id, await self.ai.translate(language, text), message)
 
     async def _ai(self, room_id, uid, name, args, message):
-        if not args:
-            await self._reply(room_id, f"Uso: {self.settings.command_prefix}ia <consulta>. La petición no se guarda como historial.", message)
+        if args.casefold() in {"estado", "status"}:
+            await self._reply(room_id, self.ai.status(), message)
             return
-        answer = await self.services.ask(
-            args,
-            system="Eres Stella, un asistente útil para una comunidad. Responde en el idioma del usuario, con precisión y sin fingir que ejecutaste acciones.",
-        )
+        if not args:
+            await self._reply(
+                room_id,
+                f"Uso: {self.settings.command_prefix}ia <consulta> o {self.settings.command_prefix}ia estado. "
+                "La petición se procesa sin guardarse como historial.",
+                message,
+            )
+            return
+        answer = await self.ai.ask(args)
         await self._reply(room_id, answer, message)
+
+    async def _voice_command(self, room_id, uid, name, args, message):
+        command = str(message.get("_stella_command") or "").casefold().strip()
+        handled, response = await self.voice.handle_command(room_id, command, args)
+        if handled:
+            await self._reply(room_id, response, message)
+
+    async def close(self) -> None:
+        await self.voice.close()
+        await self.ai.close()
+        await self.services.close()
+        if self.voice_platform is not self.platform:
+            await self.voice_platform.close()
+        await self.platform.close()
 
     async def _research(self, room_id, uid, name, args, message):
         results = await self.services.research(args)
@@ -508,5 +547,9 @@ class StellaBot:
             f"{p}ia <consulta> · {p}traducir <idioma> | <texto> · {p}investigar <tema> · {p}analizar <enlaces>\n"
             "MODERACIÓN Y ADMINISTRACIÓN\n"
             f"{p}advertir <UID> | <motivo> · {p}advertencias [UID] · {p}quitaradvertencia <ID>\n"
-            f"{p}antispam activar|desactivar · {p}actividad · {p}respuesta añadir|quitar|lista"
+            f"{p}antispam activar|desactivar · {p}actividad · {p}respuesta añadir|quitar|lista\n"
+            "VOZ Y MÚSICA\n"
+            f"{p}join · {p}salirsala · {p}leer · {p}noleer · {p}voz · {p}tts voces/voz/velocidad/volumen\n"
+            f"{p}dj buscar <tema> · {p}dj reproducir <número> · {p}dj encolar <número> · {p}dj cola\n"
+            f"{p}dj pausa/reanudar/saltar/detener · {p}dj volumen <0-100> · {p}ia estado"
         )

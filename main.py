@@ -41,8 +41,7 @@ async def lifespan(_: FastAPI):
     store.initialize()
     store.cleanup_expired()
     yield
-    await platform.close()
-    await bot.services.close()
+    await bot.close()
 
 
 app = FastAPI(title="Stella · Anarchy Community Bot", lifespan=lifespan)
