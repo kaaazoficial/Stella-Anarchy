@@ -1,23 +1,62 @@
-# Stella — Bot comunitario
+# Stella — Anarchy Community Bot
 
-Bot comunitario independiente para Anarchy. Este repositorio está reservado para la adaptación de la base reutilizable de Katheryne, eliminando por completo las funciones de Genshin Impact y la identidad, branding y características exclusivas del proyecto original.
+Stella is an independent Python bot for Anarchy Apps. It has its own codebase, configuration, storage and deployment. It is not a renamed copy of Katheryne.
 
-## Estado de desarrollo
+## Included in this first implementation
 
-Repositorio creado. La migración y depuración del código todavía no se han completado; no desplegar esta versión como bot funcional.
+- Signed Anarchy webhook receiver with timestamp validation, HMAC-SHA256 verification, payload limits and in-memory event de-duplication.
+- Anarchy API client for sending messages.
+- Commands: `!ayuda`, `!ping`, `!miuid`, `!azar`.
+- Moderation records: `!advertir`, `!advertencias`, `!quitaradvertencia`.
+- Per-room anti-spam toggle: `!antispam activar|desactivar`.
+- Exact UID-based administrator permissions.
+- SQLite persistence for moderation records and room configuration only.
 
-## Objetivos de adaptación
+## Privacy and retention
 
-- Conservar infraestructura genérica de webhooks, moderación, utilidades y funciones comunitarias que sean independientes del juego.
-- Eliminar consultas, bases de datos, comandos, fuentes, guías y referencias a Genshin Impact.
-- Sustituir la identidad, personalidad, prompts, nombres internos, almacenamiento y documentación propios de Katheryne.
-- Separar las credenciales y la persistencia de Stella de cualquier servicio anterior.
-- Ejecutar las pruebas y validaciones antes del primer despliegue.
+Stella does not save message contents, conversation histories, personal profiles, or long-term user memory. Anti-spam fingerprints and counters exist only in process memory. Moderation records are operational data and are automatically deleted after 90 days. Room configuration remains until an administrator changes it or the database is removed.
 
-## Privacidad
+The Anarchy API does not expose a documented ability for a bot to delete or mute another member's messages. A warning is therefore an internal moderation record, not a platform-enforced punishment.
 
-Stella no debe crear memoria personal permanente ni conservar historiales conversacionales. La persistencia debe limitarse a datos operativos estrictamente necesarios, con retención definida y eliminación automática.
+## Configuration
 
-## Desarrollo
+Set these environment variables in the hosting provider:
 
-Python 3.11+. Los comandos de instalación y despliegue se documentarán una vez terminada la migración y verificados los requisitos.
+| Variable | Required | Purpose |
+|---|---:|---|
+| `ANARCHY_BOT_TOKEN` | Yes | Bot API token |
+| `ANARCHY_WEBHOOK_SECRET` | Yes | HMAC webhook secret |
+| `ADMIN_UIDS` | No | Comma/semicolon/newline-separated administrator UIDs |
+| `COMMAND_PREFIX` | No | Command prefix; defaults to `!` |
+| `DATA_DIR` | No | SQLite directory; defaults to `./data` |
+
+Do not commit real credentials. See [`.env.example`](.env.example).
+
+## Run locally
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements-dev.txt
+cp .env.example .env
+uvicorn main:app --reload
+```
+
+The app exposes `GET /health` and receives Anarchy webhooks at `POST /webhook` (also `POST /`).
+
+## Render
+
+The included Blueprint targets the existing `stella-anarchy` Free web service in Ohio. Configure the required environment variables in Render before connecting the Anarchy webhook to `https://YOUR-SERVICE.onrender.com/webhook`.
+
+Free Render services can sleep when idle. A sleeping service may take time to wake for a webhook; use a paid always-on plan if the bot later requires uninterrupted response times.
+
+## Development
+
+Run tests with:
+
+```bash
+pip install -r requirements-dev.txt
+pytest -q
+```
+
+Stella is intentionally a clean foundation. More community modules should be added independently and tested before enabling them in production.
