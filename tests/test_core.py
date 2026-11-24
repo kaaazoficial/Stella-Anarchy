@@ -55,3 +55,34 @@ def test_room_settings_are_isolated(tmp_path: Path):
     store.set_setting("room-a", "antispam_enabled", "0")
     assert store.get_setting("room-a", "antispam_enabled", "1") == "0"
     assert store.get_setting("room-b", "antispam_enabled", "1") == "1"
+
+
+def test_poll_vote_changes_and_closes(tmp_path: Path):
+    store = Store(tmp_path / "stella.sqlite3")
+    store.initialize()
+    poll_id = store.create_poll("room", "creator", "Favourite?", ["A", "B"])
+    assert store.vote_poll("room", poll_id, "voter", 0) == "ok"
+    assert store.vote_poll("room", poll_id, "voter", 1) == "ok"
+    poll = store.get_poll("room", poll_id)
+    assert poll["results"] == {1: 1}
+    assert store.close_poll("room", poll_id, "creator") == "ok"
+    assert store.vote_poll("room", poll_id, "voter-2", 0) == "closed"
+
+
+def test_event_rsvp_and_creator_controls(tmp_path: Path):
+    store = Store(tmp_path / "stella.sqlite3")
+    store.initialize()
+    event_id = store.create_event("room", "owner", "Meeting", time.time() + 3600)
+    assert store.rsvp_event("room", event_id, "guest", "Guest") == "ok"
+    assert store.close_event("room", event_id, "other") == "denied"
+    assert store.close_event("room", event_id, "owner") == "ok"
+
+
+def test_activity_is_aggregated_per_day_and_room(tmp_path: Path):
+    store = Store(tmp_path / "stella.sqlite3")
+    store.initialize()
+    store.record_activity("room-a", "uid-1")
+    store.record_activity("room-a", "uid-1")
+    store.record_activity("room-b", "uid-1")
+    assert store.activity_summary("room-a")[0]["total_messages"] == 2
+    assert store.activity_summary("room-b")[0]["total_messages"] == 1
