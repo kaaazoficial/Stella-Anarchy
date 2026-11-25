@@ -18,6 +18,8 @@ class Store:
     def touch_user(self,*a): pass
     def record_activity(self,*a): pass
     def add_warning(self,*a): return 1
+    def get_setting(self,*a): return "1"
+    def auto_reply_rules(self,*a): return []
 
 class Voice:
     def __init__(self): self.speech=[]; self.enabled=False
