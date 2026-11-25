@@ -176,13 +176,13 @@ class StellaServices:
                 metadata = info.get("extmetadata") or {}
                 license_name = re.sub(r"<[^>]+>", "", str((metadata.get("LicenseShortName") or {}).get("value") or "Licencia no indicada"))
                 artist = re.sub(r"<[^>]+>", "", str((metadata.get("Artist") or {}).get("value") or ""))
-                lines.append(f"{index}. {page.get('title') or 'Archivo'}\\n{info.get('descriptionurl') or info.get('url') or ''}\\nLicencia: {html.unescape(license_name)[:90]}" + (f" · Autor: {html.unescape(artist)[:90]}" if artist else ""))
+                lines.append(f"{index}. {page.get('title') or 'Archivo'}\n{info.get('descriptionurl') or info.get('url') or ''}\nLicencia: {html.unescape(license_name)[:90]}" + (f" · Autor: {html.unescape(artist)[:90]}" if artist else ""))
             lines.append("Comprueba la licencia y la atribución en cada ficha antes de reutilizar una imagen.")
-            return "\\n\\n".join(lines)
+            return "\n\n".join(lines)
         archive_type = {"video": "movies", "audio": "audio"}.get(media_kind)
         if not archive_type:
             return "Tipos disponibles: imagen, video o audio."
-        terms = re.findall(r"[\\wÀ-ÿ]+", search_text, flags=re.UNICODE)[:6]
+        terms = re.findall(r"[\wÀ-ÿ]+", search_text, flags=re.UNICODE)[:6]
         if not terms:
             return "No encontré términos válidos para esa búsqueda."
         archive_query = f"mediatype:{archive_type} AND " + " AND ".join(terms)
@@ -204,9 +204,9 @@ class StellaServices:
             creator = html.unescape(str(item.get("creator") or ""))[:80]
             year = str(item.get("year") or "")[:12]
             details = " · ".join(value for value in (creator, year) if value)
-            lines.append(f"{index}. {title}" + (f"\\n{details}" if details else "") + f"\\nhttps://archive.org/details/{quote_plus(identifier)}")
+            lines.append(f"{index}. {title}" + (f"\n{details}" if details else "") + f"\nhttps://archive.org/details/{quote_plus(identifier)}")
         if media_kind == "audio":
             lines.append("Son páginas de origen, no una autorización de uso. Revisa derechos y licencia; para reproducir audio usa !dj buscar.")
-        return "\\n\\n".join(lines)
+        return "\n\n".join(lines)
 
 
