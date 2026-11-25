@@ -166,6 +166,16 @@ class StellaBot:
             return
 
         request_text = direct_call if direct_call is not None else content
+        if direct_call is not None and not any(request_text.startswith(item) for item in prefixes):
+            # extract_stella_call removes vocative punctuation; recover a command
+            # prefix that was immediately attached to the explicit name.
+            prefixed_call = re.search(
+                r"(?<![\\w])@?(?:stella|stell|stela)(?![\\w])\\s*([!/-]\\s*.+)$",
+                content,
+                flags=re.IGNORECASE,
+            )
+            if prefixed_call:
+                request_text = prefixed_call.group(1).strip()
         prefix = next((item for item in prefixes if item and request_text.startswith(item)), None)
         if prefix:
             await self._command(room_id, uid, name, request_text[len(prefix):].strip(), message)
