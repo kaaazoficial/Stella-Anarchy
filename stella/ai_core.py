@@ -22,8 +22,9 @@ RequestFunc = Callable[..., Awaitable[Any]]
 
 AI_PUBLIC_COMMANDS = frozenset({
     # Ayuda, consulta e investigación
-    "ayuda", "menu",
+    "ayuda", "menu", "ping",
     "fecha", "zona", "miuid", "perfil", "puntos", "ranking", "actividad",
+    "ortografia", "analizartexto", "analizar",
     "investigar", "calcular", "traducir", "multimedia", "media", "imagen",
     "video", "audio",
     # Comunidad y perfiles propios
@@ -94,6 +95,7 @@ AI_COMMAND_CATALOG = {
     "advertir": "@usuario [motivo]: registra una advertencia (administradores).",
     "advertencias": "[@usuario]: consulta advertencias (administradores).",
     "quitaradvertencia": "ID: retira una advertencia (administradores).",
+    "respuestas": "sin argumentos: alias de configuración de respuestas automáticas (administradores).",
     "antispam": "[estado|on|off|limite N|ventana N|repeticiones N|enlaces N|menciones N] (administradores).",
     "perfilbot": "nombre | estado: actualiza el nombre y estado de Stella (administradores).",
     "avatarbot": "URL HTTPS: actualiza el avatar de Stella con una imagen validada (administradores).",
@@ -134,6 +136,10 @@ AI_COMMAND_CATALOG = {
     "intento": "1-100: prueba un número en la partida activa.",
     "investigar": "tema o pregunta: búsqueda pública con varias fuentes.",
     "calcular": "expresión: calculadora matemática segura, sin ejecutar código.",
+    "analizartexto": "modo texto: resume, corrige, reescribe, extrae datos o detecta contradicciones.",
+    "analizar": "texto o enlace: inspección preliminar de enlaces y señales de riesgo.",
+    "ortografia": "texto: sugerencias ortográficas conservadoras en español.",
+    "ping": "sin argumentos: comprueba que Stella responde.",
     "traducir": "idioma | texto: traducción.",
     "multimedia": "imagen|video|audio búsqueda: recursos públicos.",
     "media": "alias de multimedia.",
