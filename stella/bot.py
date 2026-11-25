@@ -18,6 +18,8 @@ from stella.services import StellaServices
 from stella.music_voice import MusicVoice
 from stella.storage import Store
 from stella.extra_commands import calculate, datetime_text, CalculationError
+from stella.help import build_commands_help_text, filter_commands_help_text
+from stella.identity import extract_stella_call, detect_affectionate_expression
 
 log = logging.getLogger("stella.bot")
 
@@ -85,6 +87,7 @@ class StellaBot:
         if not uid or not content or self._is_bot_message(message):
             return
 
+        self.store.touch_user(uid, name)
         self.store.record_activity(room_id, uid)
         blocked, reason = self._check_antispam(room_id, uid, content)
         if blocked:
@@ -211,7 +214,11 @@ class StellaBot:
             "analizartexto": self._analyze_text,
             "calcular": self._calculate,
             "fecha": self._date_time, "zona": self._date_time,
-            "perfil": self._profile,
+            "perfil": self._profile, "bio": self._bio, "miestado": self._my_status,
+            "puntos": self._points, "saldo": self._points, "ranking": self._ranking,
+            "diario": self._daily, "trabajar": self._work, "pagar": self._pay,
+            "regalo": self._gift, "muro": self._wall, "afinidad": self._affinity,
+            "duelo": self._duel,
             "interaccion": self._interaction_help,
             "roast": self._roast, "ship": self._ship,
             "trivia": self._trivia, "responder": self._trivia_answer,
@@ -275,14 +282,144 @@ class StellaBot:
         answer = await self.ai.ask(content[:5500], system=instructions)
         await self._reply(room_id, answer, message)
 
+    def _mentioned_user(self, message: dict[str, Any]) -> tuple[str, str] | None:
+        mentions = message.get("mentions") or []
+        for item in mentions:
+            if not isinstance(item, dict):
+                continue
+            target_uid = str(item.get("uid") or item.get("userId") or item.get("id") or "").strip()
+            target_name = str(item.get("nickname") or item.get("displayName") or item.get("name") or target_uid).strip()
+            if target_uid:
+                return target_uid, target_name[:80]
+        return None
+
     async def _profile(self, room_id, uid, name, args, message):
-        author = message.get("author") or {}
-        nickname = str(author.get("nickname") or author.get("displayName") or name)[:80]
+        target = self._mentioned_user(message)
+        target_uid, target_name = target if target else (uid, name)
+        profile = self.store.get_profile(target_uid)
+        if not profile:
+            await self._reply(room_id, "Todavía no hay un perfil disponible para esa persona.", message)
+            return
         await self._reply(
             room_id,
-            f"👤 PERFIL DE {nickname}\nUID: {uid}\nEsta vista muestra únicamente los datos disponibles en el evento actual.",
+            f"👤 PERFIL · {profile['nickname']}\nUID: {target_uid}\nBiografía: {profile['bio'] or 'Sin biografía'}\nEstado: {profile['status'] or 'Sin estado'}\nPuntos: {profile['points']}",
             message,
         )
+
+    async def _bio(self, room_id, uid, name, args, message):
+        value = args.strip()
+        if not value:
+            profile = self.store.get_profile(uid) or {}
+            await self._reply(room_id, f"Tu biografía: {profile.get('bio') or 'Sin biografía'}\nUso: !bio <texto> (o !bio - para borrarla).", message)
+            return
+        value = "" if value == "-" else value
+        if len(value) > 300:
+            await self._reply(room_id, "La biografía admite hasta 300 caracteres.", message)
+            return
+        self.store.update_profile(uid, bio=value)
+        await self._reply(room_id, "Biografía actualizada." if value else "Biografía eliminada.", message)
+
+    async def _my_status(self, room_id, uid, name, args, message):
+        value = args.strip()
+        if not value:
+            profile = self.store.get_profile(uid) or {}
+            await self._reply(room_id, f"Tu estado: {profile.get('status') or 'Sin estado'}\nUso: !miestado <texto> (o !miestado - para borrarlo).", message)
+            return
+        value = "" if value == "-" else value
+        if len(value) > 80:
+            await self._reply(room_id, "El estado admite hasta 80 caracteres.", message)
+            return
+        self.store.update_profile(uid, status=value)
+        await self._reply(room_id, "Estado actualizado." if value else "Estado eliminado.", message)
+
+    async def _points(self, room_id, uid, name, args, message):
+        await self._reply(room_id, f"💰 {name}, tienes {self.store.points_balance(uid)} puntos.", message)
+
+    async def _ranking(self, room_id, uid, name, args, message):
+        rows = self.store.points_ranking()
+        if not rows:
+            await self._reply(room_id, "Todavía no hay posiciones en el ranking.", message)
+            return
+        lines = ["🏆 RANKING DE PUNTOS"]
+        lines.extend(f"{i}. {row['nickname']} · {row['points']} pts" for i, row in enumerate(rows, 1))
+        await self._reply(room_id, "\\n".join(lines), message)
+
+    async def _daily(self, room_id, uid, name, args, message):
+        ok, result = self.store.claim_reward(uid, "daily", 100, 86400)
+        if ok:
+            await self._reply(room_id, f"🎁 Recompensa diaria: +100 puntos. Saldo: {result}.", message)
+        else:
+            hours, remainder = divmod(result, 3600)
+            minutes = remainder // 60
+            await self._reply(room_id, f"Ya reclamaste tu recompensa. Vuelve en {hours} h {minutes} min.", message)
+
+    async def _work(self, room_id, uid, name, args, message):
+        amount = random.randint(15, 45)
+        ok, result = self.store.claim_reward(uid, "work", amount, 3600)
+        if ok:
+            await self._reply(room_id, f"🧰 Trabajo completado: +{amount} puntos. Saldo: {result}.", message)
+        else:
+            minutes = max(1, result // 60)
+            await self._reply(room_id, f"Necesitas descansar. Vuelve en aproximadamente {minutes} min.", message)
+
+    async def _pay(self, room_id, uid, name, args, message):
+        target = self._mentioned_user(message)
+        values = re.findall(r"\\d+", args)
+        if not target or not values:
+            await self._reply(room_id, "Uso: !pagar @usuario <cantidad>.", message)
+            return
+        amount = int(values[-1])
+        if amount > 100000:
+            await self._reply(room_id, "El límite por transferencia es de 100.000 puntos.", message)
+            return
+        result = self.store.transfer_points(uid, target[0], amount)
+        labels = {"ok": f"Transferiste {amount} puntos a {target[1]}.", "missing": "No encontré el perfil de origen o destino.", "insufficient": "No tienes puntos suficientes.", "invalid": "La transferencia no es válida."}
+        await self._reply(room_id, labels.get(result, "No pude completar la transferencia."), message)
+
+    async def _gift(self, room_id, uid, name, args, message):
+        target = self._mentioned_user(message)
+        if not target:
+            await self._reply(room_id, "Uso: !regalo @usuario [mensaje].", message)
+            return
+        if target[0] == uid:
+            await self._reply(room_id, "No puedes enviarte un regalo a ti mismo.", message)
+            return
+        message_text = re.sub(r"@[^ ]+", "", args).strip()[:160]
+        if self.store.points_balance(uid) < 20:
+            await self._reply(room_id, "Necesitas 20 puntos para enviar un regalo.", message)
+            return
+        if not self.store.transfer_points(uid, target[0], 20) == "ok":
+            await self._reply(room_id, "No pude completar el regalo.", message)
+            return
+        self.store.add_gift(uid, name, target[0], target[1], message_text)
+        self.store.add_affinity(uid, target[0], 2)
+        await self._reply(room_id, f"🎁 {name} envió un regalo a {target[1]} (20 puntos).", message)
+
+    async def _wall(self, room_id, uid, name, args, message):
+        gifts = self.store.received_gifts(uid)
+        if not gifts:
+            await self._reply(room_id, "Tu muro todavía no tiene regalos recientes.", message)
+            return
+        lines = ["🎁 TU MURO · ÚLTIMOS REGALOS"]
+        lines.extend(f"• {gift['sender_name']}: {gift['message'] or 'Te envió un detalle.'}" for gift in gifts)
+        await self._reply(room_id, "\\n".join(lines), message)
+
+    async def _affinity(self, room_id, uid, name, args, message):
+        target = self._mentioned_user(message)
+        if not target:
+            await self._reply(room_id, "Uso: !afinidad @usuario.", message)
+            return
+        score = self.store.get_affinity(uid, target[0])
+        await self._reply(room_id, f"💞 Afinidad con {target[1]}: {score}/100.", message)
+
+    async def _duel(self, room_id, uid, name, args, message):
+        target = self._mentioned_user(message)
+        if not target or target[0] == uid:
+            await self._reply(room_id, "Uso: !duelo @usuario.", message)
+            return
+        left, right = random.randint(1, 100), random.randint(1, 100)
+        winner = name if left >= right else target[1]
+        await self._reply(room_id, f"⚔️ DUELO\n{name}: {left}\n{target[1]}: {right}\nGanador: {winner}. Resultado recreativo.", message)
 
     async def _interaction_help(self, room_id, uid, name, args, message):
         await self._reply(
@@ -447,7 +584,8 @@ class StellaBot:
             await self._reply(room_id, f"Prueba otra vez: el número es {hint}. Intentos: {game['attempts']}/6.", message)
 
     async def _help_command(self, room_id, uid, name, args, message):
-        await self._reply(room_id, self._help(args), message)
+        text = build_commands_help_text(self.settings.command_prefix)
+        await self._reply(room_id, filter_commands_help_text(text, args or None), message)
 
     async def _ping(self, room_id, uid, name, args, message):
         await self._reply(room_id, "Pong. Stella está activa.", message)
