@@ -50,6 +50,20 @@ class AnarchyClient:
             log.warning("Anarchy API request failed: %s", type(exc).__name__)
             return {"ok": False, "status": 502, "data": {}}
 
+    async def get_bot_identity(self) -> dict[str, Any] | None:
+        """Return the authenticated bot identity from Anarchy GET /me."""
+        result = await self.request("GET", "/me")
+        if not result.get("ok"):
+            log.warning("Anarchy identity lookup failed with status %s", result.get("status"))
+            return None
+        data = result.get("data")
+        if not isinstance(data, dict):
+            return None
+        identity = data.get("bot")
+        if not isinstance(identity, dict):
+            return None
+        return identity
+
     async def send_message(
         self, thread_id: str, content: str, *, reply_id: str | None = None
     ) -> bool:
