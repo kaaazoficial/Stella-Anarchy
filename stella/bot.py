@@ -109,8 +109,29 @@ class StellaBot:
         if content.startswith(prefix):
             await self._command(room_id, uid, name, content[len(prefix):].strip(), message)
             return
-        if not content.startswith(self.settings.command_prefix):
-            await self.voice.enqueue_speech(room_id, f"{name}: {content}")
+        addressed = extract_stella_call(content)
+        if addressed:
+            natural = interpret_natural_request("Stella " + addressed)
+            if natural and not natural.startswith("asistente "):
+                await self._command(room_id, uid, name, natural, message)
+            else:
+                prompt = natural.removeprefix("asistente ").strip() if natural else addressed
+                answer = await self.ai.ask(prompt, session_key=str(room_id) + ":" + str(uid))
+                await self._reply(room_id, answer, message)
+            return
+        affection = detect_affectionate_expression(content)
+        if affection:
+            replies = {
+                "love": "Qué bonito detalle. Gracias por decírmelo; me alegra acompañarte.",
+                "care": "Gracias. Aprecio que te preocupes.",
+                "gratitude": "De nada. Me alegra haber podido ayudarte.",
+                "compliment": "Muchas gracias por el cumplido. Qué amable.",
+                "greeting": "¡Hola! ¿En qué puedo ayudarte?",
+                "miss_you": "Me alegra que hayas vuelto. ¿Qué hacemos hoy?",
+            }
+            await self._reply(room_id, replies.get(affection, "Gracias por tu mensaje."), message)
+            return
+        await self.voice.enqueue_speech(room_id, f"{name}: {content}")
         await self._check_auto_replies(room_id, content, message)
 
     @staticmethod
