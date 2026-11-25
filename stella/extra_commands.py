@@ -70,7 +70,12 @@ def calculate(expression: str) -> str:
                 raise CalculationError("Cantidad de argumentos no válida.")
             if node.func.id in {"min", "max"} and not 1 <= len(args) <= 8:
                 raise CalculationError("min y max aceptan entre uno y ocho valores.")
-            value = _ALLOWED_FUNCTIONS[node.func.id](*args)
+            if node.func.id == "round" and len(args) == 2:
+                if not args[1].is_integer():
+                    raise CalculationError("El número de decimales debe ser entero.")
+                value = round(args[0], int(args[1]))
+            else:
+                value = _ALLOWED_FUNCTIONS[node.func.id](*args)
         else:
             raise CalculationError("Solo se permiten números, operaciones y funciones matemáticas básicas.")
         if not math.isfinite(float(value)) or abs(float(value)) > 1e100:
