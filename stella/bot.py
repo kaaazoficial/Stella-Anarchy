@@ -21,6 +21,8 @@ from stella.extra_commands import calculate, datetime_text, CalculationError
 from stella.help import build_commands_help_text, filter_commands_help_text
 from stella.identity import extract_stella_call, detect_affectionate_expression
 from stella.nexus import interpret_natural_request
+from stella.matching import suggest_command
+from stella.spelling import detect_spanish_spelling_issues
 
 log = logging.getLogger("stella.bot")
 
@@ -213,6 +215,7 @@ class StellaBot:
             "investigar": self._research, "investigate": self._research,
             "analizar": self._inspect,
             "analizartexto": self._analyze_text,
+            "ortografia": self._spelling,
             "calcular": self._calculate,
             "fecha": self._date_time, "zona": self._date_time,
             "perfil": self._profile, "bio": self._bio, "miestado": self._my_status,
@@ -244,7 +247,11 @@ class StellaBot:
             return
         handler = routes.get(command)
         if handler is None:
-            await self._reply(room_id, f"No reconozco ese comando. Usa {self.settings.command_prefix}ayuda.", message)
+            suggestion = suggest_command(command, set(routes) | social_actions)
+            if suggestion:
+                await self._reply(room_id, f"No reconozco !{command}. ¿Quisiste decir !{suggestion[0]}? No ejecutaré la sugerencia automáticamente.", message)
+            else:
+                await self._reply(room_id, f"No reconozco ese comando. Usa {self.settings.command_prefix}ayuda.", message)
             return
         message["_stella_command"] = command
         await handler(room_id, uid, name, args, message)
@@ -293,6 +300,14 @@ class StellaBot:
             if target_uid:
                 return target_uid, target_name[:80]
         return None
+
+    async def _spelling(self, room_id, uid, name, args, message):
+        correction = detect_spanish_spelling_issues(args)
+        if not correction:
+            await self._reply(room_id, "No detecté errores ortográficos claros. No corrijo jerga, nombres propios ni expresiones ambiguas.", message)
+            return
+        changes = ", ".join(f"{before} → {after}" for before, after in correction.corrections)
+        await self._reply(room_id, f"✍️ Corrección sugerida:\n{correction.corrected_text}\nCambios: {changes}", message)
 
     async def _profile(self, room_id, uid, name, args, message):
         target = self._mentioned_user(message)
