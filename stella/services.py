@@ -149,6 +149,17 @@ class StellaServices:
         except (httpx.HTTPError, ValueError, RuntimeError, ImportError):
             log.exception("Research request failed")
             return []
+    async def ai_request(self, method: str, url: str, **kwargs):
+        """Make one bounded HTTPS request for the configured AI provider."""
+        timeout = kwargs.pop("timeout", 45)
+        async with httpx.AsyncClient(
+            timeout=timeout,
+            follow_redirects=False,
+            trust_env=False,
+            headers={"User-Agent": "StellaCommunityBot/1.0"},
+        ) as client:
+            return await client.request(method, url, **kwargs)
+
     async def fetch_avatar_image(self, source_url: str) -> tuple[bytes, str, dict[str, Any]]:
         from stella.images import validate_avatar_image_bytes
         from stella.research import is_safe_public_url
