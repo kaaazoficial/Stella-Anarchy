@@ -8,11 +8,11 @@ from functools import lru_cache
 SEPARATOR = "[C] ───────────── ✦ ─────────────"
 CATEGORY_TITLES = (
     "1. AYUDA E INTELIGENCIA ARTIFICIAL",
-    "2. SOCIAL Y PERFILES",
-    "3. JUEGOS, ECONOMÍA Y COMUNIDAD",
-    "4. MÚSICA Y VOZ",
-    "5. UTILIDADES Y MULTIMEDIA",
-    "6. ADMINISTRACIÓN Y ESTADO",
+    "3. SOCIAL Y PERFILES",
+    "4. JUEGOS, ECONOMÍA Y COMUNIDAD",
+    "5. MÚSICA Y VOZ",
+    "6. UTILIDADES Y MULTIMEDIA",
+    "7. ADMINISTRACIÓN Y ESTADO",
 )
 
 
@@ -28,16 +28,40 @@ def _command_help_sections(prefix: str):
             (False, f"• {prefix}asistente <consulta> — Conversación y solicitudes en lenguaje natural."),
             (False, f"• {prefix}ia ayuda — Guía de IA."),
             (False, f"• {prefix}ia preguntar <consulta> — Consulta directa al asistente."),
+            (False, f"• {prefix}ia  <consulta> — Consulta especializada de Teyvat."),
             (False, f"• {prefix}ia estado — Revisa el proveedor y la sesión actual."),
             (False, f"• {prefix}ia olvidar — Borra el contexto temporal de la charla."),
             (True, "▸ Investigación y Herramientas"),
             (False, f"• {prefix}investigar <tema> — Investigación (opciones: comparar, verificar, cronología, informe)."),
             (False, f"• {prefix}analizartexto <modo> <texto> — Modos: resumir, corregir, reescribir, extraer o contradicciones."),
-            (False, f"• {prefix}ortografia <texto> — Sugiere correcciones solo cuando son claras."),
             (False, f"• {prefix}calcular <operación> — Porcentajes, raíces, trigonometría y matemáticas."),
             (True, "▸ Administración de IA [ADMIN]"),
+            (False, f"• {prefix}ia probar | {prefix}ia guardian | {prefix}ia diagnostico — Diagnóstico y controles del sistema."),
         ]),
         (CATEGORY_TITLES[1], [
+            (True, "▸ Personajes y Equipos"),
+            (False, f"• {prefix}guia <personaje> — Builds y talentos."),
+            (False, f"• {prefix}materiales <personaje> — Materiales de ascensión."),
+            (False, f"• {prefix}equipos <personaje> — Composiciones de equipo."),
+            (False, f"• {prefix}rotacion <personaje> — Rotaciones de combate."),
+            (False, f"• {prefix}sinergia <personaje> — Sinergias y compañeros recomendados."),
+            (True, "▸ Mundo y Datos"),
+            (False, f"• {prefix}jefes — Lista de jefes."),
+            (False, f"• {prefix}banner — Banners activos."),
+            (False, f"• {prefix}calendario — Eventos y fechas."),
+            (False, f"• {prefix}cobertura <personaje> — Contenido del personaje."),
+            (False, f"• {prefix}reacciones <elemento> — Reacciones elementales."),
+            (False, f"• {prefix}enciclopedia | {prefix}archivo | {prefix}teyvat <nombre> — Fichas y datos del lore."),
+            (False, f"• {prefix}buscar <texto> — Búsqueda general."),
+            (False, f"• {prefix}lista <categoría> [página] — Listados por categoría."),
+            (False, f"• {prefix}enemigo | {prefix}geografia | {prefix}elemento <nombre> — Consultas específicas del juego."),
+            (False, f"• {prefix}curiosidad — Dato aleatorio de Genshin Impact."),
+            (True, "▸ Deseos (Gachapón)"),
+            (False, f"• {prefix}deseo — Simulador de tiradas."),
+            (False, f"• {prefix}pity — Consulta tu contador actual."),
+            (False, f"• {prefix}resetpity — Reinicia tu contador."),
+        ]),
+        (CATEGORY_TITLES[2], [
             (True, "▸ Perfil"),
             (False, f"• {prefix}perfil [@usuario] — Consulta un perfil."),
             (False, f"• {prefix}bio <texto> — Edita tu biografía."),
@@ -56,7 +80,7 @@ def _command_help_sections(prefix: str):
             (False, f"• {prefix}regalo @usuario [mensaje] — Envía un regalo."),
             (False, f"• {prefix}muro — Consulta los regalos recibidos."),
         ]),
-        (CATEGORY_TITLES[2], [
+        (CATEGORY_TITLES[3], [
             (True, "▸ Juegos y Entretenimiento"),
             (False, f"• {prefix}trivia — Inicia trivia | {prefix}responder <1-4> — Responde."),
             (False, f"• {prefix}adivina — Inicia adivinanza | {prefix}intento <número> — Prueba tu respuesta."),
@@ -77,27 +101,27 @@ def _command_help_sections(prefix: str):
             (False, f"• {prefix}encuesta <pregunta> | <opciones> — Crea una votación."),
             (False, f"• {prefix}evento | {prefix}eventos — Consulta, crea o cierra eventos (según permisos)."),
         ]),
-        (CATEGORY_TITLES[3], [
+        (CATEGORY_TITLES[4], [
             (True, "▸ Llamadas"),
             (False, f"• {prefix}join | {prefix}salirsala | {prefix}salas — Entrar, salir y consultar salas."),
-            (False, f"• {prefix}voz participantes|hablando|estado — Consulta participantes y rol de hablante en tiempo real."),
+            (False, f"• {prefix}voz participantes|hablando|estado — Consultar participantes y roles."),
             (True, "▸ Reproductor DJ"),
-            (False, f"• {prefix}dj buscar <tema> | ambiente <mood> — Busca pistas con licencia abierta."),
+            (False, f"• {prefix}dj buscar <tema> | resultados 1|2 — Buscar hasta diez pistas."),
             (False, f"• {prefix}dj reproducir <n> | encolar <n> — Reproducir o añadir resultados."),
-            (False, f"• {prefix}dj pausa | {prefix}dj reanudar | {prefix}dj saltar | {prefix}dj cola | {prefix}dj actual | {prefix}dj resultados — Controles y resultados."),
-            (False, f"• {prefix}dj detener | {prefix}dj volumen <0-100> | {prefix}dj fuentes — Controles y catálogos."),
-            (False, f"• {prefix}dj quitar <n> | mover <a> <b> | vaciar | repetir off|una|cola — Gestiona la cola."),
-            (False, f"• {prefix}dj favorito <n> | {prefix}dj favoritos — Guarda y consulta favoritos."),
-            (False, f"• {prefix}dj probar — Diagnóstico de audio y LiveKit."),
-            (False, f"• {prefix}reproducir <número> — Reproduce un resultado de búsqueda actual."),
+            (False, f"• {prefix}dj pausa | {prefix}dj reanudar | {prefix}dj saltar | {prefix}dj cola | {prefix}dj actual — Controles."),
+            (False, f"• {prefix}dj quitar <n> | mover <a> <b> | vaciar — Gestionar la cola."),
+            (False, f"• {prefix}dj repetir off|una|cola | transicion <ms> | duck on|off — Ajustes."),
+            (False, f"• {prefix}dj detener | {prefix}dj fuentes | {prefix}dj ambiente — Control y búsqueda."),
+            (False, f"• {prefix}dj favorito | {prefix}dj probar <tema> — Favoritos y diagnóstico [ADMIN]."),
+            (False, f"• {prefix}reproducir <archivo> — Reproduce un archivo local."),
             (True, "▸ Listas, Volumen y Lectura"),
-            (False, f"• {prefix}playlist crear|lista|agregar|ver|reproducir|borrar — Guarda resultados de búsqueda en listas propias."),
+            (False, f"• {prefix}playlist crear|agregar|ver|reproducir|borrar — Gestiona tus listas."),
             (False, f"• {prefix}volumen <0-100> | {prefix}subirvolumen | {prefix}bajarvolumen | {prefix}silencio — Controles de música."),
             (False, f"• {prefix}leer | {prefix}noleer — Activa o desactiva la lectura."),
-            (False, f"• {prefix}tts voces|voz|velocidad|volumen|probar — Configura y prueba la lectura."),
+            (False, f"• {prefix}tts voces|voz|velocidad|volumen|enlaces|menciones — Configura la lectura."),
             (False, f"• {prefix}volumenlectura <0-100> | {prefix}subirvolumenlectura | {prefix}bajarvolumenlectura | {prefix}silenciolectura — Controles de voz."),
         ]),
-        (CATEGORY_TITLES[4], [
+        (CATEGORY_TITLES[5], [
             (True, "▸ Fecha, Hora e Idiomas"),
             (False, f"• {prefix}fecha — Fecha y hora actual."),
             (False, f"• {prefix}zona <Area/Ciudad> — Hora de otra zona horaria."),
@@ -108,7 +132,7 @@ def _command_help_sections(prefix: str):
             (False, f"• {prefix}video <búsqueda> — Busca vídeos."),
             (False, f"• {prefix}audio <búsqueda> — Busca recursos de audio."),
         ]),
-        (CATEGORY_TITLES[5], [
+        (CATEGORY_TITLES[6], [
             (True, "▸ Identidad y Estado"),
             (False, f"• {prefix}miuid — Consulta tu UID."),
             (False, f"• {prefix}estado — Estado general del bot [ADMIN]."),
@@ -116,14 +140,14 @@ def _command_help_sections(prefix: str):
             (False, f"• {prefix}fuentes — Estado de proveedores [ADMIN]."),
             (False, f"• {prefix}metricas — Métricas agregadas del sistema [ADMIN]."),
             (False, f"• {prefix}autotest — Ejecuta pruebas internas [ADMIN]."),
-            (False, f"• {prefix}centro — Resumen de administración [ADMIN]."),
-            (False, f"• {prefix}admin — Resumen de administración [ADMIN]."),
+            (False, f"• {prefix}centro — Panel de investigación [ADMIN]."),
+            (False, f"• {prefix}admin [resumen|actividad|antispam|avisos|historial] — Panel de control [ADMIN]."),
             (True, "▸ Moderación y Configuración"),
-            (False, f"• {prefix}antispam activar|desactivar — Activa o desactiva el antispam por sala [ADMIN]."),
+            (False, f"• {prefix}antispam estado|on|off|límite N|ventana N|repeticiones N|enlaces N|menciones N [ADMIN]."),
             (False, f"• {prefix}advertir @usuario [motivo] | {prefix}advertencias [@usuario] | {prefix}quitaradvertencia ID [ADMIN]."),
-            (False, f"• {prefix}respuesta añadir|quitar|lista — Gestiona respuestas automáticas [ADMIN]."),
-            (False, f"• {prefix}perfilbot Nombre | Estado — Edita la identidad del bot [ADMIN]."),
-            (False, f"• {prefix}avatarbot <URL> — Cambia el avatar con una imagen validada [ADMIN]."),
+            (False, f"• {prefix}respuestas estado|on|off | {prefix}respuesta añadir|lista|eliminar ID [ADMIN]."),
+            (False, f"• {prefix}perfilbot ... | {prefix}avatarbot ... — Edita identidad e icono [ADMIN]."),
+            (False, f"• {prefix}eliminarmensajes — Elimina mensajes propios identificados en esta ejecución [ADMIN]."),
             (False, "Nota: Los comandos ADMIN requieren un UID autorizado en ADMIN_UIDS (el nickname no concede permisos)."),
         ]),
     ]
@@ -140,7 +164,7 @@ def _format_section(title: str, entries: list[tuple[bool, str]]) -> list[str]:
 def _intro_lines(prefix: str) -> list[str]:
     accepted_prefixes = " / ".join(dict.fromkeys((prefix, "!", "-")))
     return [
-        "[CB] ✦ STELLA · GUÍA DE COMANDOS ✦",
+        "[CB] ✦ KATHERYNE · GUÍA DE COMANDOS ✦",
         f"[C] Prefijos aceptados: {accepted_prefixes}",
         f"[C] Usa {prefix}menu para consultar la guía completa por secciones.",
         "[C] Catálogo de comandos · Accesos y funciones.",
@@ -199,19 +223,21 @@ _CATEGORY_ALIASES = {
     "ia": 0,
     "inteligencia": 0,
     "inteligencia artificial": 0,
-    "social": 1,
-    "perfiles": 1,
-    "juegos": 2,
-    "economia": 2,
-    "comunidad": 2,
-    "musica": 3,
-    "voz": 3,
-    "dj": 3,
-    "tts": 3,
-    "multimedia": 4,
-    "utilidades": 4,
-    "admin": 5,
-    "administracion": 5,
+    "": 1,
+    "teyvat": 1,
+    "social": 2,
+    "perfiles": 2,
+    "juegos": 3,
+    "economia": 3,
+    "comunidad": 3,
+    "musica": 4,
+    "voz": 4,
+    "dj": 4,
+    "tts": 4,
+    "multimedia": 5,
+    "utilidades": 5,
+    "admin": 6,
+    "administracion": 6,
 }
 
 
@@ -239,9 +265,9 @@ def filter_commands_help_text(help_text: str, topic: str | None = None) -> str:
     if category_index is None:
         prefix = _help_prefix(help_text)
         return (
-            "[CB] ✦ STELLA · GUÍA DE COMANDOS ✦\n"
-            f"[C] Categoría no reconocida. Disponibles: ia, social, juegos, musica, multimedia y admin.\n"
-            f"[C] Ejemplo: {prefix}ayuda social."
+            "[CB] ✦ KATHERYNE · GUÍA DE COMANDOS ✦\n"
+            f"[C] Categoría no reconocida. Disponibles: ia, , social, juegos, musica, multimedia, admin.\n"
+            f"[C] Ejemplo: {prefix}ayuda ."
         )
 
     prefix = _help_prefix(help_text)
