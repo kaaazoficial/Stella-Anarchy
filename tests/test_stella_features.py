@@ -132,3 +132,14 @@ def test_avatar_validation_rejects_unsupported_mime_and_invalid_hosts():
         await services.close()
     import asyncio
     asyncio.run(check())
+
+def test_advanced_ai_core_is_stella_only_and_bounded():
+    from stella.ai_core import AI_COMMAND_CATALOG, AI_PUBLIC_COMMANDS, StellaAICore
+
+    core = StellaAICore()
+    assert core.memory_ttl <= 300
+    assert core.memory_turns <= 2
+    assert "ayuda" in AI_PUBLIC_COMMANDS
+    assert "investigar" in AI_COMMAND_CATALOG
+    assert "" not in AI_PUBLIC_COMMANDS
+    assert not any("genshin" in command.casefold() or "teyvat" in command.casefold() for command in AI_COMMAND_CATALOG)
