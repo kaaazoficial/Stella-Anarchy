@@ -332,6 +332,11 @@ class StellaBot:
             "leer": self._voice_command, "noleer": self._voice_command,
             "voz": self._voice_command, "tts": self._voice_command,
             "dj": self._voice_command, "reproducir": self._voice_command,
+            "pausa": self._voice_command, "pausar": self._voice_command,
+            "reanudar": self._voice_command, "continuar": self._voice_command,
+            "saltar": self._voice_command, "cola": self._voice_command,
+            "djdetener": self._voice_command, "djstop": self._voice_command,
+            "saludfuentes": self._sources,
         }
         social_actions = {
             "abrazo", "abrazar", "beso", "besar", "patada", "golpe", "cachetada",
