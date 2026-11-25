@@ -242,6 +242,7 @@ class MusicVoice:
                     "music_paused": asyncio.Event(),
                     "music_skip": asyncio.Event(),
                     "music_volume": 0.75,
+                    "repeat_mode": "off",
                     "speech_queue": asyncio.Queue(maxsize=15),
                     "speech_task": None,
                     "tts_enabled": False,
@@ -587,7 +588,12 @@ class MusicVoice:
                 log.warning("Music playback failed (%s)", type(exc).__name__)
                 await self._send(room_id, f"No pude reproducir «{track.get('title', 'la pista')}». Puedes elegir otra de la búsqueda.")
             finally:
+                skipped = state["music_skip"].is_set()
                 state["music_skip"].clear()
+                if not skipped and state.get("repeat_mode") == "one":
+                    state["music_queue"].appendleft(track)
+                elif not skipped and state.get("repeat_mode") == "queue":
+                    state["music_queue"].append(track)
                 state["music_current"] = None
 
     async def pause_music(self, room_id: str, paused: bool) -> str:
@@ -842,6 +848,72 @@ class MusicVoice:
                 lines.append("No hay una pista reproduciéndose.")
             lines.extend(f"{i}. {track.get('title')} — {track.get('creator')}" for i, track in enumerate(state["music_queue"], 1))
             return "\n".join(lines)
+        if action in {"resultados", "results"}:
+            saved = self.search_results.get(room_id) or {}
+            if saved.get("expires", 0) <= time.monotonic():
+                self.search_results.pop(room_id, None)
+                return "Los resultados caducaron. Usa !dj buscar <tema>."
+            items = saved.get("items") or []
+            return "\\n".join([ "🎧 RESULTADOS DE BÚSQUEDA" ] + [f"{i}. {item.get('title')} — {item.get('creator')} · {item.get('source')}" for i, item in enumerate(items, 1)])
+        if action in {"ambiente", "mood"}:
+            from stella.astra import resolve_music_mood
+            ok, message = await self.search_music(room_id, resolve_music_mood(rest))
+            return message
+        if action in {"fuentes", "sources"}:
+            jamendo = "disponible" if os.getenv("JAMENDO_CLIENT_ID", "").strip() else "sin configurar"
+            return f"Catálogos musicales: Internet Archive (licencia verificada) y Jamendo ({jamendo})."
+        if action in {"quitar", "remove"}:
+            state = self.rooms.get(room_id)
+            try:
+                index = int(rest) - 1
+            except ValueError:
+                return "Uso: !dj quitar <posición de la cola>."
+            if not state:
+                return "Stella no está conectada a una llamada."
+            queue = list(state["music_queue"])
+            if not 0 <= index < len(queue):
+                return "Esa posición no existe en la cola."
+            removed = queue.pop(index)
+            state["music_queue"] = deque(queue)
+            return f"Quité «{removed.get('title')}» de la cola."
+        if action in {"mover", "move"}:
+            state = self.rooms.get(room_id)
+            try:
+                source, target = (int(value) - 1 for value in rest.split())
+            except (ValueError, TypeError):
+                return "Uso: !dj mover <posición actual> <nueva posición>."
+            if not state:
+                return "Stella no está conectada a una llamada."
+            queue = list(state["music_queue"])
+            if not (0 <= source < len(queue) and 0 <= target < len(queue)):
+                return "Una de esas posiciones no existe."
+            track = queue.pop(source)
+            queue.insert(target, track)
+            state["music_queue"] = deque(queue)
+            return "Orden de la cola actualizado."
+        if action in {"vaciar", "clear"}:
+            state = self.rooms.get(room_id)
+            if not state:
+                return "Stella no está conectada a una llamada."
+            state["music_queue"].clear()
+            return "Cola musical vaciada. La pista actual no se interrumpió."
+        if action in {"repetir", "repeat"}:
+            state = self.rooms.get(room_id)
+            if not state:
+                return "Stella no está conectada a una llamada."
+            mode = rest.casefold().strip()
+            if mode not in {"off", "una", "one", "cola", "queue"}:
+                return "Uso: !dj repetir off|una|cola."
+            state["repeat_mode"] = "one" if mode in {"una", "one"} else "queue" if mode in {"cola", "queue"} else "off"
+            label = {"one": "una pista", "queue": "cola completa", "off": "desactivada"}[state["repeat_mode"]]
+            return f"Repetición {label}."
+        if action in {"probar", "test"}:
+            ok, message = await self.ensure_room(room_id)
+            if not ok:
+                return message
+            if not self._load_audio():
+                return "No están disponibles las dependencias de audio/LiveKit."
+            return "Prueba de audio superada: LiveKit y las dependencias de reproducción están disponibles."
         if action in {"pausa", "pausar", "pause"}:
             return await self.pause_music(room_id, True)
         if action in {"reanudar", "continuar", "resume"}:
