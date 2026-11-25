@@ -33,6 +33,7 @@ def _command_help_sections(prefix: str):
             (True, "▸ Investigación y Herramientas"),
             (False, f"• {prefix}investigar <tema> — Investigación (opciones: comparar, verificar, cronología, informe)."),
             (False, f"• {prefix}analizartexto <modo> <texto> — Modos: resumir, corregir, reescribir, extraer o contradicciones."),
+            (False, f"• {prefix}ortografia <texto> — Sugiere correcciones solo cuando son claras."),
             (False, f"• {prefix}calcular <operación> — Porcentajes, raíces, trigonometría y matemáticas."),
             (True, "▸ Administración de IA [ADMIN]"),
             (False, f"• {prefix}ia probar | {prefix}ia guardian | {prefix}ia diagnostico — Diagnóstico y controles del sistema."),
