@@ -66,26 +66,37 @@ def test_structured_stella_mention_is_recognized():
 
 
 
-def test_prefix_command_alone_does_not_address_stella():
-    b=bot()
-    calls=[]
-    async def capture(*args):
-        calls.append(args)
-    b._command=capture
-    asyncio.run(b.handle_event({"type":"message","threadId":"r","message":{"content":"!menu","author":{"uid":"u","nickname":"Persona"}}}))
-    assert calls == []
-    assert b.platform.sent == []
+def test_common_prefix_commands_work_without_name_or_reply():
+    for command in ("!ayuda", "!menu", "!ping"):
+        b=bot()
+        calls=[]
+        async def capture(*args):
+            calls.append(args)
+        b._command=capture
+        asyncio.run(b.handle_event({
+            "type":"message",
+            "threadId":"r",
+            "message":{"content":command,"author":{"uid":"u","nickname":"Persona"}},
+        }))
+        assert len(calls) == 1
+        assert calls[0][3] == command[1:]
+        assert b.platform.sent == []
 
 
 def test_calling_stella_by_name_allows_prefixed_command():
-    b=bot()
-    calls=[]
-    async def capture(*args):
-        calls.append(args)
-    b._command=capture
-    asyncio.run(b.handle_event({"type":"message","threadId":"r","message":{"content":"Stella !menu","author":{"uid":"u","nickname":"Persona"}}}))
-    assert len(calls) == 1
-    assert calls[0][3] == "menu"
+    for content in ("Stella !menu", "@Stella !ayuda", "oye Stella -ping"):
+        b=bot()
+        calls=[]
+        async def capture(*args):
+            calls.append(args)
+        b._command=capture
+        asyncio.run(b.handle_event({
+            "type":"message",
+            "threadId":"r",
+            "message":{"content":content,"author":{"uid":"u","nickname":"Persona"}},
+        }))
+        assert len(calls) == 1
+        assert calls[0][3] in {"menu", "ayuda", "ping"}
 
 
 def test_reply_to_stella_allows_prefixed_command_without_name():

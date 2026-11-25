@@ -146,9 +146,24 @@ class StellaBot:
             "!",
             "-",
         )))
-        # A prefix alone is never an invocation: commands must be called by name,
-        # explicitly mention Stella, or reply to one of Stella's own messages.
-        addressed = direct_call is not None or mentioned or replied
+        # A command prefix is an explicit invocation. Ordinary conversation stays
+        # silent, while !ayuda, !menu and every other routed command remain usable.
+        prefixed_command = next(
+            (item for item in prefixes if content.startswith(item) and len(content) > len(item)),
+            None,
+        )
+        prefixed_named_call = re.search(
+            r"(?<!\w)@?(?:stella|stell|stela)(?!\w)\s*([!/-]\s*.+)$",
+            content,
+            flags=re.IGNORECASE,
+        )
+        addressed = (
+            direct_call is not None
+            or mentioned
+            or replied
+            or prefixed_command is not None
+            or prefixed_named_call is not None
+        )
 
         self.store.touch_user(uid, name)
         self.store.record_activity(room_id, uid)
@@ -165,17 +180,12 @@ class StellaBot:
             await self.voice.enqueue_speech(room_id, f"{name}: {content}")
             return
 
-        request_text = direct_call if direct_call is not None else content
-        if direct_call is not None and not any(request_text.startswith(item) for item in prefixes):
-            # extract_stella_call removes vocative punctuation; recover a command
-            # prefix that was immediately attached to the explicit name.
-            prefixed_call = re.search(
-                r"(?<![\\w])@?(?:stella|stell|stela)(?![\\w])\\s*([!/-]\\s*.+)$",
-                content,
-                flags=re.IGNORECASE,
-            )
-            if prefixed_call:
-                request_text = prefixed_call.group(1).strip()
+        request_text = (
+            prefixed_named_call.group(1).strip()
+            if prefixed_named_call
+            else direct_call if direct_call is not None
+            else content
+        )
         prefix = next((item for item in prefixes if item and request_text.startswith(item)), None)
         if prefix:
             await self._command(room_id, uid, name, request_text[len(prefix):].strip(), message)

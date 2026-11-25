@@ -72,6 +72,7 @@ def _intro(p: str):
     return ["[CB] ✦ STELLA · GUÍA DE COMANDOS ✦",
             f"[C] Prefijos aceptados: {' / '.join(dict.fromkeys((p, '!', '-')))}",
             f"[C] Usa {p}menu para consultar el catálogo completo.",
+            "[C] Puedes enviar comandos directamente con el prefijo; no necesitas mencionar a Stella.",
             "[C] Funciones generales · Comandos y accesos.", "[C]"]
 
 @lru_cache(maxsize=16)
