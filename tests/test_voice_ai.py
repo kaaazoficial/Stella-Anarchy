@@ -281,3 +281,127 @@ async def test_failed_music_track_is_not_requeued_forever():
     assert len(sent) == 1
     assert "No pude reproducir" in sent[0]
 
+@pytest.mark.asyncio
+async def test_failed_audio_publication_disconnects_and_releases_source():
+    class FakePlatform:
+        def __init__(self):
+            self.calls = []
+        async def request(self, method, path):
+            self.calls.append((method, path))
+            if method == "GET":
+                return {"ok": True, "status": 200, "data": {"roomList": [{"threadId": "thread-1"}]}}
+            if path.endswith("/join"):
+                return {"ok": True, "status": 200, "data": {"url": "wss://livekit.example", "token": "secret-token"}}
+            return {"ok": True, "status": 200, "data": {}}
+
+    class FakeSource:
+        instances = []
+        def __init__(self, *args, **kwargs):
+            self.closed = False
+            self.__class__.instances.append(self)
+        async def aclose(self):
+            self.closed = True
+
+    class FakeTrack:
+        @staticmethod
+        def create_audio_track(name, source):
+            return {"name": name, "source": source}
+
+    class FakeParticipant:
+        async def publish_track(self, track, options):
+            raise RuntimeError("publication rejected")
+
+    class FakeRoom:
+        def __init__(self):
+            self.callbacks = {}
+            self.connected = False
+            self.disconnect_calls = 0
+            self.local_participant = FakeParticipant()
+        def on(self, event, callback):
+            self.callbacks[event] = callback
+        async def connect(self, url, token, options=None):
+            self.connected = True
+        def isconnected(self):
+            return self.connected
+        async def disconnect(self):
+            self.disconnect_calls += 1
+            self.connected = False
+
+    room = FakeRoom()
+    class FakeRTC:
+        Room = lambda self: room
+        AudioSource = FakeSource
+        LocalAudioTrack = FakeTrack
+        TrackSource = type("TrackSource", (), {"SOURCE_MICROPHONE": "microphone"})
+        TrackPublishOptions = lambda self, **kwargs: kwargs
+        RoomOptions = lambda self, **kwargs: type("RoomOptions", (), kwargs)()
+
+    platform = FakePlatform()
+    voice = MusicVoice(platform)
+    voice._rtc = FakeRTC()
+
+    ok, message = await voice.ensure_room("thread-1")
+
+    assert not ok
+    assert "publish_audio" in message
+    assert room.disconnect_calls == 1
+    assert len(FakeSource.instances) == 1
+    assert FakeSource.instances[0].closed
+    assert platform.calls.count(("POST", "/live-rooms/thread-1/leave")) == 1
+    assert not voice.rooms
+    await voice.http.aclose()
+
+
+@pytest.mark.asyncio
+async def test_music_waits_while_tts_owns_shared_audio_track():
+    voice = object.__new__(MusicVoice)
+    state = {
+        "music_paused": asyncio.Event(),
+        "speech_done": asyncio.Event(),
+    }
+    state["music_paused"].set()
+    state["speech_done"].clear()
+    task = asyncio.create_task(voice._wait_music_gate(state))
+    await asyncio.sleep(0)
+    assert not task.done()
+
+    state["speech_done"].set()
+    await asyncio.wait_for(task, timeout=0.2)
+
+
+@pytest.mark.asyncio
+async def test_concurrent_leave_requests_call_anarchy_once():
+    class FakePlatform:
+        def __init__(self):
+            self.leave_calls = 0
+            self.started = asyncio.Event()
+            self.release = asyncio.Event()
+        async def request(self, method, path):
+            if method == "POST" and path.endswith("/leave"):
+                self.leave_calls += 1
+                self.started.set()
+                await self.release.wait()
+                return {"ok": True, "status": 200, "data": {}}
+            return {"ok": True, "status": 200, "data": {}}
+
+    platform = FakePlatform()
+    voice = MusicVoice(platform)
+    state = {
+        "connected": True,
+        "room": None,
+        "music_task": None,
+        "speech_task": None,
+        "audio_source": None,
+    }
+    voice.rooms["thread-1"] = state
+
+    first = asyncio.create_task(voice.leave_room("thread-1", request_leave=True))
+    await platform.started.wait()
+    second = asyncio.create_task(voice.leave_room("thread-1", request_leave=True))
+    await asyncio.sleep(0)
+    platform.release.set()
+    await asyncio.gather(first, second)
+
+    assert platform.leave_calls == 1
+    await voice.http.aclose()
+
