@@ -276,6 +276,12 @@ class StellaBot:
         args = parts[1].strip() if len(parts) > 1 else ""
         routes = {
             "ayuda": self._help_command, "help": self._help_command, "comandos": self._help_command, "menu": self._help_command,
+            "amistad": self._affinity, "daily": self._daily, "calc": self._calculate,
+            "investiga": self._research, "investigacion": self._research, "investigación": self._research,
+            "media": self._multimedia, "mi_uid": self._uid, "matematica": self._calculate,
+            "matemática": self._calculate, "reputacion": self._affinity, "reputación": self._affinity,
+            "texto": self._analyze_text, "top": self._ranking, "transferir": self._pay,
+            "volume": self._music_volume, "continuar": self._ai,
             "ping": self._ping, "miuid": self._uid, "uid": self._uid,
             "idbot": self._bot_id, "botid": self._bot_id, "identidadbot": self._bot_id,
             "azar": self._random, "frase": self._quote,
