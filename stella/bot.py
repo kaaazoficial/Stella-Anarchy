@@ -23,6 +23,7 @@ from stella.identity import extract_stella_call, detect_affectionate_expression
 from stella.nexus import interpret_natural_request
 from stella.matching import suggest_command
 from stella.spelling import detect_spanish_spelling_issues
+from stella.anarchy_events import update_voice_room_event, clear_voice_room, format_voice_state
 
 log = logging.getLogger("stella.bot")
 
@@ -77,8 +78,12 @@ class StellaBot:
             return
         if event_type in {"room.end", "room.kicked", "thread.removed"}:
             self._forget_room(room_id)
+            clear_voice_room(room_id)
             await self.voice.leave_room(room_id, request_leave=False)
             self.voice.search_results.pop(room_id, None)
+            return
+        if event_type in {"room.join", "room.leave", "room.speaker"}:
+            update_voice_room_event(event)
             return
         if event_type not in {"message", "message.created", "message_create"}:
             return
@@ -1138,6 +1143,10 @@ class StellaBot:
 
     async def _voice_command(self, room_id, uid, name, args, message):
         command = str(message.get("_stella_command") or "").casefold().strip()
+        if command == "voz" and args.casefold().strip() in {"participantes", "hablando", "estado"}:
+            mode = "hablando" if args.casefold().strip() == "hablando" else "participantes"
+            await self._reply(room_id, format_voice_state(room_id, mode), message)
+            return
         if command == "dj":
             action, _, rest = args.partition(" ")
             if action.casefold() in {"favorito", "favoritos", "favorite", "favorites"}:
