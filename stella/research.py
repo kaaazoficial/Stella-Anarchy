@@ -477,13 +477,13 @@ def _normalized_query(query: str) -> str:
 def classify_research_intent(query: str) -> dict[str, bool]:
     """Route general research to relevant public sources."""
     text = _normalized_query(query)
-    music = bool(re.search(r"\\b(musica|cancion(?:es)?|album(?:es)?|discografia|artista|banda|grupo musical|soundtrack|bso|ost|music|song|track|recording|musicbrainz|jamendo)\\b", text))
-    nasa = bool(re.search(r"\\b(nasa|astronomia|astronomico|astronomica|espacio|cosmos|planeta|planetas|luna|marte|jupiter|saturno|galaxia|nebulosa|telescopio|exoplaneta|sistema solar|space|astronomy)\\b", text))
-    biomedical = bool(re.search(r"\\b(pubmed|europe pmc|biomedicina|biomedical|medicina|medico|medica|salud|enfermedad(?:es)?|diagnostico|tratamiento(?:s)?|farmacologia|estudio(?:s)? clinico(?:s)?|ensayo clinico|clinical trial|clinical research|medical research|diabetes|alzheimer|cancer|oncologia|tumor(?:es)?|biomarcador(?:es)?|sintoma(?:s)?|terapia(?:s)?|disease(?:s)?|epidemiologia|neurociencia|genetica|genomica|microbiologia|proteina|proteinas|celula|celular|biologia|biology|medicamento|medicamentos|vacuna|vacunas)\\b", text))
-    academic = biomedical or bool(re.search(r"\\b(paper|papers|articulo cientifico|articulos cientificos|estudio cientifico|estudios cientificos|investigacion academica|literatura cientifica|doi|crossref|openalex|revista cientifica|publicacion academica|metaanalisis|meta analisis|scientific study|research paper|academic research|arxiv|preprint|preprints)\\b", text))
-    archive = bool(re.search(r"\\b(internet archive|archive.org|wayback machine|libro|libros|ebook|ebooks|obra de dominio publico|dominio publico|archivo historico|hemeroteca|documento historico|publicacion antigua|old book|historical archive)\\b", text))
-    fandom = bool(re.search(r"\\b(fandom|wiki comunitaria|anime|manga|videojuego|videojuegos|personaje de videojuego|franquicia de ficcion)\\b", text))
-    news = bool(re.search(r"\\b(noticia|noticias|actualidad|ultimas noticias|ultimas novedades|noticias recientes|hoy|ayer|esta semana|esta manana|este mes|breaking news|latest news|current events)\\b", text))
+    music = bool(re.search(r"\b(musica|cancion(?:es)?|album(?:es)?|discografia|artista|banda|grupo musical|soundtrack|bso|ost|music|song|track|recording|musicbrainz|jamendo)\b", text))
+    nasa = bool(re.search(r"\b(nasa|astronomia|astronomico|astronomica|espacio|cosmos|planeta|planetas|luna|marte|jupiter|saturno|galaxia|nebulosa|telescopio|exoplaneta|sistema solar|space|astronomy)\b", text))
+    biomedical = bool(re.search(r"\b(pubmed|europe pmc|biomedicina|biomedical|medicina|medico|medica|salud|enfermedad(?:es)?|diagnostico|tratamiento(?:s)?|farmacologia|estudio(?:s)? clinico(?:s)?|ensayo clinico|clinical trial|clinical research|medical research|diabetes|alzheimer|cancer|oncologia|tumor(?:es)?|biomarcador(?:es)?|sintoma(?:s)?|terapia(?:s)?|disease(?:s)?|epidemiologia|neurociencia|genetica|genomica|microbiologia|proteina|proteinas|celula|celular|biologia|biology|medicamento|medicamentos|vacuna|vacunas)\b", text))
+    academic = biomedical or bool(re.search(r"\b(paper|papers|articulo cientifico|articulos cientificos|estudio cientifico|estudios cientificos|investigacion academica|literatura cientifica|doi|crossref|openalex|revista cientifica|publicacion academica|metaanalisis|meta analisis|scientific study|research paper|academic research|arxiv|preprint|preprints)\b", text))
+    archive = bool(re.search(r"\b(internet archive|archive.org|wayback machine|libro|libros|ebook|ebooks|obra de dominio publico|dominio publico|archivo historico|hemeroteca|documento historico|publicacion antigua|old book|historical archive)\b", text))
+    fandom = bool(re.search(r"\b(fandom|wiki comunitaria|anime|manga|videojuego|videojuegos|personaje de videojuego|franquicia de ficcion)\b", text))
+    news = bool(re.search(r"\b(noticia|noticias|actualidad|ultimas noticias|ultimas novedades|noticias recientes|hoy|ayer|esta semana|esta manana|este mes|breaking news|latest news|current events)\b", text))
     return {"music": music, "nasa": nasa, "academic": academic, "biomedical": biomedical, "news": news, "archive": archive, "fandom": fandom}
 
 
@@ -672,7 +672,7 @@ async def search_crossref(
         "rows": max(1, min(4, int(limit))),
         "select": "DOI,title,author,published,created,type,container-title,URL,abstract",
     }
-    contact = os.getenv("KATHERINE_CONTACT_EMAIL", "").strip()
+    contact = os.getenv("STELLA_CONTACT_EMAIL", "").strip()
     if contact and "@" in contact and len(contact) <= 254:
         params["mailto"] = contact
     response = await request_func(
