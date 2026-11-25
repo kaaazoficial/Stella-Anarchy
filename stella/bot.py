@@ -221,8 +221,10 @@ class StellaBot:
 
     async def _reply(self, room_id: str, text: str, message: dict[str, Any]) -> None:
         reply_id = message.get("messageId") or message.get("id")
+        # Keep chat replies link-free; source names and attribution remain in the text.
+        safe_text = re.sub(r"https?://[^\\s<>]+", "[enlace omitido]", str(text), flags=re.IGNORECASE)
         await self.platform.send_message(
-            str(room_id), format_stella_text(str(text))[:7000],
+            str(room_id), format_stella_text(safe_text)[:7000],
             reply_id=str(reply_id) if reply_id else None,
         )
 
