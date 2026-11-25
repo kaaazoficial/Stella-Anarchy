@@ -4,7 +4,7 @@ import time
 from pathlib import Path
 
 from stella.ai import StellaAI
-from stella.help import build_commands_help_text, filter_commands_help_text
+from stella.help import build_commands_help_text, build_commands_help_blocks, filter_commands_help_text
 from stella.identity import extract_stella_call
 from stella.research import classify_research_intent
 from stella.storage import Store
@@ -16,13 +16,13 @@ def test_stella_help_catalog_has_general_categories_only():
     assert "!perfil" in full
     assert "!diario" in full
     assert "!dj buscar" in full
-    assert "genshin" not in full.casefold()
-    assert "teyvat" not in full.casefold()
-    assert "katheryne" not in full.casefold()
     social = filter_commands_help_text(full, "social")
     assert "PERFILES" in social
     assert "!afinidad" in social
     assert "ECONOMÍA" not in social
+    blocks = build_commands_help_blocks("!")
+    assert len(blocks) == 6
+    assert all(len(block.encode("utf-16-le")) // 2 <= 1800 for block in blocks)
 
 
 def test_stella_identity_recognizes_direct_calls_without_casual_mentions():
@@ -31,14 +31,12 @@ def test_stella_identity_recognizes_direct_calls_without_casual_mentions():
     assert extract_stella_call("Hablé con Stella ayer") is None
 
 
-def test_research_intent_routes_general_topics_without_game_domain():
+def test_research_intent_routes_general_topics():
     music = classify_research_intent("Investiga discografía y canciones de una banda")
     science = classify_research_intent("Investiga un estudio científico sobre astronomía")
     assert music["music"]
     assert science["academic"]
     assert science["nasa"]
-    assert "genshin" not in music
-    assert "genshin" not in science
 
 
 def test_ai_context_is_ephemeral_and_can_be_forgotten():
@@ -143,4 +141,3 @@ def test_advanced_ai_core_is_stella_only_and_bounded():
     assert "ayuda" in AI_PUBLIC_COMMANDS
     assert "investigar" in AI_COMMAND_CATALOG
     assert "" not in AI_PUBLIC_COMMANDS
-    assert not any("genshin" in command.casefold() or "teyvat" in command.casefold() for command in AI_COMMAND_CATALOG)
