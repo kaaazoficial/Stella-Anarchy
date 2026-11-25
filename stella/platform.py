@@ -22,6 +22,7 @@ class AnarchyClient:
         self._sent_message_ids: dict[str, deque[tuple[float, str]]] = defaultdict(deque)
         self._sent_message_ttl = 7 * 24 * 60 * 60
         self._sent_message_limit = 500
+        self.identity: dict[str, Any] = {}
 
     async def close(self) -> None:
         await self._client.aclose()
@@ -95,7 +96,8 @@ class AnarchyClient:
         identity = data.get("bot") or data.get("profile") or data
         if not isinstance(identity, dict):
             return None
-        return identity
+        self.identity = dict(identity)
+        return self.identity
 
     @staticmethod
     def _extract_message_id(payload: Any) -> str | None:
@@ -123,6 +125,21 @@ class AnarchyClient:
             history.popleft()
         if not history:
             self._sent_message_ids.pop(str(thread_id), None)
+
+    def has_sent_message(self, thread_id: str, message_id: str) -> bool:
+        """Check a referenced message against the bounded, content-free send ledger."""
+        room_id = str(thread_id or "").strip()
+        target_id = str(message_id or "").strip()
+        history = self._sent_message_ids.get(room_id) if room_id and target_id else None
+        if not history:
+            return False
+        cutoff = time.time() - self._sent_message_ttl
+        while history and history[0][0] < cutoff:
+            history.popleft()
+        found = any(item_id == target_id for _, item_id in history)
+        if not history:
+            self._sent_message_ids.pop(room_id, None)
+        return found
 
     async def delete_tracked_messages(self, thread_id: str) -> dict[str, int]:
         """Delete only recent IDs returned by this client's successful sends."""

@@ -20,7 +20,7 @@ from stella.services import StellaServices
 from stella.music_voice import MusicVoice
 from stella.storage import Store
 from stella.extra_commands import calculate, datetime_text, CalculationError
-from stella.help import build_commands_help_text, filter_commands_help_text
+from stella.help import build_commands_help_text, build_commands_help_blocks, filter_commands_help_text
 from stella.identity import extract_stella_call, detect_affectionate_expression
 from stella.nexus import interpret_natural_request
 from stella.matching import suggest_command
@@ -138,50 +138,42 @@ class StellaBot:
         if not uid or not content or self._is_bot_message(message):
             return
 
+        direct_call = extract_stella_call(content)
+        mentioned = self._is_stella_mentioned(message)
+        replied = self._is_stella_reply(room_id, message, event)
+        prefixes = tuple(dict.fromkeys((
+            str(self.settings.command_prefix or "!").strip() or "!",
+            "!",
+            "-",
+        )))
+        used_prefix = next((item for item in prefixes if item and content.startswith(item)), None)
+        addressed = direct_call is not None or mentioned or replied or used_prefix is not None
+
         self.store.touch_user(uid, name)
         self.store.record_activity(room_id, uid)
         blocked, reason = self._check_antispam(room_id, uid, content, message)
         if blocked:
             if reason:
-                warning_id = self.store.add_warning(
-                    room_id, uid, name, "stella:auto", "Stella", reason
-                )
-                await self._reply(
-                    room_id,
-                    f"⚠️ {name}, detecté actividad repetitiva. Se registró una advertencia #{warning_id}.",
-                    message,
-                )
+                warning_id = self.store.add_warning(room_id, uid, name, "stella:auto", "Stella", reason)
+                if addressed:
+                    await self._reply(room_id, f"⚠️ {name}, detecté actividad repetitiva. Se registró una advertencia #{warning_id}.", message)
             return
 
-        prefix = self.settings.command_prefix
-        if content.startswith(prefix):
-            await self._command(room_id, uid, name, content[len(prefix):].strip(), message)
+        if not addressed:
+            # Optional voice reading remains opt-in and never produces a chat reply.
+            await self.voice.enqueue_speech(room_id, f"{name}: {content}")
             return
-        addressed = extract_stella_call(content)
-        if addressed is not None:
-            affection = detect_affectionate_expression(addressed)
-            if affection:
-                replies = {
-                    "love": "Qué bonito detalle. Gracias por decírmelo; me alegra acompañarte.",
-                    "care": "Gracias. Aprecio que te preocupes.",
-                    "gratitude": "De nada. Me alegra haber podido ayudarte.",
-                    "compliment": "Muchas gracias por el cumplido. Qué amable.",
-                    "greeting": "¡Hola! ¿En qué puedo ayudarte?",
-                    "miss_you": "Me alegra que hayas vuelto. ¿Qué hacemos hoy?",
-                }
-                await self._reply(room_id, replies.get(affection, "Gracias por tu mensaje."), message)
-                return
-            if not addressed.strip():
-                await self._reply(room_id, "¡Aquí estoy! ¿En qué puedo ayudarte?", message)
-                return
-            natural = interpret_natural_request("Stella " + addressed)
-            if natural and not natural.startswith("asistente "):
-                await self._command(room_id, uid, name, natural, message)
-            else:
-                prompt = natural.removeprefix("asistente ").strip() if natural else addressed
-                await self._ai_assist(room_id, uid, name, prompt, message)
+
+        request_text = direct_call if direct_call is not None else content
+        prefix = next((item for item in prefixes if item and request_text.startswith(item)), None)
+        if prefix:
+            await self._command(room_id, uid, name, request_text[len(prefix):].strip(), message)
             return
-        affection = detect_affectionate_expression(content)
+        if not request_text.strip():
+            await self._reply(room_id, "¡Aquí estoy! ¿En qué puedo ayudarte?", message)
+            return
+
+        affection = detect_affectionate_expression(request_text)
         if affection:
             replies = {
                 "love": "Qué bonito detalle. Gracias por decírmelo; me alegra acompañarte.",
@@ -193,9 +185,75 @@ class StellaBot:
             }
             await self._reply(room_id, replies.get(affection, "Gracias por tu mensaje."), message)
             return
-        await self.voice.enqueue_speech(room_id, f"{name}: {content}")
-        await self._check_auto_replies(room_id, content, message)
+        if await self._check_auto_replies(room_id, request_text, message):
+            return
+        natural = interpret_natural_request("Stella " + request_text)
+        if natural and not natural.startswith("asistente "):
+            await self._command(room_id, uid, name, natural, message)
+        else:
+            prompt = natural.removeprefix("asistente ").strip() if natural else request_text
+            await self._ai_assist(room_id, uid, name, prompt, message)
 
+    def _stella_identity_ids(self) -> set[str]:
+        identity = getattr(self.platform, "identity", {}) or {}
+        if not isinstance(identity, dict):
+            return set()
+        return {str(identity.get(k) or "").strip() for k in ("uid", "userId", "id", "botId", "bot_id") if str(identity.get(k) or "").strip()}
+
+    def _is_stella_mentioned(self, message: dict[str, Any]) -> bool:
+        mentions = message.get("mentions") or []
+        if isinstance(mentions, dict):
+            mentions = mentions.get("users") or mentions.get("items") or list(mentions.values())
+        if not isinstance(mentions, (list, tuple)):
+            return False
+        ids = self._stella_identity_ids()
+        for item in mentions:
+            if isinstance(item, str):
+                if item.strip().casefold() == "stella" or item.strip() in ids:
+                    return True
+            elif isinstance(item, dict):
+                name = str(item.get("nickname") or item.get("displayName") or item.get("username") or item.get("name") or "").strip().casefold()
+                item_ids = {str(item.get(k) or "").strip() for k in ("uid", "userId", "user_id", "id", "botId", "bot_id") if str(item.get(k) or "").strip()}
+                if name in {"stella", "@stella"} or bool(item_ids & ids):
+                    return True
+        return False
+
+    @staticmethod
+    def _reply_reference_objects(*sources: dict[str, Any]) -> list[dict[str, Any]]:
+        result = []
+        for source in sources:
+            for key in ("replyMessage", "reply_message", "replyTo", "reply_to", "reference", "messageReference", "message_reference", "referencedMessage", "referenced_message", "quotedMessage", "quoted_message", "reply"):
+                value = source.get(key)
+                if isinstance(value, dict):
+                    nested = value.get("message")
+                    result.append(nested if isinstance(nested, dict) else value)
+        return result
+
+    def _is_stella_reply(self, room_id: str, message: dict[str, Any], event: dict[str, Any] | None = None) -> bool:
+        sources = (message, event or {})
+        ids = set()
+        for source in sources:
+            for key in ("replyMessageId", "reply_message_id", "replyToMessageId", "reply_to_message_id", "referencedMessageId", "referenced_message_id", "quotedMessageId", "quoted_message_id"):
+                value = source.get(key)
+                if isinstance(value, (str, int)) and str(value).strip():
+                    ids.add(str(value).strip())
+        objects = self._reply_reference_objects(*sources)
+        for item in objects:
+            for key in ("messageId", "message_id", "id"):
+                value = item.get(key)
+                if isinstance(value, (str, int)) and str(value).strip():
+                    ids.add(str(value).strip())
+        has_sent = getattr(self.platform, "has_sent_message", None)
+        if callable(has_sent) and any(has_sent(room_id, item_id) for item_id in ids):
+            return True
+        expected = self._stella_identity_ids()
+        for item in objects:
+            author = item.get("author") or item.get("sender") or item.get("user")
+            if isinstance(author, dict):
+                author_ids = {str(author.get(k) or "").strip() for k in ("uid", "userId", "user_id", "id", "botId", "bot_id") if str(author.get(k) or "").strip()}
+                if author_ids & expected:
+                    return True
+        return False
     @staticmethod
     def _is_bot_message(message: dict[str, Any]) -> bool:
         author = message.get("author") or {}
@@ -266,7 +324,7 @@ class StellaBot:
             queue.popleft()
         queue.append((now, digest))
         repeats = sum(1 for _, item in queue if item == digest)
-        links = len(re.findall(r"(?:https?://|www\\.)\\S+", content, flags=re.I))
+        links = len(re.findall(r"(?:https?://|www\.)\S+", content, flags=re.I))
         mentions = (message or {}).get("mentions") or []
         mention_count = len(mentions) if isinstance(mentions, list) else 0
         reason = ""
@@ -284,7 +342,9 @@ class StellaBot:
             return True, None
         return False, None
 
-    async def _check_auto_replies(self, room_id: str, content: str, message: dict[str, Any]) -> None:
+    async def _check_auto_replies(self, room_id: str, content: str, message: dict[str, Any]) -> bool:
+        if self.store.get_setting(room_id, "auto_replies_enabled", "1") != "1":
+            return False
         normalized = " ".join(content.casefold().split())
         now = time.monotonic()
         for rule in self.store.auto_reply_rules(room_id):
@@ -292,16 +352,13 @@ class StellaBot:
             if trigger and normalized == trigger:
                 key = (room_id, int(rule["id"]))
                 if len(self._auto_reply_cooldown) >= 3000:
-                    self._auto_reply_cooldown = {
-                        existing: expiry
-                        for existing, expiry in self._auto_reply_cooldown.items()
-                        if expiry > now
-                    }
+                    self._auto_reply_cooldown = {existing: expiry for existing, expiry in self._auto_reply_cooldown.items() if expiry > now}
                 if self._auto_reply_cooldown.get(key, 0) > now:
                     continue
                 self._auto_reply_cooldown[key] = now + 15
                 await self._reply(room_id, str(rule["response_text"]), message)
-                return
+                return True
+        return False
 
     async def _command(
         self, room_id: str, uid: str, name: str, raw: str, message: dict[str, Any]
@@ -522,10 +579,29 @@ class StellaBot:
         if not self._is_admin(uid):
             await self._reply(room_id, "No tienes permisos para abrir el panel de administración.", message)
             return
-        activity = self.store.activity_summary(room_id)
+        section = args.casefold().strip().split(maxsplit=1)[0] if args.strip() else "resumen"
+        if section == "actividad":
+            await self._activity(room_id, uid, name, "", message)
+            return
+        if section == "antispam":
+            await self._antispam(room_id, uid, name, "estado", message)
+            return
+        if section in {"avisos", "advertencias"}:
+            await self._warnings(room_id, uid, name, "", message)
+            return
+        if section == "historial":
+            records = self.store.warnings(room_id)
+            lines = ["⚖️ HISTORIAL DE MODERACIÓN"] + [f"#{r['id']} · {r['target_name']} · {'activa' if r['active'] else 'retirada'} · {r['reason']}" for r in records[:10]]
+            await self._reply(room_id, "\n".join(lines) if records else "El historial está vacío.", message)
+            return
+        if section not in {"resumen", "summary"}:
+            await self._reply(room_id, "Uso: !admin resumen|actividad|antispam|avisos|historial.", message)
+            return
+        activity = self.store.activity_summary(room_id, days=7)
         total = sum(int(row.get("total_messages", 0)) for row in activity)
         antispam = self.store.get_setting(room_id, "antispam_enabled", "1") == "1"
-        await self._reply(room_id, f"✦ CENTRO DE ADMINISTRACIÓN · STELLA\nMensajes agregados recientes: {total}\nAdvertencias: {len(self.store.warnings(room_id))}\nEncuestas: {len(self.store.list_polls(room_id))}\nEventos: {len(self.store.list_events(room_id))}\nAntispam: {'activado' if antispam else 'desactivado'}\nUsa !actividad para el informe detallado.", message)
+        auto = self.store.get_setting(room_id, "auto_replies_enabled", "1") == "1"
+        await self._reply(room_id, f"✦ CENTRO DE ADMINISTRACIÓN · STELLA\nMensajes últimos 7 días: {total}\nAdvertencias: {len(self.store.warnings(room_id))}\nEncuestas: {len(self.store.list_polls(room_id))}\nEventos: {len(self.store.list_events(room_id))}\nAntispam: {'activado' if antispam else 'desactivado'}\nRespuestas automáticas: {'activadas' if auto else 'desactivadas'}", message)
 
     async def _sources(self, room_id, uid, name, args, message):
         if not self._is_admin(uid):
@@ -738,7 +814,7 @@ class StellaBot:
 
     async def _pay(self, room_id, uid, name, args, message):
         target = self._mentioned_user(message)
-        values = re.findall(r"\\d+", args)
+        values = re.findall(r"\d+", args)
         if not target or not values:
             await self._reply(room_id, "Uso: !pagar @usuario <cantidad>.", message)
             return
@@ -848,7 +924,7 @@ class StellaBot:
         await self._reply(room_id, f"🔥 {target}, {random.choice(lines)}", message)
 
     async def _ship(self, room_id, uid, name, args, message):
-        names = [part.strip() for part in re.split(r"\\s*(?:\\+|,|\\by\\b)\\s*", args, flags=re.I) if part.strip()]
+        names = [part.strip() for part in re.split(r"\s*(?:\+|,|\by\b)\s*", args, flags=re.I) if part.strip()]
         if len(names) != 2:
             await self._reply(room_id, "Uso: !ship <persona 1> + <persona 2>", message)
             return
@@ -961,8 +1037,15 @@ class StellaBot:
             await self._reply(room_id, f"Prueba otra vez: el número es {hint}. Intentos: {game['attempts']}/6.", message)
 
     async def _help_command(self, room_id, uid, name, args, message):
-        text = build_commands_help_text(self.settings.command_prefix)
-        await self._reply(room_id, filter_commands_help_text(text, args or None), message)
+        prefix = self.settings.command_prefix
+        if args.strip():
+            text = build_commands_help_text(prefix)
+            await self._reply(room_id, filter_commands_help_text(text, args), message)
+            return
+        blocks = build_commands_help_blocks(prefix)
+        await self._reply(room_id, blocks[0], message)
+        for block in blocks[1:]:
+            await self.platform.send_message(room_id, format_stella_text(block)[:1800])
 
     async def _ping(self, room_id, uid, name, args, message):
         await self._reply(room_id, "Pong. Stella está activa.", message)
@@ -1016,8 +1099,8 @@ class StellaBot:
                 totals[key] += int(result.get(key, 0))
         await self._reply(
             room_id,
-            "🧹 LIMPIEZA DE MENSAJES PROPIOS\\n"
-            f"Identificados: {totals['attempted']} · eliminados: {totals['deleted']} · pendientes por error: {totals['failed']}\\n"
+            "🧹 LIMPIEZA DE MENSAJES PROPIOS\n"
+            f"Identificados: {totals['attempted']} · eliminados: {totals['deleted']} · pendientes por error: {totals['failed']}\n"
             "Solo se usan IDs confirmados por Anarchy y conservados temporalmente en memoria; no se guardan textos ni se eliminan mensajes ajenos.",
             message,
         )
@@ -1128,11 +1211,11 @@ class StellaBot:
         elif action in {"estado", "config", "configuracion", ""}:
             cfg = self._antispam_config(room_id)
             response = (
-                "🛡️ CONFIGURACIÓN ANTISPAM\\n"
-                f"Estado: {'activado' if cfg['enabled'] else 'desactivado'}\\n"
-                f"Límite: {cfg['max_messages']} mensajes / {cfg['window_seconds']} s\\n"
-                f"Repeticiones: {cfg['repeat_limit']}\\n"
-                f"Máximo de enlaces: {cfg['max_links']} · menciones: {cfg['max_mentions']}\\n"
+                "🛡️ CONFIGURACIÓN ANTISPAM\n"
+                f"Estado: {'activado' if cfg['enabled'] else 'desactivado'}\n"
+                f"Límite: {cfg['max_messages']} mensajes / {cfg['window_seconds']} s\n"
+                f"Repeticiones: {cfg['repeat_limit']}\n"
+                f"Máximo de enlaces: {cfg['max_links']} · menciones: {cfg['max_mentions']}\n"
                 f"Usos: {self.settings.command_prefix}antispam on|off; limite N; ventana N; "
                 "repeticiones N; enlaces N; menciones N."
             )
@@ -1144,6 +1227,8 @@ class StellaBot:
         parts = args.split(maxsplit=1)
         action = parts[0].casefold() if parts else ""
         rest = parts[1] if len(parts) > 1 else ""
+        if action not in {"crear", "create", "votar", "vote", "resultado", "resultados", "results", "cerrar", "close", "lista", "listar", "list"} and "|" in args:
+            action, rest = "crear", args
         if action in {"crear", "create"}:
             values = split_arguments(rest)
             if len(values) < 3 or not values[0]:
@@ -1199,7 +1284,7 @@ class StellaBot:
 
     async def _event(self, room_id, uid, name, args, message):
         parts = args.split(maxsplit=1)
-        action = parts[0].casefold() if parts else ""
+        action = parts[0].casefold() if parts else "lista"
         rest = parts[1] if len(parts) > 1 else ""
         if action in {"crear", "create"}:
             values = split_arguments(rest)
@@ -1256,48 +1341,56 @@ class StellaBot:
         if not self._is_admin(uid):
             await self._reply(room_id, "Solo el equipo administrativo puede consultar la actividad.", message)
             return
-        rows = self.store.activity_summary(room_id)
-        if not rows:
-            await self._reply(room_id, "Todavía no hay actividad agregada en los últimos siete días.", message)
+        period = args.casefold().strip()
+        if period not in {"", "hoy", "semana"}:
+            await self._reply(room_id, "Uso: !actividad hoy|semana.", message)
             return
-        lines = ["📈 ACTIVIDAD · ÚLTIMOS SIETE DÍAS"]
-        lines.extend(f"{index}. UID {row['user_uid']}: {row['total_messages']} mensajes" for index, row in enumerate(rows, 1))
+        days = 1 if period == "hoy" else 7
+        rows = self.store.activity_summary(room_id, days=days)
+        if not rows:
+            await self._reply(room_id, "No hay actividad agregada para ese periodo.", message)
+            return
+        lines = ["📈 ACTIVIDAD · " + ("HOY" if days == 1 else "ÚLTIMOS SIETE DÍAS")]
+        lines.extend(f"{i}. UID {row['user_uid']}: {row['total_messages']} mensajes" for i, row in enumerate(rows, 1))
         await self._reply(room_id, "\n".join(lines), message)
 
     async def _auto_reply(self, room_id, uid, name, args, message):
         if not self._is_admin(uid):
             await self._reply(room_id, "Solo el equipo administrativo puede configurar respuestas automáticas.", message)
             return
+        command = str(message.get("_stella_command") or "").casefold()
         parts = args.split(maxsplit=1)
         action = parts[0].casefold() if parts else ""
         rest = parts[1] if len(parts) > 1 else ""
-        if action in {"añadir", "agregar", "add"}:
+        enabled = self.store.get_setting(room_id, "auto_replies_enabled", "1") == "1"
+        if command == "respuestas" and action in {"", "estado", "status"}:
+            await self._reply(room_id, f"Respuestas automáticas: {'activadas' if enabled else 'desactivadas'}.", message)
+        elif command == "respuestas" and action in {"on", "activar", "encender"}:
+            self.store.set_setting(room_id, "auto_replies_enabled", "1")
+            await self._reply(room_id, "Respuestas automáticas activadas.", message)
+        elif command == "respuestas" and action in {"off", "desactivar", "apagar"}:
+            self.store.set_setting(room_id, "auto_replies_enabled", "0")
+            await self._reply(room_id, "Respuestas automáticas desactivadas.", message)
+        elif action in {"añadir", "agregar", "add"}:
             values = split_arguments(rest, 2)
             if len(values) < 2 or not values[0] or not values[1]:
                 await self._reply(room_id, "Uso: !respuesta añadir palabra o frase | respuesta", message)
                 return
             rule_id = self.store.add_auto_reply(room_id, values[0], values[1])
-            await self._reply(room_id, f"Respuesta automática #{rule_id} creada. Se activa cuando el mensaje coincide exactamente con el disparador.", message)
+            await self._reply(room_id, f"Respuesta automática #{rule_id} creada. Solo se aplica a llamadas dirigidas a Stella o respuestas a sus mensajes.", message)
         elif action in {"quitar", "eliminar", "remove"}:
             try:
                 rule_id = int(rest.strip())
             except ValueError:
-                await self._reply(room_id, "Uso: !respuesta quitar <ID>", message)
+                await self._reply(room_id, "Uso: !respuesta eliminar <ID>", message)
                 return
             await self._reply(room_id, "Respuesta eliminada." if self.store.remove_auto_reply(room_id, rule_id) else "No encontré esa respuesta.", message)
         elif action in {"lista", "listar", "list"}:
             rules = self.store.auto_reply_rules(room_id)
             lines = ["🤖 RESPUESTAS AUTOMÁTICAS"] + [f"#{r['id']} · {r['trigger_text']} → {r['response_text']}" for r in rules]
-            await self._reply(room_id, "\n".join(lines), message)
+            await self._reply(room_id, "\n".join(lines) if rules else "No hay respuestas automáticas configuradas.", message)
         else:
-            await self._reply(room_id, "Uso: !respuesta añadir|quitar|lista ...", message)
-
-    async def _translate(self, room_id, uid, name, args, message):
-        language, separator, text = args.partition("|")
-        if not separator:
-            await self._reply(room_id, f"Uso: {self.settings.command_prefix}traducir <idioma> | <texto>", message)
-            return
-        await self._reply(room_id, await self.ai_core.task_response("translation", text[:5000], self.services.ai_request, extra_instructions=f"Idioma de destino: {language.strip()[:80]}.", rate_key=uid), message)
+            await self._reply(room_id, "Usos: !respuestas estado|on|off · !respuesta añadir|lista|eliminar ID.", message)
 
     async def _ai(self, room_id, uid, name, args, message):
         action, _, query = args.partition(" ")
@@ -1312,27 +1405,32 @@ class StellaBot:
             await self._reply(room_id, "Contexto temporal eliminado." if removed or core_removed else "No había contexto temporal activo en esta sala.", message)
             return
         if action in {"ayuda", "help"}:
-            await self._reply(room_id, "🤖 ASISTENTE STELLA\n!ia <consulta> o !asistente <consulta>\n!ia preguntar <consulta> para formular una pregunta directa.\n!ia estado consulta proveedores y límites.\n!ia olvidar elimina el contexto temporal de esta sala.\nEl contexto es volátil, dura como máximo cinco minutos y nunca se guarda en la base de datos.", message)
+            await self._reply(room_id, "🤖 ASISTENTE STELLA\n!ia <consulta> o !asistente <consulta>\n!ia preguntar <consulta> · !ia estado · !ia olvidar\n!ia probar|guardian|diagnostico [ADMIN].", message)
+            return
+        if action in {"probar", "guardian", "diagnostico", "diagnostics"} and not self._is_admin(uid):
+            await self._reply(room_id, "Este control de IA requiere un UID autorizado en ADMIN_UIDS.", message)
+            return
+        if action == "probar":
+            answer = await self.ai.ask("Responde únicamente OK.", system="Prueba de conectividad. Responde únicamente OK.")
+            ok = bool(answer) and not answer.casefold().startswith(("no pude", "no hay proveedor"))
+            await self._reply(room_id, ("Prueba de IA superada. " if ok else "La prueba de IA falló. ") + self.ai.status(), message)
             return
         task_map = {
-            "guardian": ("guardian", query, ""),
-            "diagnostico": ("diagnostics", query, ""),
-            "diagnostics": ("diagnostics", query, ""),
+            "guardian": ("guardian", query or "Realiza una revisión preventiva del estado de seguridad.", ""),
+            "diagnostico": ("diagnostics", query or "Realiza un diagnóstico general de capacidades y límites.", ""),
+            "diagnostics": ("diagnostics", query or "Realiza un diagnóstico general de capacidades y límites.", ""),
             "resumir": ("chat_summary", query, ""),
-            "corregir": ("text_analysis", query, "Corrige ortografía, gramática y concordancia sin alterar el significado."),
-            "reescribir": ("text_analysis", query, "Reescribe con naturalidad y claridad, conservando todos los datos."),
+            "corregir": ("text_analysis", query, "Corrige ortografía y gramática sin cambiar el significado."),
+            "reescribir": ("text_analysis", query, "Reescribe con claridad conservando todos los datos."),
             "extraer": ("text_analysis", query, "Extrae nombres, fechas, cifras y puntos explícitos."),
-            "contradicciones": ("text_analysis", query, "Identifica contradicciones internas y distingue datos incompatibles de datos no relacionados."),
+            "contradicciones": ("text_analysis", query, "Identifica contradicciones internas."),
         }
         if action in task_map:
             task, task_text, extra = task_map[action]
             if not task_text.strip():
                 await self._reply(room_id, f"Uso: !ia {action} <texto>.", message)
                 return
-            answer = await self.ai_core.task_response(
-                task, task_text, self.services.ai_request,
-                extra_instructions=extra, rate_key=uid,
-            )
+            answer = await self.ai_core.task_response(task, task_text, self.services.ai_request, extra_instructions=extra, rate_key=uid)
             await self._reply(room_id, answer, message)
             return
         prompt = query.strip() if action in {"preguntar", "ask"} else args.strip()
@@ -1359,6 +1457,9 @@ class StellaBot:
             command, args = "noleer", ""
         if command == "dj":
             action, _, rest = args.partition(" ")
+            if action.casefold() in {"favorito", "favoritos", "favorite", "favorites", "probar", "test"} and not self._is_admin(uid):
+                await self._reply(room_id, "Este control del DJ requiere permisos de administrador.", message)
+                return
             if action.casefold() in {"favorito", "favoritos", "favorite", "favorites"}:
                 playlist = self.store.list_playlists(room_id, uid)
                 if not any(row["name"].casefold() == "favoritos" for row in playlist):
