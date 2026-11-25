@@ -86,3 +86,32 @@ def test_activity_is_aggregated_per_day_and_room(tmp_path: Path):
     store.record_activity("room-b", "uid-1")
     assert store.activity_summary("room-a")[0]["total_messages"] == 2
     assert store.activity_summary("room-b")[0]["total_messages"] == 1
+
+
+
+def test_log_bot_identity_reports_bot_id_and_uid(caplog):
+    import logging
+
+    from main import log_bot_identity
+
+    with caplog.at_level(logging.INFO, logger="stella"):
+        log_bot_identity({
+            "name": "Stella",
+            "botId": "bot-id-test",
+            "uid": "account-uid-test",
+        })
+
+    assert "botId=bot-id-test" in caplog.text
+    assert "uid=account-uid-test" in caplog.text
+    assert "token" not in caplog.text.casefold()
+
+
+def test_log_bot_identity_warns_when_bot_id_is_missing(caplog):
+    import logging
+
+    from main import log_bot_identity
+
+    with caplog.at_level(logging.WARNING, logger="stella"):
+        log_bot_identity({"uid": "account-uid-test"})
+
+    assert "returned no botId" in caplog.text
