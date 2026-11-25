@@ -58,4 +58,5 @@ class StellaSettings(BaseSettings):
         return str(value or "").strip() or "es-CL-CatalinaNeural"
 
 
-Settings = StellaSettings\nSETTINGS = StellaSettings()
+Settings = StellaSettings
+SETTINGS = StellaSettings()
