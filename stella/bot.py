@@ -355,8 +355,11 @@ class StellaBot:
                     message,
                 )
             return
-        if not request_text.strip():
-            await self._reply(room_id, "¡Aquí estoy! ¿En qué puedo ayudarte?", message)
+        # A direct call containing only Stella's name (possibly with
+        # punctuation or a short greeting) is a presence check, never an AI query.
+        normalized_call = re.sub(r"[\s,;:!?¡¿.]+", "", request_text).casefold()
+        if not normalized_call or normalized_call in {"hola", "holi", "hey", "ey", "oye", "buenas", "buenosdias", "buenastardes", "buenasnoches"}:
+            await self._reply(room_id, "¡Aquí estoy! ¿Qué necesitas?", message)
             return
 
         affection = detect_affectionate_expression(request_text)
