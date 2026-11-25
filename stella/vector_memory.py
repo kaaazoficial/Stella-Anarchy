@@ -144,18 +144,51 @@ class VectorMemory:
                 json={"vectors": {"size": self.dimensions, "distance": "Cosine"}},
             )
             response.raise_for_status()
+            # Read the newly-created collection so its payload schema is checked
+            # through the same path as an existing collection.
+            response = await client.get(
+                f"{self.url}/collections/{self.collection}",
+                headers=self._headers(),
+            )
+            response.raise_for_status()
         else:
             response.raise_for_status()
-            size = (
-                response.json()
-                .get("result", {})
-                .get("config", {})
-                .get("params", {})
-                .get("vectors", {})
-                .get("size")
+
+        collection = response.json().get("result", {})
+        size = (
+            collection.get("config", {})
+            .get("params", {})
+            .get("vectors", {})
+            .get("size")
+        )
+        if size is not None and int(size) != self.dimensions:
+            raise RuntimeError("Qdrant collection has an incompatible vector size")
+
+        # Qdrant Cloud strict mode rejects filters on fields without payload
+        # indexes. Stella filters every query by room and expiry, and deletion
+        # by room and user, so these three indexes are part of the schema.
+        payload_schema = collection.get("payload_schema", {})
+        required_indexes = {
+            "room_id": "keyword",
+            "uid": "keyword",
+            "expires_at": "integer",
+        }
+        for field_name, field_type in required_indexes.items():
+            existing = payload_schema.get(field_name)
+            if existing:
+                existing_type = existing.get("data_type") if isinstance(existing, dict) else None
+                if existing_type and existing_type != field_type:
+                    raise RuntimeError(
+                        f"Qdrant payload index {field_name} has incompatible type"
+                    )
+                continue
+            index_response = await client.put(
+                f"{self.url}/collections/{self.collection}/index?wait=true",
+                headers=self._headers(),
+                json={"field_name": field_name, "field_schema": field_type},
             )
-            if size is not None and int(size) != self.dimensions:
-                raise RuntimeError("Qdrant collection has an incompatible vector size")
+            index_response.raise_for_status()
+
         self.ready = True
 
     async def index_message(self, room: str, uid: str, name: str, content: str) -> None:
