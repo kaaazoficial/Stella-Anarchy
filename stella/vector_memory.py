@@ -38,7 +38,7 @@ class VectorMemory:
 
     async def _embed(self, text: str, query: bool = False) -> list[float]:
         client = await self._http()
-        prefix = "task: search result | query: " if query else "title: none | text: 
+        prefix = "task: search result | query: " if query else "title: none | text: "
         response = await client.post(
             f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:embedContent",
             headers={"x-goog-api-key": self.gemini_key},
