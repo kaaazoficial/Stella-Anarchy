@@ -60,7 +60,7 @@ _AMBIGUOUS_ACCENT_WORDS = frozenset({
 
 _DOMAIN_WORDS = frozenset({
     "anarchy", "stella",
-    "katherin", "katherina", "kathrine", "Stella", "cyno", "nahida",
+    "Stella", "cyno", "nahida",
     "baizhu", "furina", "neuvillette", "arlecchino", "clorinde", "navia",
     "alhaitham", "kaveh", "tighnari", "collei", "dehya", "nilou", "candace",
     "layla", "faruzan", "wanderer", "scaramouche", "zhongli", "raiden",
