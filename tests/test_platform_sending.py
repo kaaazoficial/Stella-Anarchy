@@ -62,3 +62,56 @@ def test_send_message_stops_after_bounded_rate_limit_retries(monkeypatch):
         assert 2.0 in sleeps and 4.0 in sleeps and 8.0 in sleeps
 
     asyncio.run(scenario())
+
+
+
+def test_send_message_includes_valid_anarchy_buttons_and_returns_message_id(monkeypatch):
+    async def scenario():
+        async def fake_sleep(_delay):
+            return None
+
+        monkeypatch.setattr("stella.platform.asyncio.sleep", fake_sleep)
+        client, calls = _client_with_responses([
+            {"ok": True, "status": 200, "data": {"message": {"messageId": "90211"}}},
+        ])
+        result = await client.send_message(
+            "room", "Selecciona una pista",
+            buttons=[{"id": "play_1", "label": "▶ 1. Instrumental"}],
+            return_message_id=True,
+        )
+        assert result == "90211"
+        assert calls[0][2]["buttons"] == [{"id": "play_1", "label": "▶ 1. Instrumental"}]
+
+    asyncio.run(scenario())
+
+
+def test_send_message_rejects_more_than_five_or_invalid_buttons():
+    async def scenario():
+        client, calls = _client_with_responses([])
+        too_many = [{"id": f"p{i}", "label": f"Pista {i}"} for i in range(6)]
+        invalid_id = [{"id": "bad id", "label": "Pista"}]
+        assert await client.send_message("room", "menu", buttons=too_many) is False
+        assert await client.send_message("room", "menu", buttons=invalid_id) is False
+        assert calls == []
+
+    asyncio.run(scenario())
+
+
+def test_edit_message_removes_buttons_using_documented_patch_route():
+    async def scenario():
+        client = object.__new__(AnarchyClient)
+        calls = []
+
+        async def request(method, path, *, json_body=None):
+            calls.append((method, path, json_body))
+            return {"ok": True, "status": 200, "data": {}}
+
+        client.request = request
+        assert await client.edit_message("room", "90211", remove_buttons=True)
+        assert calls == [(
+            "PATCH",
+            "/threads/room/messages/90211",
+            {"removeButtons": True},
+        )]
+
+    asyncio.run(scenario())
