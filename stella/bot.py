@@ -41,16 +41,21 @@ _GLOBAL_CHAT_SILENCE_KEY = "chat_silence"
 
 _SILENCE_REQUESTS = frozenset({
     "no le hables a nadie",
+    "no les hables a nadie",
     "no hables con nadie",
     "no respondas a nadie",
+    "no le respondas a nadie",
     "no contestes a nadie",
+    "no le contestes a nadie",
     "no interactues con nadie",
     "no respondas mensajes",
+    "no digas nada",
     "quedate callada",
     "quedate en silencio",
     "mantente en silencio",
     "guarda silencio",
     "entra en modo silencio",
+    "entra en silencio",
     "modo silencio",
     "silencio global",
     "callate",
@@ -68,6 +73,7 @@ _RESUME_REQUESTS = frozenset({
     "sal del silencio",
     "quita el silencio",
     "reactiva tus respuestas",
+    "deja el modo silencio",
 })
 
 
@@ -158,6 +164,8 @@ class StellaBot:
             if not unicodedata.combining(character)
         )
         normalized = re.sub(r"[^a-z0-9]+", " ", normalized).strip()
+        normalized = re.sub(r"^(?:oye )?stella ", "", normalized).strip()
+        normalized = re.sub(r" stella$", "", normalized).strip()
         if normalized.startswith("por favor "):
             normalized = normalized.removeprefix("por favor ").strip()
         for suffix in (" por favor", " por ahora"):
@@ -184,6 +192,9 @@ class StellaBot:
         self.store.set_setting(
             _GLOBAL_SETTINGS_ROOM_ID, _GLOBAL_CHAT_SILENCE_KEY, "1"
         )
+        stop_speech = getattr(self.voice, "stop_all_speech", None)
+        if callable(stop_speech):
+            await stop_speech()
         await self._reply(
             room_id,
             "Modo de silencio global activado. No responderé en ningún chat hasta que uses !hablarchat.",
@@ -257,13 +268,6 @@ class StellaBot:
             content,
             flags=re.IGNORECASE,
         )
-        addressed = (
-            direct_call is not None
-            or mentioned
-            or replied
-            or prefixed_command is not None
-            or prefixed_named_call is not None
-        )
         request_text = (
             prefixed_named_call.group(1).strip()
             if prefixed_named_call
@@ -271,6 +275,18 @@ class StellaBot:
             else content
         )
         prefix = next((item for item in prefixes if item and request_text.startswith(item)), None)
+        owner_control_request = self._is_owner(uid) and (
+            self._is_silence_request(request_text)
+            or self._is_resume_request(request_text)
+        )
+        addressed = (
+            direct_call is not None
+            or mentioned
+            or replied
+            or prefixed_command is not None
+            or prefixed_named_call is not None
+            or owner_control_request
+        )
 
         # Global silence suppresses chat replies, automatic replies and voice reading.
         # Only the configured owner can use the explicit wake-up command while muted.
