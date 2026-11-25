@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sqlite3
 import time
+from datetime import date
 from pathlib import Path
 from typing import Any
 
@@ -181,7 +182,7 @@ class Store:
 
         stamp = time.time() if now is None else float(now)
         with self._session(self.connect()) as db:
-            return cleanup_database_retention(db, now=stamp)
+            return cleanup_database_retention(db, now=stamp, today=date.today())
 
 
     def touch_user(self, uid: str, nickname: str = "Usuario", now: float | None = None) -> None:
