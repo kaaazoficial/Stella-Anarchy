@@ -145,9 +145,20 @@ async def receive_webhook(request: Request) -> dict[str, bool]:
     while len(seen_events) > SEEN_EVENTS_LIMIT:
         seen_events.popitem(last=False)
 
+    METRICS["webhook_events"] += 1
+    if str(event.get("type") or "").casefold() in {"message", "message.created", "message_create"}:
+        METRICS["text_messages_received"] += 1
+        msg = event.get("message") or {}
+        content = str(msg.get("content") or "")
+        if content.startswith(settings.command_prefix):
+            METRICS["commands_received"] += 1
+            if content.split(maxsplit=1)[0].casefold() in {settings.command_prefix + "ia", settings.command_prefix + "asistente"}:
+                METRICS["ai_requests"] += 1
     try:
         await bot.handle_event(event)
+        METRICS["webhook_dispatch_completed"] += 1
     except Exception:
+        METRICS["webhook_dispatch_failures"] += 1
         log.exception("Event processing failed; event id=%s", key[:80])
         # Acknowledge authenticated events to avoid platform retry storms.
     return {"ok": True}
