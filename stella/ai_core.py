@@ -47,6 +47,7 @@ AI_ADMIN_COMMANDS = frozenset({
     "laboratorio", "autotest", "admin", "saludfuentes",
     "respuestas", "respuesta", "advertir", "advertencias",
     "quitaradvertencia", "antispam", "perfilbot", "avatarbot",
+    "eliminarmensajes",
 })
 
 # Backwards-compatible public allowlist. Privileged tools are added only for
@@ -68,6 +69,7 @@ AI_DIRECT_ACTION_COMMANDS = frozenset({
     "bio", "miestado", "interaccion", "regalo", "evento", "roast",
     "pagar", "transferir", "advertir", "quitaradvertencia",
     "antispam", "respuestas", "respuesta", "perfilbot", "avatarbot",
+    "eliminarmensajes",
 })
 
 AI_COMMAND_CATALOG = {

@@ -108,6 +108,7 @@ class MusicVoice:
 
     def __init__(self, platform: Any) -> None:
         self.platform = platform
+        self.store = None
         self.http = httpx.AsyncClient(
             timeout=httpx.Timeout(40.0, connect=8.0),
             follow_redirects=True,
@@ -249,6 +250,9 @@ class MusicVoice:
                     "tts_voice": os.getenv("TTS_VOICE", "es-CL-CatalinaNeural"),
                     "tts_rate": "+0%",
                     "tts_volume": 0.75,
+                    "last_tts_volume": 0.75,
+                    "tts_read_links": bool(self.store and self.store.get_setting(thread_id, "tts_read_links", "0") == "1"),
+                    "tts_read_mentions": bool(self.store and self.store.get_setting(thread_id, "tts_read_mentions", "0") == "1"),
                     "created_at": time.monotonic(),
                 }
                 state["music_paused"].set()
@@ -664,7 +668,7 @@ class MusicVoice:
         state = self.rooms.get(room_id)
         if not state or not state.get("connected") or not state.get("tts_enabled"):
             return
-        text = self._clean_speech(content)
+        text = self._clean_speech(content, read_links=bool(state.get('tts_read_links')), read_mentions=bool(state.get('tts_read_mentions')))
         if not text:
             return
         queue = state["speech_queue"]
@@ -681,11 +685,22 @@ class MusicVoice:
         await self._start_speech_worker(room_id, state)
 
     @staticmethod
-    def _clean_speech(value: str) -> str:
-        text = re.sub(r"https?://\S+|www\.\S+", " enlace ", str(value or ""), flags=re.I)
+    def _clean_speech(value: str, *, read_links: bool = False, read_mentions: bool = False) -> str:
+        text = str(value or "")
+        if read_links:
+            def describe_link(match: re.Match) -> str:
+                raw = match.group(0).rstrip(".,;:!?)]}")
+                host = (urlparse(raw if "://" in raw else "https://" + raw).hostname or "").removeprefix("www.")
+                return " enlace a " + host if host else " enlace "
+            text = re.sub(r"https?://\S+|www\.\S+", describe_link, text, flags=re.I)
+        else:
+            text = re.sub(r"https?://\S+|www\.\S+", " enlace ", text, flags=re.I)
+        if read_mentions:
+            text = re.sub(r"(?<!\w)@([\w.-]{1,64})", r" \1 ", text)
+        else:
+            text = re.sub(r"(?<!\w)@[\w.-]{1,64}", " usuario ", text)
         text = re.sub(r"[*_~`>#|]", " ", text)
-        text = re.sub(r"\s+", " ", text).strip()
-        return text[:650]
+        return re.sub(r"\s+", " ", text).strip()[:650]
 
     async def _start_speech_worker(self, room_id: str, state: dict[str, Any]) -> None:
         task = state.get("speech_task")
@@ -732,7 +747,7 @@ class MusicVoice:
         state = self.rooms.get(room_id)
         if not state:
             return "Conecta primero a una llamada con !leer o !join."
-        setting, value = setting.casefold(), value.strip().casefold()
+        setting, value = setting.casefold().strip(), value.strip().casefold()
         if setting in {"voz", "voice"}:
             if value not in TTS_VOICES:
                 return "Voces: " + ", ".join(TTS_VOICES)
@@ -748,15 +763,40 @@ class MusicVoice:
             state["tts_rate"] = f"{rate:+d}%"
             return f"Velocidad ajustada a {state['tts_rate']}."
         if setting in {"volumen", "volume"}:
-            try:
-                volume = int(value)
-            except ValueError:
-                return "El volumen de lectura debe estar entre 0 y 100."
-            if not 0 <= volume <= 100:
-                return "El volumen de lectura debe estar entre 0 y 100."
-            state["tts_volume"] = volume / 100.0
-            return f"Volumen de lectura ajustado a {volume}%."
-        return "Uso: !tts voz <nombre>, !tts velocidad <-50 a 100> o !tts volumen <0 a 100>."
+            current = int(round(float(state.get("tts_volume", 0.75)) * 100))
+            previous = int(round(float(state.get("last_tts_volume", 0.75)) * 100))
+            if value in {"mute", "silencio"}:
+                if current:
+                    state["last_tts_volume"] = current / 100.0
+                target = 0
+            elif value in {"restaurar", "restore"}:
+                target = previous or 75
+            elif value in {"subir", "up"}:
+                target = min(100, current + 10)
+            elif value in {"bajar", "down"}:
+                target = max(0, current - 10)
+            else:
+                try:
+                    target = current + int(value) if value.startswith(("+", "-")) else int(value)
+                except ValueError:
+                    return "Usa 0-100, +10, -10, subir, bajar, mute o restaurar."
+            if not 0 <= target <= 100:
+                return "El volumen de lectura debe quedar entre 0 y 100."
+            if target:
+                state["last_tts_volume"] = target / 100.0
+            state["tts_volume"] = target / 100.0
+            return f"Volumen de lectura ajustado a {target}%."
+        if setting in {"enlaces", "links", "menciones", "mentions"}:
+            if value not in {"on", "off", "si", "sí", "no", "true", "false", "1", "0", "activar", "desactivar"}:
+                return "Usa on u off."
+            enabled = value in {"on", "si", "sí", "true", "1", "activar"}
+            key = "tts_read_links" if setting in {"enlaces", "links"} else "tts_read_mentions"
+            state[key] = enabled
+            if self.store:
+                self.store.set_setting(room_id, key, "1" if enabled else "0")
+            return f"Lectura de {'enlaces' if key == 'tts_read_links' else 'menciones'} {'activada' if enabled else 'desactivada'}."
+        return "Uso: !tts voz <nombre>, velocidad <-50 a 100>, volumen <valor>, enlaces on|off o menciones on|off."
+
 
     async def handle_command(self, room_id: str, command: str, args: str) -> tuple[bool, str]:
         """Handle voice/music commands. Returns (handled, user-facing result)."""

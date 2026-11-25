@@ -1,4 +1,4 @@
-"""Command catalogue and category filtering for Stella."""
+"""Complete command guide for Stella; excludes game-specific modules."""
 from __future__ import annotations
 
 import unicodedata
@@ -6,57 +6,74 @@ from functools import lru_cache
 
 SEPARATOR = "[C] ━━━━━━━━━━━ ✦ ━━━━━━━━━━━"
 
+
 def _normalize(value: str) -> str:
     decomposed = unicodedata.normalize("NFKD", str(value or "").casefold())
     return "".join(char for char in decomposed if not unicodedata.combining(char)).strip()
 
+
 def _sections(prefix: str):
     p = str(prefix or "!").strip() or "!"
     return [
-        ("GENERAL E IA", [
+        ("AYUDA, IA E INVESTIGACIÓN", [
             f"▸ {p}ayuda [categoría] · {p}menu · {p}ping · {p}miuid · {p}idbot",
-            f"▸ {p}ia <consulta> · {p}asistente <consulta> · {p}ia estado|olvidar",
-            f"▸ {p}investigar [comparar|verificar|cronologia|informe] <tema> · {p}analizar <texto o enlace>",
-            f"▸ {p}analizartexto <resumir|corregir|reescribir|extraer|contradicciones> <texto>",
-            f"▸ {p}traducir <idioma> | <texto> · {p}ortografia <texto> · {p}calcular <operación>",
-            f"▸ {p}fecha · {p}zona <Area/Ciudad> · {p}azar <mín> <máx>",
+            f"▸ {p}ia <consulta> · {p}asistente <consulta> · {p}ia estado|olvidar|ayuda",
+            f"▸ {p}investigar <tema> · comparar|verificar|cronologia|informe",
+            f"▸ {p}analizar <texto o enlaces> · {p}analizartexto resumir|corregir|reescribir|extraer|contradicciones",
+            f"▸ {p}ortografia <texto> · {p}calcular <operación> · {p}traducir <idioma> | <texto>",
         ]),
-        ("PERFILES Y COMUNIDAD", [
+        ("PERFILES, ACTIVIDAD E INTERACCIONES", [
             f"▸ {p}perfil [@usuario] · {p}bio <texto|-> · {p}miestado <texto|->",
-            f"▸ {p}afinidad|amistad|reputacion @usuario · {p}regalo @usuario [mensaje] · {p}muro",
-            f"▸ {p}puntos|saldo · {p}ranking|top · {p}diario|daily · {p}trabajar",
-            f"▸ {p}pagar|transferir @usuario <cantidad> · {p}duelo @usuario · {p}ship <personas>",
-            f"▸ {p}interaccion · {p}abrazo · {p}beso · {p}acariciar · {p}mimar · {p}consolar · {p}saludar",
-            f"▸ {p}patada · {p}golpe · {p}cachetada · {p}morder · {p}empujar · {p}proteger · {p}ayudar · {p}apoyar",
-            f"▸ {p}bailar · {p}cosquillas · {p}chocar · {p}acompañar · {p}asustar · {p}curar · {p}cargar · {p}regañar",
-            f"▸ {p}admirar · {p}dormir · {p}ignorar · {p}mirar · {p}invitar · {p}regalar · {p}roast @usuario",
+            f"▸ {p}actividad [hoy|semana] · {p}afinidad|amistad @usuario · {p}regalo @usuario [mensaje] · {p}muro",
+            f"▸ Afecto: {p}abrazo · {p}beso · {p}acariciar · {p}mimar · {p}consolar · {p}felicitar · {p}saludar",
+            f"▸ Físicas: {p}patada · {p}golpe · {p}cachetada · {p}morder · {p}empujar · {p}cargar",
+            f"▸ Sociales: {p}proteger · {p}bailar · {p}cosquillas · {p}chocar · {p}ayudar · {p}apoyar · {p}acompañar",
+            f"▸ Otras: {p}asustar · {p}curar · {p}regañar · {p}admirar · {p}dormir · {p}ignorar · {p}mirar · {p}invitar · {p}roast @usuario",
         ]),
-        ("JUEGOS Y ENTRETENIMIENTO", [
+        ("JUEGOS, ECONOMÍA Y COMUNIDAD", [
             f"▸ {p}trivia · {p}responder <1-4> · {p}adivina · {p}intento <número>",
-            f"▸ {p}verdad · {p}8ball <pregunta> · {p}elige A | B · {p}chiste · {p}frase · {p}reto",
-            f"▸ {p}encuesta crear|votar|resultados|cerrar|lista · {p}evento crear|lista|apuntarse|cerrar",
+            f"▸ {p}verdad · {p}8ball <pregunta> · {p}elige <opciones> · {p}ship <personas> · {p}duelo @usuario",
+            f"▸ {p}azar <mín> <máx>|dado|moneda · {p}chiste · {p}frase · {p}reto",
+            f"▸ {p}puntos|saldo · {p}ranking|top · {p}diario|daily · {p}trabajar",
+            f"▸ {p}pagar|transferir @usuario <cantidad> · {p}encuesta crear|votar|resultados|cerrar|lista",
+            f"▸ {p}evento crear|lista|apuntarse|cerrar · {p}interaccion @usuario",
         ]),
-        ("MÚSICA, VOZ Y MULTIMEDIA", [
-            f"▸ {p}join · {p}salirsala · {p}salas · {p}voz · {p}leer · {p}noleer · {p}tts voces|voz|velocidad|volumen",
-            f"▸ {p}dj buscar|reproducir|encolar|cola|pausa|reanudar|saltar|detener · {p}playlist crear|lista|agregar|ver|reproducir|borrar",
-            f"▸ {p}volumen <0-100> · {p}subirvolumen · {p}bajarvolumen · {p}silencio · {p}volumenlectura",
-            f"▸ {p}multimedia imagen|video|audio <búsqueda> · {p}imagen · {p}video · {p}audio",
+        ("MÚSICA, VOZ Y LECTURA", [
+            f"▸ {p}join · {p}salirsala · {p}salas · {p}voz participantes|hablando|estado",
+            f"▸ {p}dj buscar <tema> · resultados · reproducir <n> · encolar <n> · favorito [n]",
+            f"▸ {p}dj cola|quitar <n>|mover <a> <b>|vaciar · repetir off|una|cola · ambiente <tema>",
+            f"▸ {p}dj pausa|reanudar|saltar|detener|volumen <0-100>|fuentes|probar",
+            f"▸ {p}playlist crear|lista|agregar|ver|reproducir|borrar · {p}volumen|subirvolumen|bajarvolumen|silencio",
+            f"▸ {p}leer · {p}noleer · {p}silenciolectura · {p}tts voces|probar|voz|velocidad|volumen|enlaces|menciones",
+        ]),
+        ("UTILIDADES Y MULTIMEDIA", [
+            f"▸ {p}fecha · {p}zona <Area/Ciudad> · {p}multimedia imagen|video|audio <búsqueda>",
+            f"▸ {p}imagen <búsqueda> · {p}video <búsqueda> · {p}audio <búsqueda>",
         ]),
         ("MODERACIÓN Y ADMINISTRACIÓN", [
-            f"▸ {p}advertir <UID> | <motivo> · {p}advertencias [UID] · {p}quitaradvertencia <ID>",
-            f"▸ {p}antispam activar|desactivar · {p}actividad · {p}respuesta añadir|quitar|lista",
-            f"▸ {p}admin · {p}centro|nexus|paneladmin · {p}estado|sistema|diagnostico",
-            f"▸ {p}fuentes|saludfuentes · {p}metricas|rendimiento · {p}autotest|laboratorio",
+            f"▸ {p}admin|centro|nexus · {p}estado · {p}fuentes · {p}metricas · {p}autotest",
+            f"▸ {p}advertir @usuario [motivo] · {p}advertencias [@usuario] · {p}quitaradvertencia <ID>",
+            f"▸ {p}antispam estado|on|off|limite N|ventana N|repeticiones N|enlaces N|menciones N",
+            f"▸ {p}respuesta añadir|quitar|lista · {p}respuestas estado|on|off",
             f"▸ {p}perfilbot <nombre> | <estado> · {p}avatarbot <URL HTTPS>",
+            f"▸ {p}eliminarmensajes — elimina solo mensajes propios con ID confirmado [ADMIN]",
         ]),
     ]
 
+
 def build_commands_help_text(prefix: str = "!") -> str:
     p = str(prefix or "!").strip() or "!"
-    lines = ["[CB] ✦ STELLA · GUÍA DE COMANDOS ✦", f"[C] Prefijo principal: {p}", "[C] Usa !ayuda <categoría> para consultar una sección.", SEPARATOR]
+    lines = [
+        "[CB] ✦ STELLA · GUÍA DE COMANDOS ✦",
+        f"[C] Prefijo principal: {p}",
+        f"[C] Usa {p}ayuda <categoría> para consultar una sección.",
+        "[C] Catálogo general de funciones y accesos.",
+        SEPARATOR,
+    ]
     for title, entries in _sections(p):
         lines.extend([f"[CB] {title}", *[f"[C] {entry}" for entry in entries], SEPARATOR])
     return "\n".join(lines)
+
 
 @lru_cache(maxsize=64)
 def _build_commands_help_blocks_cached(prefix: str, max_units: int):
@@ -68,16 +85,20 @@ def _build_commands_help_blocks_cached(prefix: str, max_units: int):
         blocks.append(block)
     return tuple(blocks)
 
+
 def build_commands_help_blocks(prefix: str = "!", max_units: int = 1800) -> list[str]:
     return list(_build_commands_help_blocks_cached(prefix, max_units))
 
+
 _CATEGORY_ALIASES = {
-    "ia": 0, "general": 0, "inteligencia": 0,
-    "social": 1, "comunidad": 1, "perfiles": 1,
-    "juegos": 2, "entretenimiento": 2,
-    "musica": 3, "voz": 3, "dj": 3, "multimedia": 3,
-    "admin": 4, "administracion": 4, "moderacion": 4,
+    "ia": 0, "general": 0, "inteligencia": 0, "investigacion": 0,
+    "social": 1, "perfiles": 1, "actividad": 1, "interacciones": 1,
+    "juegos": 2, "economia": 2, "comunidad": 2, "entretenimiento": 2,
+    "musica": 3, "voz": 3, "dj": 3, "tts": 3,
+    "multimedia": 4, "utilidades": 4,
+    "admin": 5, "administracion": 5, "moderacion": 5,
 }
+
 
 @lru_cache(maxsize=64)
 def filter_commands_help_text(help_text: str, topic: str | None = None) -> str:
@@ -86,7 +107,11 @@ def filter_commands_help_text(help_text: str, topic: str | None = None) -> str:
         return str(help_text)
     index = _CATEGORY_ALIASES.get(requested)
     if index is None:
-        return "[CB] ✦ STELLA · GUÍA DE COMANDOS ✦\n[C] Categorías: ia, social, juegos, musica, admin.\n[C] Ejemplo: !ayuda social"
+        return (
+            "[CB] ✦ STELLA · GUÍA DE COMANDOS ✦\n"
+            "[C] Categorías: ia, social, juegos, musica, multimedia, admin.\n"
+            "[C] Ejemplo: !ayuda social"
+        )
     prefix = "!"
     for line in str(help_text).splitlines():
         if line.startswith("[C] Prefijo principal: "):
