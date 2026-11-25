@@ -36,10 +36,32 @@ seen_events: OrderedDict[str, float] = OrderedDict()
 last_retention_cleanup = 0.0
 
 
+def log_bot_identity(identity: dict[str, Any] | None) -> None:
+    """Log only the authenticated bot's public identifiers, never its token."""
+    if not identity:
+        log.warning("Could not resolve Stella's Anarchy identity during startup.")
+        return
+    bot_id = str(identity.get("botId") or identity.get("bot_id") or "").strip()
+    account_uid = str(identity.get("uid") or "").strip()
+    bot_name = str(identity.get("name") or identity.get("nickname") or "Stella").strip()
+    if not bot_id:
+        log.warning("Anarchy authenticated the token but returned no botId.")
+        return
+    log.info(
+        "Anarchy identity verified at startup: name=%s botId=%s uid=%s",
+        bot_name[:80],
+        bot_id,
+        account_uid or "unavailable",
+    )
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     store.initialize()
     store.cleanup_expired()
+    # Resolve the bot ID before it joins any room; no chat command is required.
+    identity = await platform.get_bot_identity()
+    log_bot_identity(identity)
     yield
     await bot.close()
 
