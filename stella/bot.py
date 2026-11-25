@@ -39,8 +39,6 @@ ANTISPAM_WINDOW_SECONDS = 8
 ANTISPAM_WARNING_COOLDOWN = 60
 _GLOBAL_SETTINGS_ROOM_ID = "__stella_global__"
 _GLOBAL_CHAT_SILENCE_KEY = "chat_silence"
-AI_CONVERSATION_TTL_SECONDS = 600
-MAX_ACTIVE_AI_CONVERSATIONS = 500
 
 _PLAYFUL_INSULT_PATTERNS = (
     re.compile(
@@ -146,36 +144,6 @@ class StellaBot:
         self._auto_reply_cooldown: dict[tuple[str, int], float] = {}
         # Game sessions exist only in RAM and expire automatically.
         self._game_sessions: dict[str, dict[str, Any]] = {}
-        # A conversation can continue without repeated mentions, but only for
-        # this exact room/user pair and only for a short in-memory window.
-        self._active_ai_conversations: dict[tuple[str, str], float] = {}
-
-    def _has_active_ai_conversation(self, room_id: str, uid: str) -> bool:
-        sessions = getattr(self, "_active_ai_conversations", None)
-        if not isinstance(sessions, dict):
-            return False
-        key = (str(room_id), str(uid))
-        expires_at = float(sessions.get(key, 0.0) or 0.0)
-        if expires_at <= time.monotonic():
-            sessions.pop(key, None)
-            return False
-        return True
-
-    def _mark_active_ai_conversation(self, room_id: str, uid: str) -> None:
-        if not str(room_id or "").strip() or not str(uid or "").strip():
-            return
-        sessions = getattr(self, "_active_ai_conversations", None)
-        if not isinstance(sessions, dict):
-            sessions = {}
-            self._active_ai_conversations = sessions
-        now = time.monotonic()
-        for key, expires_at in tuple(sessions.items()):
-            if float(expires_at or 0.0) <= now:
-                sessions.pop(key, None)
-        sessions[(str(room_id), str(uid))] = now + AI_CONVERSATION_TTL_SECONDS
-        while len(sessions) > MAX_ACTIVE_AI_CONVERSATIONS:
-            oldest = min(sessions, key=lambda key: float(sessions.get(key, 0.0)))
-            sessions.pop(oldest, None)
 
     def _ai_allowed_commands(self, uid: str) -> frozenset[str]:
         allowed = set(AI_PUBLIC_COMMANDS)
@@ -217,8 +185,6 @@ class StellaBot:
         answer = str(result.get("answer") or "").strip()
         if answer:
             await self._reply(room_id, answer, message)
-            if not result.get("fallback"):
-                self._mark_active_ai_conversation(room_id, uid)
 
     @staticmethod
     def _author(message: dict[str, Any]) -> tuple[str, str]:
@@ -376,7 +342,6 @@ class StellaBot:
             self._is_silence_request(request_text)
             or self._is_resume_request(request_text)
         )
-        continuing_ai_chat = self._has_active_ai_conversation(room_id, uid)
         addressed = (
             direct_call is not None
             or mentioned
@@ -384,7 +349,6 @@ class StellaBot:
             or prefixed_command is not None
             or prefixed_named_call is not None
             or owner_control_request
-            or continuing_ai_chat
         )
 
         # Global silence suppresses chat replies, automatic replies and voice reading.
@@ -412,12 +376,10 @@ class StellaBot:
             return
 
         vector_memory = getattr(self, "vector_memory", None)
-        if vector_memory is not None and self.store.get_setting(room_id, f'vector_memory_enabled:{uid}', '0') == '1':
+        if addressed and vector_memory is not None and self.store.get_setting(room_id, f'vector_memory_enabled:{uid}', '0') == '1':
             await vector_memory.index_message(room_id, uid, name, content)
 
         if not addressed:
-            # Optional voice reading remains opt-in and never produces a chat reply.
-            await self.voice.enqueue_speech(room_id, f"{name}: {content}")
             return
 
         if prefix:
@@ -438,7 +400,6 @@ class StellaBot:
         normalized_call = re.sub(r"[\s,;:!?¡¿.]+", "", request_text).casefold()
         if not normalized_call or normalized_call in {"hola", "holi", "hey", "ey", "oye", "buenas", "buenosdias", "buenastardes", "buenasnoches"}:
             await self._reply(room_id, "¡Aquí estoy! ¿Qué necesitas?", message)
-            self._mark_active_ai_conversation(room_id, uid)
             return
 
         playful_tone = classify_playful_stella_message(request_text)
@@ -464,7 +425,6 @@ class StellaBot:
                 "miss_you": "Me alegra que hayas vuelto. ¿Qué hacemos hoy?",
             }
             await self._reply(room_id, replies.get(affection, "Gracias por tu mensaje."), message)
-            self._mark_active_ai_conversation(room_id, uid)
             return
         if await self._check_auto_replies(room_id, request_text, message):
             return
@@ -541,10 +501,6 @@ class StellaBot:
         return bool(author.get("isBot") or author.get("bot"))
 
     def _forget_room(self, room_id: str) -> None:
-        active_sessions = getattr(self, "_active_ai_conversations", {})
-        for key in list(active_sessions):
-            if key[0] == str(room_id):
-                active_sessions.pop(key, None)
         for session_key in list(self.ai._memory):
             if session_key.startswith(str(room_id) + ":"):
                 self.ai.forget_session(session_key)

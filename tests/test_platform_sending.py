@@ -115,3 +115,25 @@ def test_edit_message_removes_buttons_using_documented_patch_route():
         )]
 
     asyncio.run(scenario())
+
+
+def test_send_message_converts_escaped_newlines_before_posting(monkeypatch):
+    async def scenario():
+        async def fake_sleep(_delay):
+            return None
+
+        monkeypatch.setattr("stella.platform.asyncio.sleep", fake_sleep)
+        client, calls = _client_with_responses([
+            {"ok": True, "status": 200, "data": {}},
+        ])
+
+        result = await client.send_message(
+            "room",
+            r"Primera línea\\nSegunda línea\\r\\nTercera línea",
+        )
+
+        assert result is True
+        assert calls[0][2]["content"] == "Primera línea\nSegunda línea\nTercera línea"
+        assert r"\\n" not in calls[0][2]["content"]
+
+    asyncio.run(scenario())

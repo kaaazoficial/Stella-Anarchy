@@ -10,6 +10,8 @@ from urllib.parse import quote
 
 import httpx
 
+from stella.text import normalize_message_text
+
 log = logging.getLogger("stella.platform")
 
 
@@ -195,7 +197,7 @@ class AnarchyClient:
     ) -> bool | str:
         """Send a paced Anarchy message; optionally return its ID for interactive buttons."""
         room_id = str(thread_id)
-        body: dict[str, Any] = {"content": content[:1900]}
+        body: dict[str, Any] = {"content": normalize_message_text(content)[:1900]}
         if reply_id:
             body["replyMessageId"] = reply_id
         if buttons is not None:

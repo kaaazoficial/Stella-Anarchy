@@ -31,9 +31,20 @@ def _is_heading(line: str, *, first_content_line: bool, line_count: int) -> bool
     return first_content_line and line_count > 1 and len(value) <= 68
 
 
+def normalize_message_text(content: str) -> str:
+    """Turn escaped line-break sequences into real newlines before sending chat text."""
+    text = str(content or "")
+    # Providers can return JSON-escaped line breaks as visible backslash sequences.
+    text = re.sub(r"\\+r\\+n", "\n", text)
+    text = re.sub(r"\\+n", "\n", text)
+    text = re.sub(r"\\+r", "\n", text)
+    text = re.sub(r"\\+t", "    ", text)
+    return text.replace("\r\n", "\n").replace("\r", "\n")
+
+
 def format_stella_text(content: str) -> str:
     """Center message text and emphasize headings without rewriting its words."""
-    text = str(content or "")
+    text = normalize_message_text(content)
     if not text.strip():
         return text
 
