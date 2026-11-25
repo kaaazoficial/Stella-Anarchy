@@ -39,7 +39,7 @@ SQLite stores only data required by existing community features:
 - Profile text: bio and status are cleared after 30 days.
 - Affinity scores: retained only while both associated accounts remain active; removed when either account reaches the 90-day inactivity limit.
 - Gifts: at most five per recipient and no more than 30 days.
-- Daily reward/work cooldowns: removed when the associated account reaches the 90-day inactivity limit.
+- Daily reward/work cooldowns and personal music playlists: removed when the associated account reaches the 90-day inactivity limit.
 - Moderation warnings: 90 days.
 - Aggregate daily activity counts: 7 days.
 - Polls and voter identifiers: 30 days after poll creation.
