@@ -1,5 +1,6 @@
 from stella.ai_core import (
     build_ai_instructions,
+    classify_request_intent,
     clarification_for_unspecified_topic,
     is_contextual_followup_request,
     resolve_community_faq,
@@ -14,6 +15,7 @@ def test_conversation_instructions_prioritize_the_current_request():
     assert "No introduzcas personajes, aplicaciones, juegos" in prompt
     assert "haz una sola pregunta breve" in prompt
     assert "no ejecutes herramientas" in prompt
+    assert "No inventes relaciones entre la consulta y temas anteriores" in prompt
 
 
 def test_conversation_instructions_do_not_expose_tools():
@@ -21,6 +23,7 @@ def test_conversation_instructions_do_not_expose_tools():
 
     assert "SIN HERRAMIENTAS." in prompt
     assert "JSON requerido: objeto con únicamente answer (texto)." in prompt
+    assert "HERRAMIENTAS:" not in prompt
 
 
 def test_explicit_topic_change_drops_previous_context():
@@ -44,3 +47,13 @@ def test_unspecified_help_request_asks_for_the_subject():
 def test_faq_does_not_answer_unrelated_questions_with_a_generic_greeting():
     assert resolve_community_faq("hola") == "¡Hola! Soy Stella. ¿En qué puedo ayudarte?"
     assert resolve_community_faq("¿cómo reparo una placa electrónica?") is None
+
+
+def test_intent_classifier_keeps_normal_questions_as_conversation():
+    assert classify_request_intent("¿qué es la electricidad?") == "conversation"
+    assert classify_request_intent("explícame cómo funciona un motor") == "conversation"
+
+
+def test_intent_classifier_only_marks_explicit_actions_as_actions():
+    assert classify_request_intent("calcula 25 por 4") == "action"
+    assert classify_request_intent("investiga la historia de la electricidad") == "research"
