@@ -38,6 +38,41 @@ class Store:
         with self._session(self.connect()) as db:
             db.executescript(
                 """
+                CREATE TABLE IF NOT EXISTS users (
+                    uid TEXT PRIMARY KEY,
+                    nickname TEXT NOT NULL,
+                    bio TEXT NOT NULL DEFAULT '',
+                    status TEXT NOT NULL DEFAULT '',
+                    points INTEGER NOT NULL DEFAULT 0,
+                    created_at REAL NOT NULL,
+                    last_seen REAL NOT NULL,
+                    profile_updated_at REAL
+                );
+                CREATE INDEX IF NOT EXISTS idx_users_last_seen ON users(last_seen);
+                CREATE INDEX IF NOT EXISTS idx_users_points ON users(points DESC);
+                CREATE TABLE IF NOT EXISTS affinities (
+                    uid TEXT NOT NULL,
+                    target_uid TEXT NOT NULL,
+                    score INTEGER NOT NULL DEFAULT 0,
+                    last_at REAL NOT NULL,
+                    PRIMARY KEY(uid,target_uid)
+                );
+                CREATE TABLE IF NOT EXISTS gifts (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    sender_uid TEXT NOT NULL,
+                    sender_name TEXT NOT NULL,
+                    target_uid TEXT NOT NULL,
+                    target_name TEXT NOT NULL,
+                    message TEXT NOT NULL DEFAULT '',
+                    created_at REAL NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_gifts_target ON gifts(target_uid,id DESC);
+                CREATE TABLE IF NOT EXISTS reward_claims (
+                    uid TEXT NOT NULL,
+                    action TEXT NOT NULL,
+                    claimed_at REAL NOT NULL,
+                    PRIMARY KEY(uid,action)
+                );
                 CREATE TABLE IF NOT EXISTS moderation_warnings (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     room_id TEXT NOT NULL,
@@ -126,6 +161,11 @@ class Store:
         poll_cutoff = stamp - 30 * 86400
         with self._session(self.connect()) as db:
             counts = {}
+            db.execute("UPDATE users SET bio='',status='',profile_updated_at=NULL WHERE profile_updated_at IS NOT NULL AND profile_updated_at < ?", (stamp - 30 * 86400,))
+            db.execute("DELETE FROM gifts WHERE created_at < ?", (stamp - 30 * 86400,))
+            db.execute("DELETE FROM affinities WHERE uid IN (SELECT uid FROM users WHERE last_seen < ?) OR target_uid IN (SELECT uid FROM users WHERE last_seen < ?)", (stamp - 90 * 86400, stamp - 90 * 86400))
+            db.execute("DELETE FROM reward_claims WHERE uid IN (SELECT uid FROM users WHERE last_seen < ?)", (stamp - 90 * 86400,))
+            db.execute("DELETE FROM users WHERE last_seen < ?", (stamp - 90 * 86400,))
             statements = (
                 ("warnings", "DELETE FROM moderation_warnings WHERE created_at < ?", warning_cutoff),
                 ("activity", "DELETE FROM activity_daily WHERE day_key < date(?, 'unixepoch')", daily_cutoff),
@@ -136,6 +176,138 @@ class Store:
                 cursor = db.execute(sql, (value,))
                 counts[label] = max(0, cursor.rowcount)
             return counts
+
+
+    def touch_user(self, uid: str, nickname: str = "Usuario", now: float | None = None) -> None:
+        stamp = time.time() if now is None else float(now)
+        with self._session(self.connect()) as db:
+            db.execute(
+                """INSERT INTO users(uid,nickname,created_at,last_seen)
+                   VALUES(?,?,?,?) ON CONFLICT(uid) DO UPDATE SET
+                   nickname=excluded.nickname,last_seen=excluded.last_seen""",
+                (str(uid), str(nickname)[:80], stamp, stamp),
+            )
+
+    def get_profile(self, uid: str) -> dict[str, Any] | None:
+        with self._session(self.connect()) as db:
+            row = db.execute(
+                "SELECT uid,nickname,bio,status,points,created_at,last_seen FROM users WHERE uid=?",
+                (str(uid),),
+            ).fetchone()
+            return dict(row) if row else None
+
+    def update_profile(self, uid: str, *, bio: str | None = None, status: str | None = None) -> bool:
+        fields = []
+        values: list[Any] = []
+        if bio is not None:
+            fields.append("bio=?")
+            values.append(str(bio)[:300])
+        if status is not None:
+            fields.append("status=?")
+            values.append(str(status)[:80])
+        if not fields:
+            return False
+        fields.append("profile_updated_at=?")
+        values.extend([time.time(), str(uid)])
+        with self._session(self.connect()) as db:
+            cursor = db.execute(f"UPDATE users SET {','.join(fields)} WHERE uid=?", values)
+            return cursor.rowcount > 0
+
+    def points_balance(self, uid: str) -> int:
+        with self._session(self.connect()) as db:
+            row = db.execute("SELECT points FROM users WHERE uid=?", (str(uid),)).fetchone()
+            return int(row["points"]) if row else 0
+
+    def claim_reward(self, uid: str, action: str, amount: int, cooldown: float) -> tuple[bool, int]:
+        now = time.time()
+        with self._session(self.connect()) as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute(
+                "SELECT claimed_at FROM reward_claims WHERE uid=? AND action=?",
+                (str(uid), str(action)),
+            ).fetchone()
+            if row and now - float(row["claimed_at"]) < cooldown:
+                return False, max(1, int(cooldown - (now - float(row["claimed_at"]))))
+            db.execute(
+                """INSERT INTO reward_claims(uid,action,claimed_at) VALUES(?,?,?)
+                   ON CONFLICT(uid,action) DO UPDATE SET claimed_at=excluded.claimed_at""",
+                (str(uid), str(action), now),
+            )
+            db.execute("UPDATE users SET points=points+?,last_seen=? WHERE uid=?", (int(amount), now, str(uid)))
+            row = db.execute("SELECT points FROM users WHERE uid=?", (str(uid),)).fetchone()
+            return True, int(row["points"]) if row else 0
+
+    def transfer_points(self, sender_uid: str, target_uid: str, amount: int) -> str:
+        if amount <= 0 or sender_uid == target_uid:
+            return "invalid"
+        with self._session(self.connect()) as db:
+            db.execute("BEGIN IMMEDIATE")
+            sender = db.execute("SELECT points FROM users WHERE uid=?", (str(sender_uid),)).fetchone()
+            target = db.execute("SELECT uid FROM users WHERE uid=?", (str(target_uid),)).fetchone()
+            if not sender or not target:
+                return "missing"
+            if int(sender["points"]) < amount:
+                return "insufficient"
+            db.execute("UPDATE users SET points=points-? WHERE uid=?", (amount, str(sender_uid)))
+            db.execute("UPDATE users SET points=points+? WHERE uid=?", (amount, str(target_uid)))
+            return "ok"
+
+    def points_ranking(self, limit: int = 10) -> list[dict[str, Any]]:
+        with self._session(self.connect()) as db:
+            rows = db.execute(
+                "SELECT nickname,points FROM users ORDER BY points DESC,last_seen DESC LIMIT ?",
+                (max(1, min(20, int(limit))),),
+            ).fetchall()
+            return [dict(row) for row in rows]
+
+    def add_affinity(self, uid: str, target_uid: str, amount: int = 1) -> int:
+        if uid == target_uid:
+            return 0
+        now = time.time()
+        with self._session(self.connect()) as db:
+            db.execute(
+                """INSERT INTO affinities(uid,target_uid,score,last_at) VALUES(?,?,?,?)
+                   ON CONFLICT(uid,target_uid) DO UPDATE SET
+                   score=MIN(100,affinities.score+excluded.score),last_at=excluded.last_at""",
+                (str(uid), str(target_uid), max(1, min(5, int(amount))), now),
+            )
+            row = db.execute(
+                "SELECT score FROM affinities WHERE uid=? AND target_uid=?",
+                (str(uid), str(target_uid)),
+            ).fetchone()
+            return int(row["score"]) if row else 0
+
+    def get_affinity(self, uid: str, target_uid: str) -> int:
+        with self._session(self.connect()) as db:
+            row = db.execute(
+                "SELECT score FROM affinities WHERE uid=? AND target_uid=?",
+                (str(uid), str(target_uid)),
+            ).fetchone()
+            return int(row["score"]) if row else 0
+
+    def add_gift(self, sender_uid: str, sender_name: str, target_uid: str, target_name: str, message: str = "") -> int:
+        now = time.time()
+        with self._session(self.connect()) as db:
+            cursor = db.execute(
+                """INSERT INTO gifts(sender_uid,sender_name,target_uid,target_name,message,created_at)
+                   VALUES(?,?,?,?,?,?)""",
+                (str(sender_uid), str(sender_name)[:80], str(target_uid), str(target_name)[:80], str(message)[:160], now),
+            )
+            db.execute(
+                """DELETE FROM gifts WHERE target_uid=? AND id NOT IN
+                   (SELECT id FROM gifts WHERE target_uid=? ORDER BY id DESC LIMIT 5)""",
+                (str(target_uid), str(target_uid)),
+            )
+            return int(cursor.lastrowid)
+
+    def received_gifts(self, uid: str, limit: int = 5) -> list[dict[str, Any]]:
+        with self._session(self.connect()) as db:
+            rows = db.execute(
+                """SELECT sender_name,message,created_at FROM gifts
+                   WHERE target_uid=? AND created_at>=? ORDER BY id DESC LIMIT ?""",
+                (str(uid), time.time() - 30 * 86400, max(1, min(5, int(limit)))),
+            ).fetchall()
+            return [dict(row) for row in rows]
 
     def add_warning(
         self, room_id: str, target_uid: str, target_name: str,
