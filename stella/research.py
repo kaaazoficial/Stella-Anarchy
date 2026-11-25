@@ -477,10 +477,10 @@ def _normalized_query(query: str) -> str:
 def classify_research_intent(query: str) -> dict[str, bool]:
     """Route research across general, academic, biomedical, news and media sources."""
     text = _normalized_query(query)
-    music = bool(re.search(
-        r"\b(musica|cancion(?:es)?|album(?:es)?|discografia|artista|banda|"
-        r"grupo musical|soundtrack|bso|ost|music|song|track|recording|"
-        r"musicbrainz|jamendo)\b", text
+    music = any(term in text for term in (
+        "musica", "cancion", "album", "discografia", "artista", "banda",
+        "grupo musical", "soundtrack", "bso", "ost", "music", "song",
+        "track", "recording", "musicbrainz", "jamendo",
     ))
     nasa = bool(re.search(
         r"\b(nasa|astronomia|astronomico|astronomica|espacio|cosmos|"
