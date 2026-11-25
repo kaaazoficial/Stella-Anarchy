@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from stella.ai import StellaAI
-from stella.config import Settings
+from stella.config import Settings, _uid_set
 from stella.language import split_arguments
 from stella.moderation import inspect_links, sanitize_reason
 from stella.platform import AnarchyClient
@@ -59,7 +59,7 @@ class StellaBot:
         return uid, name
 
     def _is_admin(self, uid: str) -> bool:
-        return bool(uid) and uid in self.settings.admin_uids
+        return bool(uid) and uid in _uid_set(self.settings.admin_uids)
 
     async def _reply(self, room_id: str, text: str, message: dict[str, Any]) -> None:
         reply_id = message.get("messageId") or message.get("id")
