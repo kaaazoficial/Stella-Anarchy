@@ -816,6 +816,12 @@ class StellaBot:
                 and command_suggestion[0] == "ayuda"
                 and command_suggestion[1] >= 86,
             ),
+            (
+                "silencio global",
+                self._is_silence_request("No le hables a nadie")
+                and self._is_silence_request("Stella, no le hables a nadie")
+                and self._is_resume_request("Ya puedes volver a hablar"),
+            ),
             ("fecha", bool(datetime_text("America/Santiago"))),
             ("perfil de usuario", self.store.get_profile(uid) is not None),
         ]
