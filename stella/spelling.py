@@ -59,7 +59,19 @@ _AMBIGUOUS_ACCENT_WORDS = frozenset({
 })
 
 _DOMAIN_WORDS = frozenset({
-    "anarchy", "stella", "build", "builds", "main", "dps",
+    "genshin", "teyvat", "hoyoverse", "mihoyo", "anarchy", "stella",
+    "katherin", "katherina", "kathrine", "katheryne", "cyno", "nahida",
+    "baizhu", "furina", "neuvillette", "arlecchino", "clorinde", "navia",
+    "alhaitham", "kaveh", "tighnari", "collei", "dehya", "nilou", "candace",
+    "layla", "faruzan", "wanderer", "scaramouche", "zhongli", "raiden",
+    "ei", "venti", "xiao", "ganyu", "shenhe", "yelan", "hu", "tao",
+    "kazuha", "ayaka", "ayato", "yoimiya", "itto", "gorou", "kokomi",
+    "kirara", "lynette", "lyney", "freminet", "sumeru", "fontaine",
+    "natlan", "mondstadt", "liyue", "inazuma", "snezhnaya", "primogemas",
+    "abyss", "abyssal", "build", "builds", "main", "subdps", "dps",
+    "arle", "fischl", "xiangling", "xingqiu", "bennett", "chevreuse",
+    "kaeya", "albedo", "noelle", "tartaglia", "xianyun", "chiori",
+    "sigewinne", "wriothesley", "dainsleif", "enkanomiya", "focalors",
     "openai", "openrouter", "python", "javascript", "typescript", "html",
     "css", "sql", "api", "github", "render", "livekit", "edge", "tts",
     "discord", "bandit", "ruff", "pyspellchecker", "anarchyapps",
@@ -123,7 +135,7 @@ def detect_spanish_spelling_issues(
 ) -> SpellingCorrection | None:
     """Return a conservative correction only for clear Spanish typos.
 
-    Proper names, short chat slang, mentions, URLs, code and
+    Proper names, Genshin terms, short chat slang, mentions, URLs, code and
     ambiguous accent pairs are deliberately left untouched.
     """
     original = str(text or "").strip()
