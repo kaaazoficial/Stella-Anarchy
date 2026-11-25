@@ -15,6 +15,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import Response
 
 from stella.bot import StellaBot
+from stella.boot import IMPORT_STARTED_AT
 from stella.config import Settings
 from stella.platform import AnarchyClient
 from stella.storage import Store
@@ -37,7 +38,7 @@ SIGNATURE_TOLERANCE_SECONDS = 300
 SEEN_EVENTS_LIMIT = 3000
 seen_events: OrderedDict[str, float] = OrderedDict()
 last_retention_cleanup = 0.0
-PROCESS_STARTED_AT = time.monotonic()
+PROCESS_STARTED_AT = IMPORT_STARTED_AT
 METRICS: dict[str, float] = {
     "webhook_events": 0,
     "webhook_dispatch_completed": 0,
