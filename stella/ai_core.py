@@ -69,6 +69,10 @@ AI_DIRECT_ACTION_COMMANDS = frozenset({
 })
 
 AI_COMMAND_CATALOG = {
+    "ortografia": "texto: revisa ortografía y sugiere cambios claros.",
+    "analizartexto": "modo texto: resume, corrige, reescribe, extrae o detecta contradicciones.",
+    "analizar": "texto o enlaces: revisión heurística de enlaces.",
+    "ping": "sin argumentos: comprueba que Stella responde.",
     "ayuda": "sin argumentos: muestra categorías y usos.",
     "menu": "sin argumentos: muestra el catálogo de comandos por categorías.",
     "centro": "sin argumentos: panel de administración (solo administradores).",
