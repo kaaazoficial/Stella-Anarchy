@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import logging
+import time
+from collections import defaultdict, deque
 from typing import Any
 from urllib.parse import quote
 
@@ -16,6 +18,10 @@ class AnarchyClient:
         self.api_base = api_base.rstrip("/")
         self.token = token
         self._client = httpx.AsyncClient(timeout=httpx.Timeout(15.0))
+        # IDs only; message text and conversation content are never retained.
+        self._sent_message_ids: dict[str, deque[tuple[float, str]]] = defaultdict(deque)
+        self._sent_message_ttl = 7 * 24 * 60 * 60
+        self._sent_message_limit = 500
 
     async def close(self) -> None:
         await self._client.aclose()
@@ -91,14 +97,72 @@ class AnarchyClient:
             return None
         return identity
 
+    @staticmethod
+    def _extract_message_id(payload: Any) -> str | None:
+        if not isinstance(payload, dict):
+            return None
+        for key in ("messageId", "message_id", "id"):
+            value = payload.get(key)
+            if isinstance(value, (str, int)) and str(value).strip():
+                return str(value).strip()
+        for key in ("message", "data", "result", "item"):
+            found = AnarchyClient._extract_message_id(payload.get(key))
+            if found:
+                return found
+        return None
+
+    def _remember_sent_message(self, thread_id: str, message_id: str) -> None:
+        now = time.time()
+        history = self._sent_message_ids[str(thread_id)]
+        cutoff = now - self._sent_message_ttl
+        while history and history[0][0] < cutoff:
+            history.popleft()
+        if not any(existing_id == message_id for _, existing_id in history):
+            history.append((now, message_id))
+        while len(history) > self._sent_message_limit:
+            history.popleft()
+        if not history:
+            self._sent_message_ids.pop(str(thread_id), None)
+
+    async def delete_tracked_messages(self, thread_id: str) -> dict[str, int]:
+        """Delete only recent IDs returned by this client's successful sends."""
+        room_id = str(thread_id or "").strip()
+        history = self._sent_message_ids.get(room_id)
+        if not room_id or not history:
+            return {"attempted": 0, "deleted": 0, "failed": 0}
+        cutoff = time.time() - self._sent_message_ttl
+        active = [(stamp, item_id) for stamp, item_id in history if stamp >= cutoff]
+        deleted = failed = 0
+        remaining: deque[tuple[float, str]] = deque()
+        for stamp, message_id in active:
+            result = await self.request(
+                "DELETE",
+                f"/threads/{quote(room_id, safe='')}/messages/{quote(message_id, safe='')}",
+            )
+            if result.get("ok") or result.get("status") == 404:
+                deleted += 1
+            else:
+                failed += 1
+                remaining.append((stamp, message_id))
+        if remaining:
+            self._sent_message_ids[room_id] = remaining
+        else:
+            self._sent_message_ids.pop(room_id, None)
+        return {"attempted": len(active), "deleted": deleted, "failed": failed}
+
     async def send_message(
         self, thread_id: str, content: str, *, reply_id: str | None = None
     ) -> bool:
+        room_id = str(thread_id)
         body: dict[str, Any] = {"content": content[:1900]}
         if reply_id:
             body["replyMessageId"] = reply_id
         result = await self.request(
-            "POST", f"/threads/{quote(str(thread_id), safe='')}/messages",
+            "POST", f"/threads/{quote(room_id, safe='')}/messages",
             json_body=body,
         )
+        if result.get("ok"):
+            message_id = self._extract_message_id(result.get("data"))
+            if message_id:
+                self._remember_sent_message(room_id, message_id)
         return bool(result.get("ok"))
