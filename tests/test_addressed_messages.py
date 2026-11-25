@@ -150,4 +150,3 @@ def test_autotest_command_suggestion_check_passes():
     assert len(b.platform.sent) == 1
     assert "4/4 correctas" in b.platform.sent[0][1]
     assert "✓ sugerencia de comandos" in b.platform.sent[0][1]
-\n
