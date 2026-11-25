@@ -490,7 +490,6 @@ class MusicVoice:
         if not text:
             return False, "Uso: !dj buscar <artista, canción, género o ambiente>."
         lookup = text
-        # The same Gemini -> Groq chain used by Katheryne can improve catalog terms.
         if os.getenv("MUSIC_AI_SEARCH", "1").strip().casefold() not in {"0", "false", "off"}:
             try:
                 from stella.ai import StellaAI
