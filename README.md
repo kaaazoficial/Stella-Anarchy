@@ -7,9 +7,9 @@ Stella is an independent Python bot for Anarchy Apps. It has its own codebase, c
 - Signed Anarchy webhook receiver with timestamp validation, HMAC-SHA256 verification, streamed payload limits, 15-minute in-memory event de-duplication and bounded caches.
 - Anarchy API client for sending chat messages and replies. At startup, Stella calls `GET /me` and logs its authenticated `botId` and account `uid`; this works before Stella joins any chat.
 - General commands: `!ayuda`, `!ping`, `!miuid`, `!azar`, `!frase`.
-- General utilities added: safe mathematical evaluation with `!calcular`, date/time and IANA time zones with `!fecha` and `!zona`, and AI-assisted text operations with `!analizartexto resumir|corregir|reescribir|extraer|contradicciones`.
+- General utilities: safe mathematical evaluation with `!calcular`, date/time and IANA time zones with `!fecha` and `!zona`, spelling suggestions with `!ortografia`, and AI-assisted text operations with `!analizartexto resumir|corregir|reescribir|extraer|contradicciones`.
 - Community entertainment added: `!trivia` / `!responder`, `!adivina` / `!intento`, `!verdad`, `!8ball`, `!elige`, `!chiste`, `!reto`, `!ship`, `!roast`, and text-based social actions such as `!abrazo`, `!beso`, `!saludar`, `!consolar`, and `!ayudar`. Active game rounds are volatile and expire; they are not written to SQLite.
-- `!ayuda` now supports category filters: `ia`, `social`, `juegos`, `comunidad`, `musica`, and `admin`.
+- `!ayuda` and `!menu` expose the full command catalogue with category filters: `ia`, `social`, `juegos`, `musica`, `multimedia`, and `admin`. Stella can also be addressed by name for supported natural-language commands.
 
 - Moderation records: `!advertir`, `!advertencias`, `!quitaradvertencia`.
 - Room anti-spam configuration: `!antispam activar|desactivar`.
@@ -18,25 +18,32 @@ Stella is an independent Python bot for Anarchy Apps. It has its own codebase, c
 - Aggregate activity reports for administrators: `!actividad`.
 - Exact-match automatic replies, configured by administrators: `!respuesta añadir|quitar|lista`.
 - Preliminary link inspection: `!analizar`.
-- Gemini-first AI with Groq fallback. Models are configurable through environment variables. Commands: `!ia`, `!ia estado`, `!traducir`, `!investigar`.
+- Gemini-first AI with Groq fallback. Models are configurable through environment variables. Commands: `!ia`, `!ia ayuda`, `!ia estado`, `!ia olvidar`, `!traducir`, and `!investigar` with general, comparison, verification, chronology and report modes. AI context is limited to two recent exchanges per room/user, expires after five minutes and can be cleared immediately.
 - LiveKit voice-room connection for active Anarchy calls: `!join`, `!salirsala`, `!voz`.
 - Text-to-speech with Edge TTS, Spanish voices, speed and volume controls: `!leer`, `!noleer`, `!tts voces`, `!tts voz`, `!tts velocidad`, `!tts volumen`.
 - Music DJ with open-license music catalogues (Internet Archive and Jamendo where configured), exact result selection, bounded queues, pause/resume/skip/stop and volume: `!dj buscar`, `!dj reproducir`, `!dj encolar`, `!dj cola`, `!dj pausa`, `!dj reanudar`, `!dj saltar`, `!dj detener`.
 - Music is not downloaded from YouTube or arbitrary URLs. Tracks must come from the supported catalogues and pass source/license validation.
-- Exact UID-based administrator permissions.
+- Profiles and social economy: `!perfil`, `!bio`, `!miestado`, `!puntos`, `!ranking`, `!diario`, `!trabajar`, `!pagar`, `!regalo`, `!muro`, `!afinidad` and `!duelo`.
+- High-confidence command typo suggestions; suggestions are never executed automatically.
+- Exact UID-based administrator permissions. `/metrics` exposes aggregate Prometheus counters and can be protected with `PROMETHEUS_METRICS_TOKEN`; `/health` includes a SQLite integrity check.
 
 ## Privacy, data and retention
 
-Stella does not save message contents, conversation histories, personal profiles or long-term user memory. Prompts sent to the optional AI provider are processed for that request and are not written to Stella's database; the provider's own retention policy still applies.
+Stella never stores message contents or conversation transcripts. AI continuity is optional and volatile: at most two recent exchanges per room/user, a five-minute TTL, a maximum of 100 active sessions and an explicit `!ia olvidar` command. This context is held only in process memory and disappears on restart. Prompts sent to Gemini or Groq are processed by the selected provider; that provider's own retention policy still applies.
 
-Only these operational records are stored in SQLite:
+SQLite stores only data required by existing community features:
+- Account operations: UID, nickname, points and last-seen timestamp. Accounts and their associated points/reward state are deleted after 90 days of inactivity.
+- Profile text: bio and status are cleared after 30 days.
+- Affinity scores: retained only while both associated accounts remain active; removed when either account reaches the 90-day inactivity limit.
+- Gifts: at most five per recipient and no more than 30 days.
+- Daily reward/work cooldowns: removed when the associated account reaches the 90-day inactivity limit.
 - Moderation warnings: 90 days.
-- Aggregate per-user daily message counts: 7 days.
-- Polls and their voter identifiers: 30 days after poll creation.
+- Aggregate daily activity counts: 7 days.
+- Polls and voter identifiers: 30 days after poll creation.
 - Events and attendee identifiers: 30 days after the event date.
-- Room settings, polls/event definitions while current, and automatic-reply rules: retained as community configuration until deleted or the database is removed.
+- Room settings and automatic-reply rules: retained as community configuration until deleted or the database is removed.
 
-Anti-spam fingerprints, recent command state, webhook de-duplication and cooldowns remain in RAM and are bounded/expired. SQLite cleanup runs at startup and at least hourly while the process receives events.
+Anti-spam fingerprints, command sessions, AI context, voice participants, TTS/music queues, webhook de-duplication and cooldowns remain in bounded or expiring process memory. No conversation text is included in activity metrics. SQLite cleanup runs at startup and at least hourly while the process receives events.
 
 The Anarchy API's bot messaging capabilities do not mean the bot can delete or mute another member's messages. A warning is an internal moderation record, not a platform-enforced punishment. Link inspection is heuristic and does not certify that a destination is safe.
 
@@ -81,7 +88,7 @@ cp .env.example .env
 uvicorn main:app --reload
 ```
 
-The app exposes `GET /health` and receives Anarchy webhooks at `POST /webhook` (also `POST /`).
+The app exposes `GET /health`, `GET /metrics` and receives Anarchy webhooks at `POST /webhook` (also `POST /`). Set `PROMETHEUS_METRICS_TOKEN` if the metrics endpoint should require a Bearer token.
 
 ## Connect Anarchy
 
