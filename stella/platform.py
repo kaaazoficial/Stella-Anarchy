@@ -50,6 +50,33 @@ class AnarchyClient:
             log.warning("Anarchy API request failed: %s", type(exc).__name__)
             return {"ok": False, "status": 502, "data": {}}
 
+    async def upload_bytes(
+        self, path: str, content: bytes, content_type: str
+    ) -> dict[str, Any]:
+        """Upload bounded binary data to an Anarchy bot API endpoint."""
+        if not self.token:
+            return {"ok": False, "status": 503, "data": {}}
+        if not isinstance(content, bytes) or not content or len(content) > 512 * 1024:
+            return {"ok": False, "status": 413, "data": {"error": "Invalid upload size"}}
+        try:
+            response = await self._client.put(
+                f"{self.api_base}{path}",
+                headers={
+                    "Authorization": f"Bot {self.token}",
+                    "Accept": "application/json",
+                    "Content-Type": str(content_type),
+                },
+                content=content,
+            )
+            try:
+                data = response.json()
+            except ValueError:
+                data = {"message": response.text[:500]}
+            return {"ok": response.is_success, "status": response.status_code, "data": data}
+        except httpx.HTTPError as exc:
+            log.warning("Anarchy binary upload failed: %s", type(exc).__name__)
+            return {"ok": False, "status": 502, "data": {}}
+
     async def get_bot_identity(self) -> dict[str, Any] | None:
         """Return the authenticated bot identity from Anarchy GET /me."""
         result = await self.request("GET", "/me")
