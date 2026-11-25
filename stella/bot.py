@@ -234,6 +234,9 @@ class StellaBot:
         if event_type == "room.ready":
             self.voice.notify_room_ready(room_id)
             return
+        if event_type == "interaction":
+            await self.voice.handle_interaction(event)
+            return
         if event_type in {"room.end", "room.kicked", "thread.removed"}:
             self.voice.notify_room_ended(room_id)
             self._forget_room(room_id)
@@ -1670,6 +1673,18 @@ class StellaBot:
             command, args = "noleer", ""
         if command == "dj":
             action, _, rest = args.partition(" ")
+            if action.casefold() in {"buscar", "search"}:
+                await self.voice.search_music_interactive(
+                    room_id, rest, reply_id=str(message.get("messageId") or message.get("id") or "") or None
+                )
+                return
+            if action.casefold() in {"ambiente", "mood"}:
+                from stella.astra import resolve_music_mood
+                await self.voice.search_music_interactive(
+                    room_id, resolve_music_mood(rest),
+                    reply_id=str(message.get("messageId") or message.get("id") or "") or None,
+                )
+                return
             if action.casefold() in {"favorito", "favoritos", "favorite", "favorites", "probar", "test"} and not self._is_admin(uid):
                 await self._reply(room_id, "Este control del DJ requiere permisos de administrador.", message)
                 return
