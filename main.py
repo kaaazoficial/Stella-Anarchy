@@ -175,7 +175,7 @@ async def root() -> dict[str, str]:
 
 
 @app.get("/health")
-async def health() -> dict[str, Any]:
+async def health() -> JSONResponse:
     """Liveness and privacy-safe component diagnostics for Render and operators."""
     database = verify_sqlite_database(settings.database_path)
     database_ok = bool(database.get("ok"))
