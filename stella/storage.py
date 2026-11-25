@@ -385,6 +385,30 @@ class Store:
             ).fetchall()
             return [dict(row) for row in rows]
 
+    def remove_playlist_track(self, room_id: str, owner_uid: str, name: str, position: int) -> bool:
+        """Remove one 1-based playlist position, scoped to its owning user and room."""
+        try:
+            index = int(position)
+        except (TypeError, ValueError):
+            return False
+        if index < 1:
+            return False
+        with self._session(self.connect()) as db:
+            playlist = db.execute(
+                "SELECT id FROM dj_playlists WHERE room_id=? AND owner_uid=? AND name=? COLLATE NOCASE",
+                (str(room_id), str(owner_uid), str(name).strip()),
+            ).fetchone()
+            if not playlist:
+                return False
+            row = db.execute(
+                "SELECT id FROM dj_playlist_tracks WHERE playlist_id=? ORDER BY id LIMIT 1 OFFSET ?",
+                (playlist["id"], index - 1),
+            ).fetchone()
+            if not row:
+                return False
+            db.execute("DELETE FROM dj_playlist_tracks WHERE id=? AND playlist_id=?", (row["id"], playlist["id"]))
+            return True
+
     def delete_playlist(self, room_id: str, owner_uid: str, name: str) -> bool:
         with self._session(self.connect()) as db:
             row = db.execute(
