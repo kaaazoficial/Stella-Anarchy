@@ -174,7 +174,7 @@ class StellaBot:
             # extract_stella_call removes vocative punctuation; recover a command
             # prefix that was immediately attached to the explicit name.
             prefixed_call = re.search(
-                r"(?<![\\w])@?(?:stella|stell|stela)(?![\\w])\\s*([!/-]\\s*.+)$",
+                r"(?<!\\w)@?(?:stella|stell|stela)(?!\\w)\\s*([!/-]\\s*.+)$",
                 content,
                 flags=re.IGNORECASE,
             )
