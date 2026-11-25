@@ -42,7 +42,8 @@ AI_PUBLIC_COMMANDS = frozenset({
 
 AI_ADMIN_COMMANDS = frozenset({
     "estado", "fuentes", "saludfuentes", "metricas",
-    "centro", "autotest", "admin",
+    "centro", "nexus", "paneladmin", "sistema", "diagnostico", "rendimiento",
+    "laboratorio", "autotest", "admin", "saludfuentes",
     "respuestas", "respuesta", "advertir", "advertencias",
     "quitaradvertencia", "antispam", "perfilbot", "avatarbot",
 })
@@ -76,6 +77,13 @@ AI_COMMAND_CATALOG = {
     "ayuda": "sin argumentos: muestra categorías y usos.",
     "menu": "sin argumentos: muestra el catálogo de comandos por categorías.",
     "centro": "sin argumentos: panel de administración (solo administradores).",
+    "nexus": "sin argumentos: alias del panel administrativo (solo administradores).",
+    "paneladmin": "sin argumentos: alias del panel administrativo (solo administradores).",
+    "sistema": "sin argumentos: estado del sistema (solo administradores).",
+    "diagnostico": "sin argumentos: diagnóstico operativo (solo administradores).",
+    "rendimiento": "sin argumentos: métricas del proceso (solo administradores).",
+    "laboratorio": "sin argumentos: pruebas internas (solo administradores).",
+    "saludfuentes": "sin argumentos: diagnóstico de fuentes externas (solo administradores).",
     "estado": "sin argumentos: estado técnico (solo administradores).",
     "fuentes": "sin argumentos: estado de las fuentes (administradores).",
     "saludfuentes": "sin argumentos: alias de fuentes (administradores).",
