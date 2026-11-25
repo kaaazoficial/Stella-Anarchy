@@ -233,6 +233,7 @@ class StellaBot:
             "bajarvolumen": self._music_volume_down, "silencio": self._music_mute,
             "volumenlectura": self._tts_volume, "subirvolumenlectura": self._tts_volume_up,
             "bajarvolumenlectura": self._tts_volume_down, "silenciolectura": self._tts_mute,
+            "salas": self._rooms,
             "interaccion": self._interaction_help,
             "roast": self._roast, "ship": self._ship,
             "trivia": self._trivia, "responder": self._trivia_answer,
@@ -248,8 +249,8 @@ class StellaBot:
             "abrazo", "abrazar", "beso", "besar", "patada", "golpe", "cachetada",
             "acariciar", "mimar", "morder", "consolar", "felicitar", "saludar",
             "proteger", "bailar", "cosquillas", "chocar", "highfive", "ayudar",
-            "regalar", "acompañar", "asustar", "curar", "cargar", "empujar",
-            "regañar", "admirar", "apoyar", "dormir", "ignorar", "mirar", "invitar",
+            "regalar", "acompanar", "asustar", "curar", "cargar", "empujar",
+            "reganar", "admirar", "apoyar", "dormir", "ignorar", "mirar", "invitar",
         }
         if command in social_actions:
             message["_stella_social_action"] = command
@@ -420,6 +421,15 @@ class StellaBot:
         lines = [f"AUTOTEST STELLA · {passed}/{len(checks)} correctas"]
         lines.extend(("✓ " if ok else "✗ ") + label for label, ok in checks)
         await self._reply(room_id, "\n".join(lines), message)
+
+    async def _rooms(self, room_id, uid, name, args, message):
+        active = sorted(self.voice.rooms)
+        if not active:
+            await self._reply(room_id, "No hay salas de voz activas en este proceso. Usa !join para conectar a Stella a la llamada de esta sala.", message)
+            return
+        lines = ["🎙️ SALAS DE VOZ ACTIVAS"]
+        lines.extend(f"• {room}" for room in active[:20])
+        await self._reply(room_id, "\\n".join(lines), message)
 
     async def _bot_profile(self, room_id, uid, name, args, message):
         if not self._is_admin(uid):
@@ -661,9 +671,9 @@ class StellaBot:
             "felicitar": "felicita a", "saludar": "saluda a", "proteger": "se pone delante de",
             "bailar": "invita a bailar a", "cosquillas": "le hace cosquillas a",
             "chocar": "choca los cinco con", "highfive": "choca los cinco con",
-            "ayudar": "ayuda a", "regalar": "le entrega un detalle a", "acompañar": "acompaña a",
+            "ayudar": "ayuda a", "regalar": "le entrega un detalle a", "acompanar": "acompaña a",
             "asustar": "intenta asustar a", "curar": "atiende a", "cargar": "carga a",
-            "empujar": "empuja a", "regañar": "regaña a", "admirar": "admira a",
+            "empujar": "empuja a", "reganar": "regaña a", "admirar": "admira a",
             "apoyar": "muestra su apoyo a", "dormir": "se queda dormido junto a",
             "ignorar": "decide ignorar a", "mirar": "se queda mirando a", "invitar": "invita a",
         }
