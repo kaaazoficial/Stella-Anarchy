@@ -302,7 +302,7 @@ class StellaBot:
             "ia": self._ai, "asistente": self._ai,
             "investigar": self._research, "investigate": self._research,
             "analizar": self._inspect,
-            "analizartexto": self._analyze_text,
+            "analizartexto": self._analyze_text, "analizatexto": self._analyze_text,
             "ortografia": self._spelling,
             "calcular": self._calculate,
             "fecha": self._date_time, "zona": self._date_time,
