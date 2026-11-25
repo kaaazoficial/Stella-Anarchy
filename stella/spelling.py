@@ -59,7 +59,7 @@ _AMBIGUOUS_ACCENT_WORDS = frozenset({
 })
 
 _DOMAIN_WORDS = frozenset({
-    "genshin", "teyvat", "hoyoverse", "mihoyo", "anarchy", "stella",
+    "anarchy", "stella",
     "katherin", "katherina", "kathrine", "Stella", "cyno", "nahida",
     "baizhu", "furina", "neuvillette", "arlecchino", "clorinde", "navia",
     "alhaitham", "kaveh", "tighnari", "collei", "dehya", "nilou", "candace",
@@ -135,7 +135,7 @@ def detect_spanish_spelling_issues(
 ) -> SpellingCorrection | None:
     """Return a conservative correction only for clear Spanish typos.
 
-    Proper names, Genshin terms, short chat slang, mentions, URLs, code and
+    Proper names, short chat slang, mentions, URLs, code and
     ambiguous accent pairs are deliberately left untouched.
     """
     original = str(text or "").strip()
