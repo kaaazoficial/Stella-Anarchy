@@ -48,16 +48,16 @@ def cleanup_database_retention(db, *, now: float | None = None, today: date | No
     run("playlists_expired",
         "DELETE FROM dj_playlists WHERE owner_uid IN (SELECT uid FROM users WHERE last_seen < ?)",
         (user_cutoff,))
-    run("warnings_expired", "DELETE FROM moderation_warnings WHERE created_at < ?", (moderation_cutoff,))
-    run("activity_expired", "DELETE FROM activity_daily WHERE day_key < date(?, 'unixepoch')", (stamp - (ACTIVITY_RETENTION_DAYS - 1) * 86400,))
+    run("warnings", "DELETE FROM moderation_warnings WHERE created_at < ?", (moderation_cutoff,))
+    run("activity", "DELETE FROM activity_daily WHERE day_key < date(?, 'unixepoch')", (stamp - (ACTIVITY_RETENTION_DAYS - 1) * 86400,))
     run("event_rsvps_expired",
         "DELETE FROM event_rsvps WHERE event_id IN (SELECT id FROM community_events WHERE starts_at < ?)",
         (event_cutoff,))
-    run("events_expired", "DELETE FROM community_events WHERE starts_at < ?", (event_cutoff,))
+    run("events", "DELETE FROM community_events WHERE starts_at < ?", (event_cutoff,))
     run("poll_votes_expired",
         "DELETE FROM poll_votes WHERE poll_id IN (SELECT id FROM polls WHERE created_at < ?)",
         (poll_cutoff,))
-    run("polls_expired", "DELETE FROM polls WHERE created_at < ?", (poll_cutoff,))
+    run("polls", "DELETE FROM polls WHERE created_at < ?", (poll_cutoff,))
     run("inactive_users_deleted", "DELETE FROM users WHERE last_seen < ?", (user_cutoff,))
     run("excess_gifts_deleted",
         """DELETE FROM gifts WHERE id NOT IN (
