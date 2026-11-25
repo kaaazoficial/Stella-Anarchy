@@ -45,7 +45,8 @@ def _sections(prefix: str):
         ("MODERACIÓN Y ADMINISTRACIÓN", [
             f"▸ {p}advertir <UID> | <motivo> · {p}advertencias [UID] · {p}quitaradvertencia <ID>",
             f"▸ {p}antispam activar|desactivar · {p}actividad · {p}respuesta añadir|quitar|lista",
-            f"▸ {p}admin · {p}centro · {p}estado · {p}fuentes · {p}metricas · {p}autotest",
+            f"▸ {p}admin · {p}centro|nexus|paneladmin · {p}estado|sistema|diagnostico",
+            f"▸ {p}fuentes|saludfuentes · {p}metricas|rendimiento · {p}autotest|laboratorio",
             f"▸ {p}perfilbot <nombre> | <estado> · {p}avatarbot <URL HTTPS>",
         ]),
     ]
