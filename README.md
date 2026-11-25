@@ -72,6 +72,7 @@ Set these variables in the hosting provider. Never commit real credentials.
 | `ANARCHY_COMMUNITY_BOT_TOKEN` | No | Optional separate token for LiveKit voice endpoints; defaults to the bot token |
 | `JAMENDO_CLIENT_ID` | No | Optional Jamendo catalogue access |
 | `TTS_VOICE` | No | Defaults to Chilean Spanish Catalina |
+| `PROMETHEUS_METRICS_TOKEN` | No | Optional Bearer token protecting `/metrics` |
 
 AI uses Gemini first and automatically tries Groq if Gemini fails. Both provider keys are optional, but at least one is required for `!ia` and `!traducir`. The AI provider response is not saved in Stella's SQLite database and Stella does not maintain conversation history. The external providers' own processing and retention policies still apply. Web search uses DuckDuckGo's HTML search endpoint and may be unavailable if the provider blocks the request.
 
