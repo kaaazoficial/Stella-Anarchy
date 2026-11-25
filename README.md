@@ -33,7 +33,7 @@ Stella is an independent Python bot for Anarchy Apps. It has its own codebase, c
 
 ## Privacy, data and retention
 
-Stella never stores message contents or conversation transcripts. AI continuity is optional and volatile: at most two recent exchanges per room/user, a five-minute TTL, a maximum of 100 active sessions and an explicit `!ia olvidar` command. This context is held only in process memory and disappears on restart. Prompts sent to Gemini or Groq are processed by the selected provider; that provider's own retention policy still applies.
+Stella can optionally index ordinary room messages in Qdrant when configured. Indexed text expires after 30 days by default, cleanup runs every six hours, and retrieval is restricted to the current room. Users can opt out with `!memoria desactivar`, re-enable with `!memoria activar`, or delete their indexed messages with `!memoria olvidar`. AI conversation context remains ephemeral. AI continuity is optional and volatile: at most two recent exchanges per room/user, a five-minute TTL, a maximum of 100 active sessions and an explicit `!ia olvidar` command. This context is held only in process memory and disappears on restart. Prompts sent to Gemini or Groq are processed by the selected provider; that provider's own retention policy still applies.
 
 SQLite stores only data required by existing community features:
 - Account operations: UID, nickname, points and last-seen timestamp. Accounts and their associated points/reward state are deleted after 90 days of inactivity.
@@ -66,6 +66,13 @@ Set these variables in the hosting provider. Never commit real credentials.
 | `DATA_DIR` | No | SQLite directory; defaults to `./data` |
 | `GEMINI_API_KEY` | No | Gemini primary provider key |
 | `GEMINI_MODEL` | No | Defaults to `gemini-3.5-flash-lite` |
+| `QDRANT_URL` | No | Qdrant Cloud endpoint |
+| `QDRANT_API_KEY` | No | Qdrant API key; keep secret |
+| `QDRANT_COLLECTION` | No | Defaults to `stella_messages` |
+| `GEMINI_EMBEDDING_MODEL` | No | Defaults to `gemini-embedding-2` |
+| `GEMINI_EMBEDDING_DIMENSIONS` | No | Defaults to `768` |
+| `MEMORY_RETENTION_DAYS` | No | Defaults to `30` |
+| `MEMORY_CLEANUP_INTERVAL_SECONDS` | No | Defaults to `21600` (six hours) |
 | `GEMINI_API_URL` | No | Gemini API base URL |
 | `GROQ_API_KEY` | No | Groq fallback provider key |
 | `GROQ_MODEL` | No | Defaults to `openai/gpt-oss-20b` |
