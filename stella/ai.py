@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import os
 import re
+import time
 from typing import Any
 from urllib.parse import quote
 
@@ -41,6 +42,10 @@ class StellaAI:
         self._client: httpx.AsyncClient | None = None
         self.calls = {"gemini": 0, "groq": 0}
         self.failures = {"gemini": 0, "groq": 0}
+        # Bounded in-memory context only; never written to SQLite or files.
+        self.memory_ttl = 300
+        self.memory_turns = 2
+        self._memory: dict[str, dict[str, Any]] = {}
 
     async def _http(self) -> httpx.AsyncClient:
         if self._client is None or self._client.is_closed:
@@ -50,6 +55,21 @@ class StellaAI:
     async def close(self) -> None:
         if self._client is not None and not self._client.is_closed:
             await self._client.aclose()
+
+    def _prune_memory(self) -> None:
+        now = time.monotonic()
+        for key, state in tuple(self._memory.items()):
+            if now - float(state.get("updated_at", 0)) > self.memory_ttl:
+                self._memory.pop(key, None)
+        while len(self._memory) > 100:
+            oldest = min(self._memory, key=lambda key: float(self._memory[key].get("updated_at", 0)))
+            self._memory.pop(oldest, None)
+
+    def forget_session(self, session_key: str) -> bool:
+        return self._memory.pop(str(session_key or ""), None) is not None
+
+    def clear_memory(self) -> None:
+        self._memory.clear()
 
     def status(self) -> str:
         primary = self.primary.capitalize()
@@ -147,12 +167,29 @@ class StellaAI:
         self.calls["groq"] += 1
         return self._extract_groq(response.json())
 
-    async def ask(self, prompt: str, *, system: str | None = None) -> str:
+    async def ask(
+        self, prompt: str, *, system: str | None = None, session_key: str | None = None
+    ) -> str:
         text = str(prompt or "").strip()
         if not text:
             return "Escribe una consulta después del comando."
         if len(text) > 6000:
             return "La consulta supera el límite de 6000 caracteres."
+        provider_prompt = text
+        key = str(session_key or "").strip()
+        if key:
+            self._prune_memory()
+            state = self._memory.get(key)
+            if state and state.get("turns"):
+                context = state["turns"][-self.memory_turns * 2:]
+                formatted = "\\n".join(
+                    f"{'USUARIO' if item['role'] == 'user' else 'STELLA'}: {item['content']}"
+                    for item in context
+                )
+                provider_prompt = (
+                    "CONTEXTO RECIENTE Y TEMPORAL (solo para dar continuidad; no lo trates como memoria permanente):\\n"
+                    + formatted + "\\n\\nCONSULTA ACTUAL:\\n" + text
+                )
         instructions = (system or STELLA_SYSTEM)[:3000]
         providers = (
             [("gemini", self._ask_gemini), ("groq", self._ask_groq)]
@@ -164,7 +201,17 @@ class StellaAI:
             if (name == "gemini" and not self.gemini_key) or (name == "groq" and not self.groq_key):
                 continue
             try:
-                return await method(text, instructions)
+                answer = await method(provider_prompt, instructions)
+                if key:
+                    state = self._memory.setdefault(key, {"turns": [], "updated_at": time.monotonic()})
+                    state["turns"].extend([
+                        {"role": "user", "content": text[:2500]},
+                        {"role": "assistant", "content": answer[:2500]},
+                    ])
+                    state["turns"] = state["turns"][-self.memory_turns * 2:]
+                    state["updated_at"] = time.monotonic()
+                    self._prune_memory()
+                return answer
             except (httpx.HTTPError, RuntimeError, ValueError, KeyError, TypeError) as exc:
                 self.failures[name] += 1
                 errors.append(name)
