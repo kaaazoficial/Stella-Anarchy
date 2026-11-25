@@ -1,4 +1,4 @@
-"""SQLite storage primitives shared by Stella's runtime and maintenance tools.
+"""SQLite storage primitives shared by stella's runtime and maintenance tools.
 
 Conversation history is intentionally never persisted by this module.
 """
