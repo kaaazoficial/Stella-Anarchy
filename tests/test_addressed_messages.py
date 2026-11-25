@@ -326,3 +326,69 @@ def test_real_question_after_name_is_preserved():
 
     assert extract_stella_call("Stella, ¿cómo estás?") == "¿cómo estás?"
     assert extract_stella_call("Oye Stella, explícame esto") == "explícame esto"
+
+
+def test_natural_followup_continues_for_same_user_without_mention(monkeypatch):
+    import stella.bot as bot_module
+
+    b = bot()
+    b._active_ai_conversations = {("r", "u"): bot_module.time.monotonic() + 60}
+    calls = []
+
+    async def capture_ai(*args):
+        calls.append(args)
+
+    b._ai_assist = capture_ai
+    monkeypatch.setattr(
+        bot_module, "interpret_natural_request",
+        lambda value: "asistente me siento cansado hoy",
+    )
+
+    asyncio.run(b.handle_event({
+        "type": "message",
+        "threadId": "r",
+        "message": {"content": "Me siento cansado hoy", "author": {"uid": "u", "nickname": "Persona"}},
+    }))
+
+    assert len(calls) == 1
+    assert calls[0][0:4] == ("r", "u", "Persona", "me siento cansado hoy")
+    assert b.platform.sent == []
+
+
+def test_natural_followup_session_is_isolated_by_room_and_user():
+    import time
+
+    b = bot()
+    b._active_ai_conversations = {
+        ("room-a", "user-a"): time.monotonic() + 60,
+    }
+
+    assert b._has_active_ai_conversation("room-a", "user-a")
+    assert not b._has_active_ai_conversation("room-a", "user-b")
+    assert not b._has_active_ai_conversation("room-b", "user-a")
+
+
+def test_natural_followup_session_expires_and_is_removed(monkeypatch):
+    import stella.bot as bot_module
+
+    b = bot()
+    clock = [100.0]
+    monkeypatch.setattr(bot_module.time, "monotonic", lambda: clock[0])
+    b._active_ai_conversations = {("room", "user"): 99.0}
+
+    assert not b._has_active_ai_conversation("room", "user")
+    assert ("room", "user") not in b._active_ai_conversations
+
+
+def test_presence_call_opens_a_short_lived_natural_chat_session():
+    import time
+
+    b = bot()
+    asyncio.run(b.handle_event({
+        "type": "message",
+        "threadId": "room",
+        "message": {"content": "Stella", "author": {"uid": "user", "nickname": "Persona"}},
+    }))
+
+    assert b._has_active_ai_conversation("room", "user")
+    assert b._active_ai_conversations[("room", "user")] <= time.monotonic() + 601
