@@ -462,6 +462,29 @@ class StellaBot:
             return
         await self._reply(room_id, f"🧮 {args[:160]} = {result}", message)
 
+    async def _translate(self, room_id, uid, name, args, message):
+        language, separator, content = args.partition("|")
+        language = language.strip()
+        content = content.strip()
+        if not separator or not language or not content:
+            await self._reply(room_id, "Uso: !traducir <idioma> | <texto>", message)
+            return
+        if len(content) > 2500:
+            await self._reply(room_id, "El texto para traducir no puede superar 2500 caracteres.", message)
+            return
+        try:
+            translated = await self.ai_core.translate(
+                language,
+                content,
+                self.services.ai_request,
+                rate_key=uid,
+            )
+        except Exception:
+            log.exception("Translation command failed")
+            await self._reply(room_id, "No pude completar la traducción. Revisa el proveedor de IA o inténtalo más tarde.", message)
+            return
+        await self._reply(room_id, translated, message)
+
     async def _date_time(self, room_id, uid, name, args, message):
         zone = args.strip() if str(message.get("_stella_command") or "") == "zona" else "America/Santiago"
         try:
