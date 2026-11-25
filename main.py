@@ -138,6 +138,7 @@ async def receive_webhook(request: Request) -> dict[str, bool]:
     global last_retention_cleanup
     if now - last_retention_cleanup >= 3600:
         store.cleanup_expired()
+        await bot.vector_memory.cleanup()
         last_retention_cleanup = now
     key = _event_key(event, raw)
     if key in seen_events:
