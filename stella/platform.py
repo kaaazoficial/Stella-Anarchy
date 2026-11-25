@@ -23,7 +23,7 @@ class AnarchyClient:
         # enough distance between requests so multi-page replies are delivered.
         self._message_send_lock = asyncio.Lock()
         self._last_message_send_at = 0.0
-        self._message_min_interval = 0.5
+        self._message_min_interval = 1.0
         self._message_max_attempts = 4
         # IDs only; message text and conversation content are never retained.
         self._sent_message_ids: dict[str, deque[tuple[float, str]]] = defaultdict(deque)
@@ -220,7 +220,7 @@ class AnarchyClient:
                     )
                     return False
 
-                fallback = 0.5 * (2 ** attempt)
+                fallback = 2.0 * (2 ** attempt)
                 retry_delay = self._retry_after_seconds(
                     result.get("retry_after"), fallback
                 )
