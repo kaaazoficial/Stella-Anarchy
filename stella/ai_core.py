@@ -968,9 +968,13 @@ class StellaAICore:
         }
 
     def _fallback_provider_config(self) -> dict[str, str] | None:
-        if self._primary_provider_config()["name"] != "Google Gemini":
+        primary = self._primary_provider_config()
+        if primary["name"] == "Google Gemini":
+            fallback = self._groq_provider_config()
+        elif primary["name"] == "Groq":
+            fallback = self._gemini_provider_config()
+        else:
             return None
-        fallback = self._groq_provider_config()
         return fallback if fallback["key"] and fallback["url"] and fallback["model"] else None
 
     def _active_provider_config(self) -> dict[str, str]:
