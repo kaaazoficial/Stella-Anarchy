@@ -18,7 +18,7 @@ Stella is an independent Python bot for Anarchy Apps. It has its own codebase, c
 - Aggregate activity reports for administrators: `!actividad`.
 - Exact-match automatic replies, configured by administrators: `!respuesta añadir|quitar|lista`.
 - Preliminary link inspection: `!analizar`.
-- Gemini-first AI with Groq fallback, using the same models as Katheryne: Gemini `gemini-3.5-flash-lite` and Groq `openai/gpt-oss-20b`. Commands: `!ia`, `!ia estado`, `!traducir`, `!investigar`.
+- Gemini-first AI with Groq fallback. Models are configurable through environment variables. Commands: `!ia`, `!ia estado`, `!traducir`, `!investigar`.
 - LiveKit voice-room connection for active Anarchy calls: `!join`, `!salirsala`, `!voz`.
 - Text-to-speech with Edge TTS, Spanish voices, speed and volume controls: `!leer`, `!noleer`, `!tts voces`, `!tts voz`, `!tts velocidad`, `!tts volumen`.
 - Music DJ with open-license music catalogues (Internet Archive and Jamendo where configured), exact result selection, bounded queues, pause/resume/skip/stop and volume: `!dj buscar`, `!dj reproducir`, `!dj encolar`, `!dj cola`, `!dj pausa`, `!dj reanudar`, `!dj saltar`, `!dj detener`.
