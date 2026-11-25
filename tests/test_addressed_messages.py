@@ -15,22 +15,32 @@ class Platform:
         return True
 
 class Store:
+    def __init__(self):
+        self.settings = {}
     def touch_user(self,*a): pass
     def record_activity(self,*a): pass
     def add_warning(self,*a): return 1
-    def get_setting(self,*a): return "1"
+    def get_setting(self, room_id, key, default):
+        return self.settings.get((str(room_id), str(key)), default)
+    def set_setting(self, room_id, key, value):
+        self.settings[(str(room_id), str(key))] = str(value)
     def auto_reply_rules(self,*a): return []
     def get_profile(self,*a): return {"uid":a[0] if a else "u"}
 
 class Voice:
-    def __init__(self): self.speech=[]; self.enabled=False
+    def __init__(self):
+        self.speech=[]
+        self.enabled=False
+        self.speech_stopped=False
     async def enqueue_speech(self,*a):
         if self.enabled: self.speech.append(a)
+    async def stop_all_speech(self):
+        self.speech_stopped=True
     async def leave_room(self,*a,**k): pass
 
 def bot():
     value=object.__new__(StellaBot)
-    value.settings=SimpleNamespace(command_prefix="!")
+    value.settings=SimpleNamespace(command_prefix="!", sinner_uid="owner", admin_uids="")
     value.platform=Platform()
     value.store=Store()
     value.voice=Voice()
@@ -150,3 +160,90 @@ def test_autotest_command_suggestion_check_passes():
     assert len(b.platform.sent) == 1
     assert "4/4 correctas" in b.platform.sent[0][1]
     assert "✓ sugerencia de comandos" in b.platform.sent[0][1]
+
+def _message(content, uid="u"):
+    return {
+        "type":"message",
+        "threadId":"room-a",
+        "message":{"content":content,"author":{"uid":uid,"nickname":uid}},
+    }
+
+
+def test_owner_can_enable_global_silence_without_mentioning_stella():
+    b=bot()
+    asyncio.run(b.handle_event(_message("No le hables a nadie", "owner")))
+
+    assert b.store.get_setting("__stella_global__", "chat_silence", "0") == "1"
+    assert b.voice.speech_stopped is True
+    assert len(b.platform.sent) == 1
+    assert "silencio global activado" in b.platform.sent[0][1]
+
+
+def test_owner_can_enable_global_silence_with_direct_natural_call():
+    b=bot()
+    asyncio.run(b.handle_event(_message("Stella, no le hables a nadie", "owner")))
+
+    assert b.store.get_setting("__stella_global__", "chat_silence", "0") == "1"
+    assert len(b.platform.sent) == 1
+
+
+def test_non_owner_cannot_enable_global_silence():
+    b=bot()
+    asyncio.run(b.handle_event(_message("Stella, no le hables a nadie", "moderator")))
+
+    assert b.store.get_setting("__stella_global__", "chat_silence", "0") == "0"
+    assert len(b.platform.sent) == 1
+    assert "reservado al propietario" in b.platform.sent[0][1]
+
+
+def test_global_silence_blocks_commands_chat_replies_and_voice():
+    b=bot()
+    b.voice.enabled=True
+    b.store.set_setting("__stella_global__", "chat_silence", "1")
+
+    asyncio.run(b.handle_event(_message("!ping", "u")))
+    asyncio.run(b.handle_event(_message("Stella, hola", "u")))
+    asyncio.run(b.handle_event(_message("mensaje normal", "u")))
+
+    assert b.platform.sent == []
+    assert b.voice.speech == []
+
+
+def test_owner_can_restore_chat_with_natural_phrase_while_silenced():
+    b=bot()
+    b.store.set_setting("__stella_global__", "chat_silence", "1")
+
+    asyncio.run(b.handle_event(_message("Ya puedes volver a hablar", "owner")))
+
+    assert b.store.get_setting("__stella_global__", "chat_silence", "1") == "0"
+    assert len(b.platform.sent) == 1
+    assert "silencio global desactivado" in b.platform.sent[0][1]
+
+
+def test_owner_can_restore_chat_with_reversible_command_while_silenced():
+    b=bot()
+    b.store.set_setting("__stella_global__", "chat_silence", "1")
+
+    asyncio.run(b.handle_event(_message("!hablarchat", "owner")))
+
+    assert b.store.get_setting("__stella_global__", "chat_silence", "1") == "0"
+    assert len(b.platform.sent) == 1
+
+
+def test_owner_can_toggle_silence_with_commands():
+    b=bot()
+
+    asyncio.run(b.handle_event(_message("!silenciarchat", "owner")))
+    assert b.store.get_setting("__stella_global__", "chat_silence", "0") == "1"
+
+    asyncio.run(b.handle_event(_message("!despertar", "owner")))
+    assert b.store.get_setting("__stella_global__", "chat_silence", "1") == "0"
+
+
+def test_autotest_silence_phrase_recognition():
+    b=bot()
+    assert b._is_silence_request("No le hables a nadie")
+    assert b._is_silence_request("Stella, no le hables a nadie")
+    assert b._is_silence_request("por favor no le hables a nadie")
+    assert b._is_resume_request("Ya puedes volver a hablar")
+
