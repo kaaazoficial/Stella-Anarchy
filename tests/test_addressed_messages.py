@@ -20,6 +20,7 @@ class Store:
     def add_warning(self,*a): return 1
     def get_setting(self,*a): return "1"
     def auto_reply_rules(self,*a): return []
+    def get_profile(self,*a): return {"uid":a[0] if a else "u"}
 
 class Voice:
     def __init__(self): self.speech=[]; self.enabled=False
@@ -125,3 +126,27 @@ def test_help_command_sends_all_six_pages():
     for title in expected_titles:
         assert title in delivered
 
+def test_unknown_command_suggests_typo_without_executing_it():
+    b=bot()
+    handled=[]
+    async def capture_help(*args):
+        handled.append(args)
+    b._help_command=capture_help
+
+    asyncio.run(b._command("r", "u", "Persona", "ayudaa", {}))
+
+    assert handled == []
+    assert len(b.platform.sent) == 1
+    assert "¿Quisiste decir !ayuda?" in b.platform.sent[0][1]
+    assert "No ejecutaré la sugerencia automáticamente." in b.platform.sent[0][1]
+
+
+def test_autotest_command_suggestion_check_passes():
+    b=bot()
+    b._is_admin=lambda uid: True
+
+    asyncio.run(b._autotest("r", "u", "Admin", "", {}))
+
+    assert len(b.platform.sent) == 1
+    assert "4/4 correctas" in b.platform.sent[0][1]
+    assert "✓ sugerencia de comandos" in b.platform.sent[0][1]

@@ -665,9 +665,15 @@ class StellaBot:
         if not self._is_admin(uid):
             await self._reply(room_id, "Solo un administrador puede ejecutar el autotest.", message)
             return
+        command_suggestion = suggest_command("ayudaa", {"ayuda", "ping"})
         checks = [
             ("calculadora", calculate("2 + 2") == "4"),
-            ("sugerencia de comandos", bool(suggest_command("aydu", {"ayuda", "ping"}))),
+            (
+                "sugerencia de comandos",
+                command_suggestion is not None
+                and command_suggestion[0] == "ayuda"
+                and command_suggestion[1] >= 86,
+            ),
             ("fecha", bool(datetime_text("America/Santiago"))),
             ("perfil de usuario", self.store.get_profile(uid) is not None),
         ]
