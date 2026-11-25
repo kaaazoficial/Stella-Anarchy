@@ -43,8 +43,18 @@ AI_CONVERSATION_TTL_SECONDS = 600
 MAX_ACTIVE_AI_CONVERSATIONS = 500
 
 _PLAYFUL_INSULT_PATTERNS = (
-    re.compile(r"\b(?:idiota|imb[eé]cil|est[uú]pida?|tonta?|in[uú]til|pesada|tarada|boba|payasa|rid[ií]cula|basura|mierda)\b", re.IGNORECASE),
-    re.compile(r"\b(?:c[aá]llate|no sirves para nada|no vales nada|eres un desastre)\b", re.IGNORECASE),
+    re.compile(
+        r"\b(?:eres|estas|sos|pareces)\s+(?:(?:un|una)\s+)?"
+        r"(?:idiota|imb[eé]cil|est[uú]pida?|tonta?|in[uú]til|pesada|"
+        r"tarada|boba|payasa|rid[ií]cula|basura|mierda)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\b(?:c[aá]llate|no sirves para nada|no vales nada|eres un desastre)\b"
+        r"|\b(?:idiota|imb[eé]cil|est[uú]pida?|tonta?|in[uú]til|pesada|"
+        r"tarada|boba|payasa|rid[ií]cula)\s*[.!?]*$",
+        re.IGNORECASE,
+    ),
 )
 _PLAYFUL_JOKE_PATTERNS = (
     re.compile(r"\b(?:era broma|es broma|te estoy molestando|no te enojes|no te piques|jaj+a+|xd+|lmao)\b", re.IGNORECASE),
