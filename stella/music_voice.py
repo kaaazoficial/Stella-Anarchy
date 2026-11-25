@@ -483,6 +483,10 @@ class MusicVoice:
         thread_id = str(room_id or "").strip()
         if not thread_id:
             return
+        should_request_leave = request_leave and thread_id not in self._leave_api_requested
+        if should_request_leave:
+            # Mark before any await so concurrent disconnect callbacks cannot duplicate it.
+            self._leave_api_requested.add(thread_id)
         state = self.rooms.pop(thread_id, None)
         if state:
             state["connected"] = False
@@ -508,8 +512,7 @@ class MusicVoice:
 
         # Mark before awaiting the API call so concurrent disconnect callbacks
         # cannot issue duplicate leave requests for the same room.
-        if request_leave and thread_id not in self._leave_api_requested:
-            self._leave_api_requested.add(thread_id)
+        if should_request_leave:
             try:
                 result = await self.platform.request(
                     "POST", f"/live-rooms/{quote(thread_id, safe='')}/leave"
