@@ -171,7 +171,22 @@ async def root() -> dict[str, str]:
 
 @app.get("/health")
 async def health() -> dict[str, Any]:
-    return {"ok": True, "bot": "Stella", "version": settings.version}
+    database = verify_sqlite_database(settings.database_path)
+    return {"ok": bool(database.get("ok")), "bot": "Stella", "version": settings.version, "database": database["integrity"]}
+
+
+@app.get("/metrics")
+async def metrics_endpoint(request: Request):
+    expected = os.getenv("PROMETHEUS_METRICS_TOKEN", "").strip()
+    if expected:
+        supplied = request.headers.get("Authorization", "").removeprefix("Bearer ").strip()
+        if not hmac.compare_digest(expected, supplied):
+            raise HTTPException(status_code=401, detail="Unauthorized")
+    body, content_type = render_prometheus_metrics(
+        METRICS,
+        uptime_seconds=time.monotonic() - PROCESS_STARTED_AT,
+    )
+    return Response(content=body, media_type=content_type)
 
 
 @app.post("/webhook")
