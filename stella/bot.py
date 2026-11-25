@@ -1138,6 +1138,30 @@ class StellaBot:
 
     async def _voice_command(self, room_id, uid, name, args, message):
         command = str(message.get("_stella_command") or "").casefold().strip()
+        if command == "dj":
+            action, _, rest = args.partition(" ")
+            if action.casefold() in {"favorito", "favoritos", "favorite", "favorites"}:
+                playlist = self.store.list_playlists(room_id, uid)
+                if not any(row["name"].casefold() == "favoritos" for row in playlist):
+                    self.store.create_playlist(room_id, uid, "Favoritos")
+                if not rest.strip():
+                    tracks = self.store.playlist_tracks(room_id, uid, "Favoritos")
+                    body = "\\n".join(f"{i}. {track['title']} — {track['creator']}" for i, track in enumerate(tracks, 1)) or "Todavía no guardaste pistas."
+                    await self._reply(room_id, "⭐ TUS FAVORITOS\\n" + body, message)
+                    return
+                try:
+                    number = int(rest.strip())
+                except ValueError:
+                    await self._reply(room_id, "Uso: !dj favorito <número de resultado> o !dj favoritos.", message)
+                    return
+                saved = self.voice.search_results.get(room_id) or {}
+                items = saved.get("items") or []
+                if saved.get("expires", 0) <= time.monotonic() or not 1 <= number <= len(items):
+                    await self._reply(room_id, "Primero busca pistas con !dj buscar.", message)
+                    return
+                result = self.store.add_playlist_track(room_id, uid, "Favoritos", items[number - 1])
+                await self._reply(room_id, "⭐ Pista guardada en Favoritos." if result == "ok" else "No pude guardar esa pista.", message)
+                return
         handled, response = await self.voice.handle_command(room_id, command, args)
         if handled:
             await self._reply(room_id, response, message)
