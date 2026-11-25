@@ -21,7 +21,9 @@ NATURAL_COMMAND_NAMES = frozenset({
     "trivia", "responder", "adivina", "intento", "verdad", "8ball",
     "elige", "ship", "roast", "encuesta", "evento", "actividad",
     "advertir", "advertencias", "quitaradvertencia", "antispam",
-    "respuesta", "respuestas", "traducir", "ia", "asistente",
+    "respuesta", "respuestas", "eliminarmensajes", "centro", "nexus",
+    "paneladmin", "estado", "fuentes", "saludfuentes", "metricas", "autotest",
+    "traducir", "ia", "asistente",
     "investigar", "analizar", "analizartexto", "calcular", "fecha",
     "zona", "join", "salirsala", "voz", "tts", "leer", "noleer",
     "dj", "reproducir",
@@ -93,6 +95,7 @@ def interpret_natural_request(value: str) -> str | None:
         (r"^(?:pausa|deten) (?:la )?musica$", "dj pausa"),
         (r"^(?:reanuda|continua) (?:la )?musica$", "dj reanudar"),
         (r"^(?:salta) (?:la )?(?:cancion|pista)$", "dj saltar"),
+        (r"^(?:elimina|borra|limpia) (?:tus )?mensajes(?: propios)?$", "eliminarmensajes"),
     )
     for pattern, command in patterns:
         if re.fullmatch(pattern, normalized):
