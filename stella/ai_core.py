@@ -42,7 +42,7 @@ AI_PUBLIC_COMMANDS = frozenset({
 
 AI_ADMIN_COMMANDS = frozenset({
     "estado", "fuentes", "saludfuentes", "metricas",
-    "centro", "nexus", "autotest", "admin", "paneladmin",
+    "centro", "autotest", "admin",
     "respuestas", "respuesta", "advertir", "advertencias",
     "quitaradvertencia", "antispam", "perfilbot", "avatarbot",
 })
@@ -72,14 +72,12 @@ AI_COMMAND_CATALOG = {
     "ayuda": "sin argumentos: muestra categorías y usos.",
     "menu": "sin argumentos: muestra el catálogo de comandos por categorías.",
     "centro": "sin argumentos: panel de administración (solo administradores).",
-    "nexus": "sin argumentos: panel Nexus (solo administradores).",
     "estado": "sin argumentos: estado técnico (solo administradores).",
     "fuentes": "sin argumentos: estado de las fuentes (administradores).",
     "saludfuentes": "sin argumentos: alias de fuentes (administradores).",
     "metricas": "sin argumentos: muestra métricas agregadas del proceso (solo administradores).",
     "autotest": "sin argumentos: ejecuta pruebas internas (solo administradores).",
     "admin": "[resumen|actividad|antispam|avisos|historial]: panel administrativo.",
-    "paneladmin": "alias del panel administrativo.",
     "respuestas": "[estado|on|off]: consulta o activa respuestas automáticas (administradores).",
     "respuesta": "añadir palabra | respuesta; lista; eliminar ID (administradores).",
     "advertir": "@usuario [motivo]: registra una advertencia (administradores).",
@@ -610,20 +608,6 @@ AI_TOOL_REQUEST_HINTS = (
     ({"calcular"}, ("calcula ", "calcular ", "cuanto es ", "cuánto es ", "resuelve ", "raiz cuadrada de ")),
 )
 
-AI_GENSIN_REQUEST_HINTS = (
-    ({"", }, ("quien es", "quien fue", "que es", "ficha de", "datos de", "informacion de", "info de", )),
-    ({}, ("build", "artefactos", "mejor arma", "estadisticas de build")),
-    ({}, ("equipo", "composicion", "companeros", "companero")),
-    ({}, ("rotation")),
-    ({}, ("ascension", "mejorar a", "subir a nivel")),
-    ({}, ("reaccion", "elemental")),
-    ({}, ("jefe", "boss", )),
-    ({}, ("banners", "proximos banners")),
-    ({}, ("lista de", "listado", "todos los personajes", "todos los enemigos")),
-    ({}, ("mapa", "region", "lugar de ")),
-    ({}, ("dato curioso")),
-    ({}, ("contador de deseos")),
-)
 
 AI_ADMIN_REQUEST_HINTS = (
     ({"estado"}, ("estado tecnico", "estado del bot", "diagnostico del bot")),
@@ -631,7 +615,6 @@ AI_ADMIN_REQUEST_HINTS = (
     ({"metricas"}, ("metricas", "rendimiento del bot")),
     ({"autotest"}, ("autotest", "pruebas internas", "ejecuta pruebas")),
     ({"centro"}, ("centro de administracion", "centro admin")),
-    ({"nexus"}, ("nexus", "panel nexus")),
     ({"admin", "paneladmin"}, ("panel admin", "panel administrativo", "administracion")),
     ({"guardian"}, ("guardian", "panel preventivo")),
     ({"antispam"}, ("antispam", "anti spam")),
@@ -639,7 +622,6 @@ AI_ADMIN_REQUEST_HINTS = (
     ({"respuestas", "respuesta"}, ("respuestas automaticas", "respuesta automatica")),
     ({"perfilbot"}, ("perfil del bot", "perfilbot")),
     ({"avatarbot"}, ("avatar del bot", "avatarbot")),
-    ({"eliminarmensajes"}, ("eliminar mensajes", "borrar mensajes", "limpiar mensajes enviados")),
 )
 
 
@@ -667,11 +649,7 @@ def select_ai_tool_commands(
         if re.search(rf"(?<!\w)!{re.escape(name)}(?!\w)", text):
             selected.add(name)
 
-    hint_groups = (
-        AI_GENSIN_REQUEST_HINTS
-        if intent == "specialized_subject"
-        else (*AI_TOOL_REQUEST_HINTS, *AI_ADMIN_REQUEST_HINTS)
-    )
+    hint_groups = (*AI_TOOL_REQUEST_HINTS, *AI_ADMIN_REQUEST_HINTS)
     if intent == "research":
         selected.add("investigar")
     else:
@@ -683,8 +661,6 @@ def select_ai_tool_commands(
             ):
                 selected.update(commands)
 
-    if intent == "specialized_subject" and not selected:
-        selected.update({})
     if intent == "multi_action":
         selected.intersection_update(AI_PLAN_SAFE_COMMANDS)
 
@@ -718,11 +694,6 @@ def build_ai_instructions(
         "research": (
             "INVESTIGACIÓN: usa la herramienta de investigación solo si aporta evidencia. "
             "Distingue hallazgos, discrepancias y datos no confirmados; no inventes citas."
-        ),
-        "specialized_subject": (
-            "INTENCIÓN: . Usa datos de  solo para esta consulta. "
-            "Distingue información confirmada, teoría y especulación de la comunidad. "
-            "No inventes escalados, estadísticas, rotaciones ni disponibilidad."
         ),
         "conversation": (
             "CONVERSACIÓN: responde directamente y con naturalidad; no ejecutes herramientas. "
@@ -808,7 +779,7 @@ def validate_ai_tool_call(
                   "noleer", "silenciolectura", "pausa", "pausar", "reanudar",
                   "continuar", "saltar", "cola", "actual", "salirsala",
                   "djdetener", "djstop", "salas", "subirvolumen", "bajarvolumen",
-                  "silencio", "centro", "nexus", "autotest"} and args:
+                  "silencio", "centro", "autotest"} and args:
         return None
     elif name in {"pagar", "transferir"}:
         parts = args.split()
