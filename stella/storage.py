@@ -604,13 +604,20 @@ class Store:
                 (str(room_id), str(user_uid), day),
             )
 
-    def activity_summary(self, room_id: str, limit: int = 10) -> list[dict[str, Any]]:
+    def activity_summary(self, room_id: str, limit: int = 10, days: int = 7) -> list[dict[str, Any]]:
+        from datetime import datetime, timedelta, timezone
+
+        period = max(1, min(7, int(days)))
+        today = datetime.now(timezone.utc).date()
+        first_day = (today - timedelta(days=period - 1)).isoformat()
+        last_day = today.isoformat()
         with self._session(self.connect()) as db:
             rows = db.execute(
                 """SELECT user_uid,SUM(message_count) AS total_messages
-                   FROM activity_daily WHERE room_id=?
+                   FROM activity_daily
+                   WHERE room_id=? AND day_key>=? AND day_key<=?
                    GROUP BY user_uid ORDER BY total_messages DESC LIMIT ?""",
-                (str(room_id), max(1, min(20, int(limit)))),
+                (str(room_id), first_day, last_day, max(1, min(20, int(limit)))),
             ).fetchall()
             return [dict(row) for row in rows]
 
