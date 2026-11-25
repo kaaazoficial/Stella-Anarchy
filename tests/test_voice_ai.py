@@ -9,6 +9,7 @@ from stella.music_voice import (
     MusicVoice,
     TTS_VOICES,
     _allowed_audio_url,
+    _audius_license_label,
     _license_label,
     _safe_filename,
 )
@@ -48,10 +49,15 @@ def test_music_sources_are_restricted_to_supported_https_hosts():
     assert _allowed_audio_url("https://archive.org/download/item/audio.mp3")
     assert _allowed_audio_url("https://ia800000.us.archive.org/file.mp3")
     assert _allowed_audio_url("https://upload.wikimedia.org/wikipedia/commons/a/audio.ogg")
+    assert _allowed_audio_url("https://ccmixter.org/content/artist/song.mp3")
+    assert _allowed_audio_url("https://api.audius.co/v1/tracks/123/stream?app_name=StellaAnarchy")
+    assert _allowed_audio_url("https://discoveryprovider.audius.co/content/song.mp3")
     assert _allowed_audio_url("https://www.jamendo.com/track/123")
     assert not _allowed_audio_url("http://archive.org/download/item/audio.mp3")
     assert not _allowed_audio_url("https://youtube.com/watch?v=abc")
     assert not _allowed_audio_url("https://user:pass@archive.org/audio.mp3")
+    assert not _allowed_audio_url("https://api.audius.co.evil.example/audio.mp3")
+    assert not _allowed_audio_url("https://ccmixter.org.evil.example/audio.mp3")
 
 
 def test_music_license_filter_requires_open_license():
@@ -60,6 +66,11 @@ def test_music_license_filter_requires_open_license():
     assert _license_label("https://creativecommons.org/publicdomain/zero/1.0/") == "CC0"
     assert _license_label("https://creativecommons.org/licenses/by-nc/4.0/") is None
     assert _license_label("") is None
+    assert _audius_license_label("CC BY 4.0") == ("Creative Commons BY", "https://creativecommons.org/licenses/by/4.0/")
+    assert _audius_license_label("CC BY-SA 4.0") == ("Creative Commons BY-SA", "https://creativecommons.org/licenses/by-sa/4.0/")
+    assert _audius_license_label("CC0") == ("CC0", "https://creativecommons.org/publicdomain/zero/1.0/")
+    assert _audius_license_label("CC BY-NC 4.0") is None
+    assert _audius_license_label("All Rights Reserved") is None
 
 
 def test_music_filename_validation_blocks_paths_and_unknown_types():
@@ -498,18 +509,130 @@ async def test_dj_search_uses_available_catalogs_without_api_keys(monkeypatch):
         calls.append(("openverse", query, limit))
         return []
 
+    async def ccmixter(query, limit):
+        calls.append(("ccmixter", query, limit))
+        return []
+
+    async def audius(query, limit):
+        calls.append(("audius", query, limit))
+        return []
+
     voice.search_archive = archive
     voice.search_wikimedia = commons
     voice.search_openverse = openverse
+    voice.search_ccmixter = ccmixter
+    voice.search_audius = audius
 
     ok, message = await voice.search_music("thread-1", "instrumental study")
 
     assert ok
-    assert {item[0] for item in calls} == {"archive", "commons", "openverse"}
+    assert {item[0] for item in calls} == {"archive", "commons", "openverse", "ccmixter", "audius"}
     assert "Archive" in message and "Commons" in message
     assert len(voice.search_results["thread-1"]["items"]) == 2
 
 
+
+
+
+
+@pytest.mark.asyncio
+async def test_ccmixter_search_checks_license_and_direct_audio_file():
+    class FakeResponse:
+        def __init__(self, payload):
+            self.payload = payload
+        def raise_for_status(self):
+            return None
+        def json(self):
+            return self.payload
+
+    class FakeHTTP:
+        def __init__(self):
+            self.calls = []
+        async def get(self, url, params=None, **kwargs):
+            self.calls.append((url, params or {}))
+            params = params or {}
+            if params.get("dataview") == "info":
+                return FakeResponse([{
+                    "file_name": "Open beat",
+                    "user_name": "artist",
+                    "user_real_name": "Independent Artist",
+                    "license_name": "Attribution",
+                    "license_url": "https://creativecommons.org/licenses/by/4.0/",
+                    "file_page_url": "https://ccmixter.org/files/artist/123",
+                }])
+            if params.get("dataview") == "files":
+                return FakeResponse([{
+                    "download_url": "https://ccmixter.org/content/artist/open-beat.mp3",
+                    "file_name": "open-beat.mp3",
+                    "file_rawsize": "4096",
+                }])
+            if params.get("lic") == "by":
+                return FakeResponse([{"upload_id": "123", "user_name": "artist"}])
+            return FakeResponse([])
+
+    voice = object.__new__(MusicVoice)
+    voice.http = FakeHTTP()
+    tracks = await voice.search_ccmixter("instrumental study", limit=3)
+
+    assert len(tracks) == 1
+    assert tracks[0]["source"] == "ccMixter"
+    assert tracks[0]["license"] == "Creative Commons BY"
+    assert tracks[0]["creator"] == "Independent Artist"
+    assert tracks[0]["url"].endswith(".mp3")
+    assert any(call[1].get("lic") == "by" for call in voice.http.calls)
+    assert any(call[1].get("dataview") == "files" for call in voice.http.calls)
+
+
+@pytest.mark.asyncio
+async def test_audius_search_uses_stream_endpoint_and_rejects_restricted_tracks():
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+        def json(self):
+            return {"data": [
+                {
+                    "id": "track-1",
+                    "title": "Open Track",
+                    "license": "CC BY-SA 4.0",
+                    "is_streamable": True,
+                    "duration": 180,
+                    "permalink": "https://audius.co/artist/open-track",
+                    "user": {"name": "Independent Artist"},
+                },
+                {
+                    "id": "track-2",
+                    "title": "All Rights Reserved",
+                    "license": "All Rights Reserved",
+                    "is_streamable": True,
+                    "duration": 180,
+                },
+                {
+                    "id": "track-3",
+                    "title": "Non-commercial",
+                    "license": "CC BY-NC 4.0",
+                    "is_streamable": True,
+                    "duration": 180,
+                },
+            ]}
+
+    class FakeHTTP:
+        def __init__(self):
+            self.calls = []
+        async def get(self, url, params=None, **kwargs):
+            self.calls.append((url, params, kwargs))
+            return FakeResponse()
+
+    voice = object.__new__(MusicVoice)
+    voice.http = FakeHTTP()
+    tracks = await voice.search_audius("ambient", limit=5)
+
+    assert len(tracks) == 1
+    assert tracks[0]["license"] == "Creative Commons BY-SA"
+    assert tracks[0]["creator"] == "Independent Artist"
+    assert tracks[0]["source"] == "Audius"
+    assert "/tracks/track-1/stream" in tracks[0]["url"]
+    assert "https://" in tracks[0]["item_url"]
+    assert voice.http.calls[0][0] == "https://api.audius.co/v1/tracks/search"
 
 
 @pytest.mark.asyncio
