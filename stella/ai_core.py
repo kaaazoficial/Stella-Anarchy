@@ -29,8 +29,7 @@ AI_PUBLIC_COMMANDS = frozenset({
     # Comunidad y perfiles propios
     "bio", "miestado", "afinidad", "amistad", "interaccion", "regalo", "muro",
     "evento", "roast",
-    # specialized subject / 
- Juegos y economía personal
+    # Juegos y economía personal
     "trivia", "responder", "adivina", "intento", "diario", "daily", "trabajar",
     "pagar", "transferir", "encuesta", "elige", "duelo", "ship", "azar",
     "verdad", "8ball", "chiste", "frase", "reto",
