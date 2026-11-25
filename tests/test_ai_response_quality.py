@@ -1,3 +1,5 @@
+import pytest
+
 from stella.ai_core import (
     build_ai_instructions,
     classify_request_intent,
