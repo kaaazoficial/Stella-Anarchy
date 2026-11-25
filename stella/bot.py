@@ -146,8 +146,9 @@ class StellaBot:
             "!",
             "-",
         )))
-        used_prefix = next((item for item in prefixes if item and content.startswith(item)), None)
-        addressed = direct_call is not None or mentioned or replied or used_prefix is not None
+        # A prefix alone is never an invocation: commands must be called by name,
+        # explicitly mention Stella, or reply to one of Stella's own messages.
+        addressed = direct_call is not None or mentioned or replied
 
         self.store.touch_user(uid, name)
         self.store.record_activity(room_id, uid)
@@ -165,6 +166,16 @@ class StellaBot:
             return
 
         request_text = direct_call if direct_call is not None else content
+        if direct_call is not None and not any(request_text.startswith(item) for item in prefixes):
+            # extract_stella_call removes vocative punctuation; recover a command
+            # prefix that was immediately attached to the explicit name.
+            prefixed_call = re.search(
+                r"(?<![\\w])@?(?:stella|stell|stela)(?![\\w])\\s*([!/-]\\s*.+)$",
+                content,
+                flags=re.IGNORECASE,
+            )
+            if prefixed_call:
+                request_text = prefixed_call.group(1).strip()
         prefix = next((item for item in prefixes if item and request_text.startswith(item)), None)
         if prefix:
             await self._command(room_id, uid, name, request_text[len(prefix):].strip(), message)
@@ -1471,6 +1482,13 @@ class StellaBot:
             mode = "hablando" if args.casefold().strip() == "hablando" else "participantes"
             await self._reply(room_id, format_voice_state(room_id, mode), message)
             return
+        if command == "reproducir":
+            if not args.strip():
+                await self._reply(room_id, "Uso: !reproducir <archivo>. Consulta !dj archivos para ver los audios locales disponibles.", message)
+                return
+            ok, response = await self.voice.enqueue_local_track(room_id, args.strip(), enqueue=False)
+            await self._reply(room_id, response, message)
+            return
         dj_aliases = {
             "pausa": "pausa", "pausar": "pausa",
             "reanudar": "reanudar", "continuar": "reanudar",
@@ -1490,23 +1508,51 @@ class StellaBot:
                 playlist = self.store.list_playlists(room_id, uid)
                 if not any(row["name"].casefold() == "favoritos" for row in playlist):
                     self.store.create_playlist(room_id, uid, "Favoritos")
-                if not rest.strip():
+                subcommand, _, operand = rest.partition(" ")
+                subcommand = subcommand.casefold().strip()
+                operand = operand.strip()
+                # Keep the historic short form !dj favorito <resultado>.
+                if not subcommand or subcommand in {"lista", "listar", "list"}:
                     tracks = self.store.playlist_tracks(room_id, uid, "Favoritos")
                     body = "\n".join(f"{i}. {track['title']} — {track['creator']}" for i, track in enumerate(tracks, 1)) or "Todavía no guardaste pistas."
                     await self._reply(room_id, "⭐ TUS FAVORITOS\n" + body, message)
                     return
-                try:
-                    number = int(rest.strip())
-                except ValueError:
-                    await self._reply(room_id, "Uso: !dj favorito <número de resultado> o !dj favoritos.", message)
+                if subcommand.isdigit():
+                    operand, subcommand = subcommand, "guardar"
+                if subcommand in {"guardar", "agregar", "añadir", "save"}:
+                    try:
+                        number = int(operand)
+                    except ValueError:
+                        number = 0
+                    saved = self.voice.search_results.get(room_id) or {}
+                    items = saved.get("items") or []
+                    if saved.get("expires", 0) <= time.monotonic() or not 1 <= number <= len(items):
+                        await self._reply(room_id, "Primero busca pistas con !dj buscar y elige un número válido.", message)
+                        return
+                    result = self.store.add_playlist_track(room_id, uid, "Favoritos", items[number - 1])
+                    await self._reply(room_id, "⭐ Pista guardada en Favoritos." if result == "ok" else "No pude guardar esa pista.", message)
                     return
-                saved = self.voice.search_results.get(room_id) or {}
-                items = saved.get("items") or []
-                if saved.get("expires", 0) <= time.monotonic() or not 1 <= number <= len(items):
-                    await self._reply(room_id, "Primero busca pistas con !dj buscar.", message)
+                if subcommand in {"reproducir", "play"}:
+                    try:
+                        number = int(operand)
+                    except ValueError:
+                        number = 0
+                    tracks = self.store.playlist_tracks(room_id, uid, "Favoritos")
+                    if not 1 <= number <= len(tracks):
+                        await self._reply(room_id, "No encontré ese favorito.", message)
+                        return
+                    ok, response = await self.voice.enqueue_saved_track(room_id, tracks[number - 1], enqueue=False)
+                    await self._reply(room_id, response, message)
                     return
-                result = self.store.add_playlist_track(room_id, uid, "Favoritos", items[number - 1])
-                await self._reply(room_id, "⭐ Pista guardada en Favoritos." if result == "ok" else "No pude guardar esa pista.", message)
+                if subcommand in {"quitar", "eliminar", "borrar", "remove", "delete"}:
+                    try:
+                        number = int(operand)
+                    except ValueError:
+                        number = 0
+                    removed = self.store.remove_playlist_track(room_id, uid, "Favoritos", number)
+                    await self._reply(room_id, "Favorito eliminado." if removed else "No encontré ese favorito.", message)
+                    return
+                await self._reply(room_id, "Usa !dj favorito lista|guardar <resultado>|reproducir <número>|quitar <número>.", message)
                 return
         handled, response = await self.voice.handle_command(room_id, command, args)
         if handled:

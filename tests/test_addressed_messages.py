@@ -18,10 +18,13 @@ class Store:
     def touch_user(self,*a): pass
     def record_activity(self,*a): pass
     def add_warning(self,*a): return 1
+    def get_setting(self,*a): return "1"
+    def auto_reply_rules(self,*a): return []
 
 class Voice:
-    def __init__(self): self.speech=[]
-    async def enqueue_speech(self,*a): self.speech.append(a)
+    def __init__(self): self.speech=[]; self.enabled=False
+    async def enqueue_speech(self,*a):
+        if self.enabled: self.speech.append(a)
     async def leave_room(self,*a,**k): pass
 
 def bot():
@@ -60,3 +63,37 @@ def test_structured_stella_mention_is_recognized():
     b=bot()
     assert b._is_stella_mentioned({"mentions":[{"uid":"stella-account"}]})
     assert not b._is_stella_mentioned({"mentions":[{"nickname":"other bot"}]})
+
+
+
+def test_prefix_command_alone_does_not_address_stella():
+    b=bot()
+    calls=[]
+    async def capture(*args):
+        calls.append(args)
+    b._command=capture
+    asyncio.run(b.handle_event({"type":"message","threadId":"r","message":{"content":"!menu","author":{"uid":"u","nickname":"Persona"}}}))
+    assert calls == []
+    assert b.platform.sent == []
+
+
+def test_calling_stella_by_name_allows_prefixed_command():
+    b=bot()
+    calls=[]
+    async def capture(*args):
+        calls.append(args)
+    b._command=capture
+    asyncio.run(b.handle_event({"type":"message","threadId":"r","message":{"content":"Stella !menu","author":{"uid":"u","nickname":"Persona"}}}))
+    assert len(calls) == 1
+    assert calls[0][3] == "menu"
+
+
+def test_reply_to_stella_allows_prefixed_command_without_name():
+    b=bot()
+    calls=[]
+    async def capture(*args):
+        calls.append(args)
+    b._command=capture
+    asyncio.run(b.handle_event({"type":"message","threadId":"r","message":{"content":"!menu","replyMessageId":"stella-msg","author":{"uid":"u","nickname":"Persona"}}}))
+    assert len(calls) == 1
+    assert calls[0][3] == "menu"

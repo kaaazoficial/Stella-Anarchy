@@ -8,7 +8,7 @@ import re
 import tempfile
 import time
 from collections import deque
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 from typing import Any
 from urllib.parse import quote, urlparse
 
@@ -42,6 +42,38 @@ OPEN_LICENSE_MARKERS = (
     "creativecommons.org/publicdomain/mark/",
 )
 AUDIO_EXTENSIONS = {".mp3", ".ogg", ".oga", ".wav", ".flac", ".m4a", ".opus", ".aac"}
+DJ_MUSIC_DIR = Path(os.getenv("DJ_MUSIC_DIR", "music/stella")).resolve()
+
+
+def resolve_local_audio(filename: str) -> Path | None:
+    """Resolve one local audio filename without permitting traversal or symlinks out."""
+    safe = _safe_filename(filename)
+    if not safe:
+        return None
+    root = DJ_MUSIC_DIR.resolve()
+    path = (root / safe).resolve()
+    try:
+        if not path.is_relative_to(root) or not path.is_file():
+            return None
+        size = path.stat().st_size
+        if size <= 0 or size > MAX_TRACK_BYTES:
+            return None
+    except OSError:
+        return None
+    return path
+
+
+def list_local_audio() -> list[str]:
+    try:
+        DJ_MUSIC_DIR.mkdir(parents=True, exist_ok=True)
+        return sorted(
+            path.name for path in DJ_MUSIC_DIR.iterdir()
+            if path.is_file()
+            and path.suffix.casefold() in AUDIO_EXTENSIONS
+            and resolve_local_audio(path.name) == path.resolve()
+        )
+    except OSError:
+        return []
 
 
 def _payload_data(result: dict[str, Any]) -> dict[str, Any]:
@@ -89,6 +121,14 @@ def _license_label(value: str) -> str | None:
     return None
 
 
+def _is_open_license(value: str) -> bool:
+    """Validate either a source URL or a label already normalized by our catalog."""
+    normalized = str(value or "").strip().casefold()
+    return bool(_license_label(normalized)) or normalized in {
+        "creative commons by", "creative commons by-sa", "cc0", "dominio público",
+    }
+
+
 def _safe_filename(value: str) -> str | None:
     name = str(value or "").strip()
     if not name or PurePosixPath(name).name != name or "\\" in name:
@@ -127,6 +167,17 @@ class MusicVoice:
         for room_id in list(self.rooms):
             await self.leave_room(room_id, request_leave=True)
         await self.http.aclose()
+
+    def _bounded_setting(self, room_id: str, key: str, default: int, low: int, high: int) -> int:
+        try:
+            value = int(self.store.get_setting(room_id, key, str(default))) if self.store else default
+        except (TypeError, ValueError):
+            value = default
+        return max(low, min(high, value))
+
+    def _bool_setting(self, room_id: str, key: str, default: bool) -> bool:
+        raw = self.store.get_setting(room_id, key, "1" if default else "0") if self.store else ("1" if default else "0")
+        return str(raw).strip().casefold() in {"1", "true", "yes", "on", "si", "sí"}
 
     async def _send(self, room_id: str, text: str, reply_id: str | None = None) -> None:
         await self.platform.send_message(room_id, text[:1800], reply_id=reply_id)
@@ -244,6 +295,10 @@ class MusicVoice:
                     "music_skip": asyncio.Event(),
                     "music_volume": 0.75,
                     "repeat_mode": "off",
+                    "transition_ms": self._bounded_setting(thread_id, "dj_transition_ms", 500, 0, 2000),
+                    "duck_enabled": self._bool_setting(thread_id, "dj_duck_enabled", True),
+                    "music_duck_gain": 0.28,
+                    "tts_active": asyncio.Event(),
                     "speech_queue": asyncio.Queue(maxsize=15),
                     "speech_task": None,
                     "tts_enabled": False,
@@ -322,7 +377,11 @@ class MusicVoice:
         destination[: samples.size] = samples
         await source.capture_frame(rtc_frame)
 
-    async def _play_audio_bytes(self, source: Any, data: bytes, volume: float, *, room_id: str, skip_event=None, pause_event=None) -> None:
+    async def _play_audio_bytes(
+        self, source: Any, data: bytes, volume: float, *, room_id: str,
+        skip_event=None, pause_event=None, fade_ms: int = 0,
+        duck_state: dict[str, Any] | None = None,
+    ) -> None:
         if not self._load_audio():
             raise RuntimeError("No se pudieron cargar PyAV/NumPy para reproducir audio.")
         if len(data) > MAX_TRACK_BYTES:
@@ -333,26 +392,57 @@ class MusicVoice:
             if stream is None:
                 raise RuntimeError("El archivo no contiene una pista de audio.")
             resampler = self._av.AudioResampler(format="s16", layout="mono", rate=SAMPLE_RATE)
+            try:
+                duration = float(stream.duration * stream.time_base) if stream.duration and stream.time_base else 0.0
+            except (TypeError, ValueError, OverflowError):
+                duration = 0.0
+            total_samples = int(duration * SAMPLE_RATE) if duration > 0 else None
+            fade_samples = int(SAMPLE_RATE * max(0, min(2000, int(fade_ms))) / 1000)
+            position = 0
             started = time.monotonic()
+
+            async def emit(frame) -> None:
+                nonlocal position
+                if skip_event is not None and skip_event.is_set():
+                    return
+                if pause_event is not None:
+                    await pause_event.wait()
+                duck_active = bool(
+                    duck_state
+                    and duck_state.get("duck_enabled", True)
+                    and duck_state.get("tts_active")
+                    and duck_state["tts_active"].is_set()
+                )
+                duck_gain = float(duck_state.get("music_duck_gain", 0.28)) if duck_active else 1.0
+                samples = self._frame_samples(frame, volume * duck_gain, self._np)
+                if samples.size and fade_samples:
+                    fade_in = min(1.0, max(0.0, (position + samples.size) / fade_samples))
+                    fade_out = 1.0
+                    if total_samples is not None:
+                        remaining = max(0, total_samples - position)
+                        if remaining < fade_samples:
+                            fade_out = min(1.0, remaining / fade_samples)
+                    gain = min(fade_in, fade_out)
+                    if gain < 0.999:
+                        samples = self._np.clip(
+                            samples.astype(self._np.float32) * gain,
+                            -32768, 32767,
+                        ).astype(self._np.int16)
+                if samples.size:
+                    await self._capture_pcm(source, frame, samples)
+                    position += int(samples.size)
+
             for decoded in container.decode(stream):
                 if time.monotonic() - started > MAX_TRACK_SECONDS:
                     raise RuntimeError("La reproducción alcanzó el límite de 15 minutos.")
                 for frame in resampler.resample(decoded):
                     if skip_event is not None and skip_event.is_set():
                         return
-                    if pause_event is not None:
-                        await pause_event.wait()
-                    samples = self._frame_samples(frame, volume, self._np)
-                    if samples.size:
-                        await self._capture_pcm(source, frame, samples)
+                    await emit(frame)
             for frame in resampler.resample(None):
                 if skip_event is not None and skip_event.is_set():
                     return
-                if pause_event is not None:
-                    await pause_event.wait()
-                samples = self._frame_samples(frame, volume, self._np)
-                if samples.size:
-                    await self._capture_pcm(source, frame, samples)
+                await emit(frame)
         finally:
             container.close()
 
@@ -538,15 +628,7 @@ class MusicVoice:
         if task is None or task.done():
             state["music_task"] = asyncio.create_task(self._music_worker(room_id, state))
 
-    async def enqueue_track(self, room_id: str, number: int, *, enqueue: bool) -> tuple[bool, str]:
-        saved = self.search_results.get(room_id) or {}
-        if saved.get("expires", 0) <= time.monotonic():
-            self.search_results.pop(room_id, None)
-            return False, "Los resultados caducaron. Usa !dj buscar <tema> de nuevo."
-        items = saved.get("items") or []
-        if number < 1 or number > len(items):
-            return False, "Ese número no corresponde a los resultados actuales."
-        track = items[number - 1]
+    async def _queue_track(self, room_id: str, track: dict[str, Any], *, enqueue: bool) -> tuple[bool, str]:
         ok, message = await self.ensure_room(room_id)
         if not ok:
             return False, message
@@ -567,6 +649,37 @@ class MusicVoice:
         position = len(state["music_queue"]) + (1 if state.get("music_current") else 0)
         return True, f"«{track['title']}» {'añadida a la cola (posición ' + str(position) + ')' if enqueue else 'enviada al reproductor'}."
 
+    async def enqueue_track(self, room_id: str, number: int, *, enqueue: bool) -> tuple[bool, str]:
+        saved = self.search_results.get(room_id) or {}
+        if saved.get("expires", 0) <= time.monotonic():
+            self.search_results.pop(room_id, None)
+            return False, "Los resultados caducaron. Usa !dj buscar <tema> de nuevo."
+        items = saved.get("items") or []
+        if number < 1 or number > len(items):
+            return False, "Ese número no corresponde a los resultados actuales."
+        track = items[number - 1]
+        if not _allowed_audio_url(str(track.get("url") or "")) or not _is_open_license(str(track.get("license") or "")):
+            return False, "La pista no supera la validación de fuente o licencia."
+        return await self._queue_track(room_id, track, enqueue=enqueue)
+
+    async def enqueue_saved_track(self, room_id: str, track: dict[str, Any], *, enqueue: bool) -> tuple[bool, str]:
+        if not isinstance(track, dict) or not _allowed_audio_url(str(track.get("url") or "")):
+            return False, "El favorito no contiene una fuente musical autorizada."
+        if not _license_label(str(track.get("license") or "")):
+            return False, "El favorito no conserva una licencia musical compatible."
+        return await self._queue_track(room_id, dict(track), enqueue=enqueue)
+
+    async def enqueue_local_track(self, room_id: str, filename: str, *, enqueue: bool) -> tuple[bool, str]:
+        path = resolve_local_audio(filename)
+        if path is None:
+            return False, "No encontré ese archivo local válido. Revisa !dj archivos y el directorio DJ_MUSIC_DIR."
+        track = {
+            "title": path.stem[:160], "creator": "Archivo local",
+            "license": "Archivo local", "source": "Archivo local",
+            "item_url": "", "local_path": str(path),
+        }
+        return await self._queue_track(room_id, track, enqueue=enqueue)
+
     async def _music_worker(self, room_id: str, state: dict[str, Any]) -> None:
         while self.rooms.get(room_id) is state and state.get("connected"):
             if not state["music_queue"]:
@@ -575,16 +688,27 @@ class MusicVoice:
             track = state["music_queue"].popleft()
             state["music_current"] = track
             try:
-                data = await self._download_audio(str(track.get("url") or ""))
+                local_path = track.get("local_path")
+                if local_path:
+                    local_file = resolve_local_audio(Path(str(local_path)).name)
+                    if local_file is None or str(local_file) != str(Path(str(local_path)).resolve()):
+                        raise RuntimeError("El archivo local ya no está disponible o salió del directorio permitido.")
+                    data = await asyncio.to_thread(local_file.read_bytes)
+                else:
+                    data = await self._download_audio(str(track.get("url") or ""))
+                details = f"Fuente: {track['source']} · Licencia: {track['license']}"
+                item_url = str(track.get("item_url") or "").strip()
                 await self._send(
                     room_id,
                     f"🎧 Ahora suena: {track['title']} — {track['creator']}\n"
-                    f"Fuente: {track['source']} · Licencia: {track['license']}\n{track['item_url']}",
+                    + details + (f"\n{item_url}" if item_url else ""),
                 )
                 await self._play_audio_bytes(
                     state["music_source"], data, state["music_volume"],
                     room_id=room_id, skip_event=state["music_skip"],
                     pause_event=state["music_paused"],
+                    fade_ms=int(state.get("transition_ms", 500)),
+                    duck_state=state,
                 )
             except asyncio.CancelledError:
                 raise
@@ -728,9 +852,16 @@ class MusicVoice:
                     )
                     await communicator.save(path)
                     data = await asyncio.to_thread(lambda: open(path, "rb").read())
-                    await self._play_audio_bytes(
-                        state["speech_source"], data, state["tts_volume"], room_id=room_id,
-                    )
+                    active = state.get("tts_active")
+                    if active is not None:
+                        active.set()
+                    try:
+                        await self._play_audio_bytes(
+                            state["speech_source"], data, state["tts_volume"], room_id=room_id,
+                        )
+                    finally:
+                        if active is not None:
+                            active.clear()
                 finally:
                     try:
                         os.unlink(path)
@@ -886,8 +1017,50 @@ class MusicVoice:
                 lines.append(f"Reproduciendo: {current.get('title')}")
             else:
                 lines.append("No hay una pista reproduciéndose.")
+            lines.extend([
+                f"Volumen: {round(float(state.get('music_volume', 0.75)) * 100)}%",
+                f"Repetición: {state.get('repeat_mode', 'off')}",
+                f"Fundido: {int(state.get('transition_ms', 500))} ms",
+                f"Atenuación al hablar: {'activada' if state.get('duck_enabled', True) else 'desactivada'}",
+            ])
             lines.extend(f"{i}. {track.get('title')} — {track.get('creator')}" for i, track in enumerate(state["music_queue"], 1))
             return "\n".join(lines)
+        if action in {"archivos", "archivo", "lista", "locales"}:
+            tracks = list_local_audio()
+            return "🎼 ARCHIVOS LOCALES\n" + ("\n".join(f"• {name}" for name in tracks) if tracks else "No hay archivos. Colócalos en el directorio DJ_MUSIC_DIR.")
+        if action in {"añadir", "agregar", "add", "archivo"}:
+            if not rest:
+                return "Uso: !dj añadir <archivo>."
+            ok, message = await self.enqueue_local_track(room_id, rest, enqueue=True)
+            return message
+        if action in {"transicion", "transición", "transition"}:
+            try:
+                milliseconds = int(rest) if rest else int(state_value := self.rooms.get(room_id, {}).get("transition_ms", 500))
+            except (TypeError, ValueError):
+                milliseconds = -1
+            if not 0 <= milliseconds <= 2000:
+                return "El fundido debe estar entre 0 y 2000 ms."
+            state = self.rooms.get(room_id)
+            if not state:
+                return "Conecta primero a una llamada con !join."
+            state["transition_ms"] = milliseconds
+            if self.store:
+                self.store.set_setting(room_id, "dj_transition_ms", str(milliseconds))
+            return f"🌊 Fundido de entrada/salida ajustado a {milliseconds} ms."
+        if action in {"duck", "atenuacion", "atenuación"}:
+            state = self.rooms.get(room_id)
+            if not state:
+                return "Conecta primero a una llamada con !join."
+            mode = rest.casefold().strip() or "estado"
+            if mode in {"on", "si", "sí", "activar"}:
+                state["duck_enabled"] = True
+            elif mode in {"off", "no", "desactivar"}:
+                state["duck_enabled"] = False
+            elif mode not in {"estado", "status"}:
+                return "Usa !dj duck on|off|estado."
+            if self.store:
+                self.store.set_setting(room_id, "dj_duck_enabled", "1" if state["duck_enabled"] else "0")
+            return f"🎚️ Atenuación durante la lectura: {'activada' if state['duck_enabled'] else 'desactivada'}."
         if action in {"resultados", "results"}:
             saved = self.search_results.get(room_id) or {}
             if saved.get("expires", 0) <= time.monotonic():
@@ -971,11 +1144,22 @@ class MusicVoice:
         if action in {"actual", "now"}:
             state = self.rooms.get(room_id)
             current = state.get("music_current") if state else None
-            return f"🎧 {current.get('title')} — {current.get('creator')}" if current else "No hay una pista sonando."
+            if not state:
+                return "Stella no está conectada a una llamada."
+            if not current:
+                return "No hay una pista sonando."
+            return (
+                f"🎧 {current.get('title')} — {current.get('creator')}\n"
+                f"Volumen: {round(float(state.get('music_volume', 0.75)) * 100)}% · "
+                f"Repetición: {state.get('repeat_mode', 'off')}\n"
+                f"Fundido: {int(state.get('transition_ms', 500))} ms · "
+                f"Atenuación: {'on' if state.get('duck_enabled', True) else 'off'}"
+            )
         return (
             "🎧 DJ DE STELLA\n"
             "!dj buscar <artista, tema o ambiente>\n"
             "!dj reproducir <número> | !dj encolar <número>\n"
             "!dj cola | !dj pausa | !dj reanudar | !dj saltar | !dj detener\n"
-            "!dj volumen <0 a 100> | !join | !salirsala"
+            "!dj volumen <0 a 100> | !dj transicion <0-2000> | !dj duck on|off\n"
+            "!dj archivos | !dj añadir <archivo> | !reproducir <archivo> | !join | !salirsala"
         )
