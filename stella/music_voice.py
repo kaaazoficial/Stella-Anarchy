@@ -121,6 +121,14 @@ def _license_label(value: str) -> str | None:
     return None
 
 
+def _is_open_license(value: str) -> bool:
+    """Validate either a source URL or a label already normalized by our catalog."""
+    normalized = str(value or "").strip().casefold()
+    return bool(_license_label(normalized)) or normalized in {
+        "creative commons by", "creative commons by-sa", "cc0", "dominio público",
+    }
+
+
 def _safe_filename(value: str) -> str | None:
     name = str(value or "").strip()
     if not name or PurePosixPath(name).name != name or "\\" in name:
@@ -650,7 +658,7 @@ class MusicVoice:
         if number < 1 or number > len(items):
             return False, "Ese número no corresponde a los resultados actuales."
         track = items[number - 1]
-        if not _allowed_audio_url(str(track.get("url") or "")) or not _license_label(str(track.get("license") or "")):
+        if not _allowed_audio_url(str(track.get("url") or "")) or not _is_open_license(str(track.get("license") or "")):
             return False, "La pista no supera la validación de fuente o licencia."
         return await self._queue_track(room_id, track, enqueue=enqueue)
 
