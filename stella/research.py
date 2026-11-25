@@ -475,64 +475,52 @@ def _normalized_query(query: str) -> str:
 
 
 def classify_research_intent(query: str) -> dict[str, bool]:
-    """Route research to specialist sources without mixing unrelated subjects."""
+    """Route research across general, academic, biomedical, news and media sources."""
     text = _normalized_query(query)
-    genshin = bool(re.search(
-        r"\b(genshin(?: impact)?|teyvat|natlan|fontaine|sumeru|inazuma|mondstadt|"
-        r"liyue|cyno|nahida|furina|arlecchino|neuvillette|mavuika|"
-        r"keqing|zhongli|hu tao|kazuha|raiden shogun)\b", text
-    ))
     music = bool(re.search(
-        r"\b(musica|cancion(?:es)?|album(?:es)?|discografia|artista|banda|"
+        r"\\b(musica|cancion(?:es)?|album(?:es)?|discografia|artista|banda|"
         r"grupo musical|soundtrack|bso|ost|music|song|track|recording|"
-        r"musicbrainz|jamendo)\b", text
+        r"musicbrainz|jamendo)\\b", text
     ))
-    nasa = not genshin and bool(re.search(
-        r"\b(nasa|astronomia|astronomico|astronomica|espacio|cosmos|"
+    nasa = bool(re.search(
+        r"\\b(nasa|astronomia|astronomico|astronomica|espacio|cosmos|"
         r"planeta|planetas|luna|marte|jupiter|saturno|galaxia|nebulosa|"
-        r"telescopio|exoplaneta|sistema solar|space|astronomy)\b", text
+        r"telescopio|exoplaneta|sistema solar|space|astronomy)\\b", text
     ))
     biomedical = bool(re.search(
-        r"\b(pubmed|europe pmc|biomedicina|biomedical|medicina|medico|medica|"
+        r"\\b(pubmed|europe pmc|biomedicina|biomedical|medicina|medico|medica|"
         r"salud|enfermedad(?:es)?|diagnostico|tratamiento(?:s)?|farmacologia|"
         r"estudio(?:s)? clinico(?:s)?|ensayo clinico|ensayos clinicos|"
         r"clinical trial|clinical trials|clinical research|medical research|"
         r"diabetes|alzheimer|cancer|oncologia|tumor(?:es)?|biomarcador(?:es)?|"
-        r"sintoma(?:s)?|terapia(?:s)?|disease(?:s)?|"
-        r"epidemiologia|neurociencia|genetica|genomica|microbiologia|"
-        r"proteina|proteinas|celula|celular|biologia|biology|"
-        r"medicamento|medicamentos|vacuna|vacunas)\b", text
+        r"sintoma(?:s)?|terapia(?:s)?|disease(?:s)?|epidemiologia|neurociencia|"
+        r"genetica|genomica|microbiologia|proteina|proteinas|celula|celular|"
+        r"biologia|biology|medicamento|medicamentos|vacuna|vacunas)\\b", text
     ))
     academic = biomedical or bool(re.search(
-        r"\b(paper|papers|articulo cientifico|articulos cientificos|"
+        r"\\b(paper|papers|articulo cientifico|articulos cientificos|"
         r"estudio cientifico|estudios cientificos|investigacion academica|"
         r"literatura cientifica|doi|crossref|openalex|revista cientifica|"
         r"publicacion academica|metaanalisis|meta analisis|scientific study|"
-        r"research paper|academic research|arxiv|preprint|preprints)\b", text
+        r"research paper|academic research|arxiv|preprint|preprints)\\b", text
     ))
     archive = bool(re.search(
-        r"\b(internet archive|archive.org|wayback machine|libro|libros|"
-        r"ebook|ebooks|obra de dominio publico|dominio publico|"
-        r"archivo historico|hemeroteca|documento historico|"
-        r"publicacion antigua|old book|historical archive)\b", text
+        r"\\b(internet archive|archive.org|wayback machine|libro|libros|"
+        r"ebook|ebooks|obra de dominio publico|dominio publico|archivo historico|"
+        r"hemeroteca|documento historico|publicacion antigua|old book|historical archive)\\b", text
     ))
-    fandom = genshin or bool(re.search(
-        r"\b(fandom|wiki comunitaria|anime|manga|videojuego|videojuegos|"
-        r"personaje de videojuego|franquicia de ficcion)\b", text
+    fandom = bool(re.search(
+        r"\\b(fandom|wiki comunitaria|anime|manga|videojuego|videojuegos|"
+        r"personaje de videojuego|franquicia de ficcion)\\b", text
     ))
     news = bool(re.search(
-        r"\b(noticia|noticias|actualidad|ultimas noticias|ultimas novedades|"
+        r"\\b(noticia|noticias|actualidad|ultimas noticias|ultimas novedades|"
         r"noticias recientes|hoy|ayer|esta semana|esta manana|este mes|"
-        r"breaking news|latest news|current events)\b", text
+        r"breaking news|latest news|current events)\\b", text
     ))
     return {
-        "genshin": genshin,
-        "music": music,
-        "nasa": nasa,
-        "academic": academic,
-        "biomedical": biomedical,
-        "news": news,
-        "archive": archive,
+        "music": music, "nasa": nasa, "academic": academic,
+        "biomedical": biomedical, "news": news, "archive": archive,
         "fandom": fandom,
     }
 
@@ -1325,22 +1313,6 @@ async def search_web(
         ])
     if intent["fandom"]:
         jobs.append(("fandom", search_fandom_wikis(search_text, request_func, limit=2)))
-    if intent["genshin"]:
-        jobs.extend([
-            ("keqingmains", search_scoped_site(
-                search_text, "keqingmains.com", request_func,
-                source_type="keqingmains",
-                attribution="KeqingMains, guías y theorycraft comunitario de Genshin Impact; distingue guía general de recomendaciones dependientes de versión.",
-                limit=2,
-            )),
-            ("hoyolab", search_scoped_site(
-                search_text, "hoyolab.com", request_func,
-                source_type="hoyolab",
-                attribution="HoYoLAB, publicaciones y contenido de la comunidad de HoYoverse; comprueba autoría, fecha y si la publicación es oficial.",
-                limit=2,
-            )),
-        ])
-
     software_targets = _software_document_targets(search_text)
     for domain, label in software_targets:
         jobs.append((
@@ -1383,8 +1355,6 @@ async def search_web(
     priority: list[str] = []
     if intent["news"]:
         priority.extend(["news", "web"])
-    if intent["genshin"]:
-        priority.extend(["keqingmains", "hoyolab", "fandom"])
     if intent["nasa"]:
         priority.extend(["nasa_web", "nasa"])
     if intent["music"]:
