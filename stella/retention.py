@@ -61,6 +61,7 @@ def cleanup_database_retention(db, *, now: float, today: date) -> dict[str, int]
         cursor = db.execute(sql, params)
         counts[key] = max(0, cursor.rowcount)
 
+    counts["warnings"] = counts.get("moderation_warnings_expired", 0)
     cursor = db.execute("DELETE FROM users WHERE last_seen < ?", (user_cutoff,))
     counts["inactive_users_deleted"] = max(0, cursor.rowcount)
 
