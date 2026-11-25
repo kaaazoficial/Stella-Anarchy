@@ -1257,6 +1257,16 @@ class StellaBot:
             mode = "hablando" if args.casefold().strip() == "hablando" else "participantes"
             await self._reply(room_id, format_voice_state(room_id, mode), message)
             return
+        dj_aliases = {
+            "pausa": "pausa", "pausar": "pausa",
+            "reanudar": "reanudar", "continuar": "reanudar",
+            "saltar": "saltar", "cola": "cola",
+            "djdetener": "detener", "djstop": "detener",
+        }
+        if command in dj_aliases:
+            command, args = "dj", dj_aliases[command]
+        elif command == "silenciolectura":
+            command, args = "noleer", ""
         if command == "dj":
             action, _, rest = args.partition(" ")
             if action.casefold() in {"favorito", "favoritos", "favorite", "favorites"}:
