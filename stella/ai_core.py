@@ -67,7 +67,6 @@ AI_DIRECT_ACTION_COMMANDS = frozenset({
     "bio", "miestado", "interaccion", "regalo", "evento", "roast",
     "pagar", "transferir", "advertir", "quitaradvertencia",
     "antispam", "respuestas", "respuesta", "perfilbot", "avatarbot",
-    "eliminarmensajes",
 })
 
 AI_COMMAND_CATALOG = {
@@ -348,28 +347,20 @@ def is_contextual_followup_request(value: str) -> bool:
     if any(marker in text for marker in topic_change_markers):
         return False
     pronoun_reference = re.search(
-        r"\b(?:ella|ellas|ellos|eso|ese|esa|lo anterior|la anterior|el anterior|"
+        r"\\b(?:ella|ellas|ellos|eso|ese|esa|lo anterior|la anterior|el anterior|"
         r"la misma|el mismo|a ella|con ella|para ella|sobre ella|de ella|"
-        r"le sirve|le sirven|le conviene|le queda|su historia|sus armas|sus talentos|sus constelaciones|sus habilidades|sus artefactos)\b",
-        text,
-    )
-    game_followup_subject = re.search(
-        r"\b(?:arma|armas|build|artefactos?|talentos?|equipos?|materiales|"
-        r"rotacion|constelaciones?|elemento|personajes?|habilidades?|ascensiones?)\b",
+        r"le sirve|le sirven|le conviene|le queda|su historia|sus ideas|sus opciones|"
+        r"sus caracteristicas|sus funciones|sus pasos)\\b",
         text,
     )
     return bool(
         (pronoun_reference and len(text.split()) <= 18)
-        or (
-            game_followup_subject
-            and re.match(r"^(?:que|cual|como|y que|y cual|y como)\b", text)
-        )
-        or re.match(r"^y (?:que|cual|como|con|para|sobre|la|respecto a)\b", text)
+        or re.match(r"^y (?:que|cual|como|con|para|sobre|la|respecto a)\\b", text)
     )
 
 
 def is_contextual_specialized_subject_followup(value: str, history: list[dict[str, str]]) -> bool:
-    """No game-specific follow-up domain is enabled in Stella."""
+    """No specialized follow-up domain is enabled in Stella."""
     return False
 
 def build_domain_drift_recovery() -> str:
@@ -951,7 +942,11 @@ class StellaAICore:
             os.getenv("STELLA_AI_PRIMARY_PROVIDER") or ""
         ).strip().casefold()
         gemini_key = (os.getenv("GEMINI_API_KEY") or "").strip()
-        if primary_setting in {"gemini", "google", "google-gemini"} or gemini_key:
+        if primary_setting in {"gemini", "google", "google-gemini"}:
+            return self._gemini_provider_config()
+        if primary_setting in {"groq"}:
+            return self._groq_provider_config()
+        if gemini_key:
             return self._gemini_provider_config()
 
         # Backward compatibility for existing deployments/tests using one
