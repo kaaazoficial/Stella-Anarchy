@@ -1427,10 +1427,12 @@ def summarize_source_coverage(sources: list[dict[str, str]]) -> dict[str, int]:
     official = sum(
         1 for item in normalized
         if any(term in str(item.get("source_type") or "").casefold()
+               for term in ("official", "nasa", "wikidata", "wikipedia", "official_software_docs"))
     )
     community = sum(
         1 for item in normalized
         if any(term in str(item.get("source_type") or "").casefold()
+               for term in ("fandom", "community", "archive"))
     )
     return {
         "sources": len(normalized),
