@@ -48,6 +48,7 @@ METRICS: dict[str, float] = {
     "messages_sent": 0,
     "api_requests": 0,
 }
+bot.metrics = METRICS
 
 
 def log_bot_identity(identity: dict[str, Any] | None) -> None:
