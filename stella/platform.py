@@ -59,7 +59,7 @@ class AnarchyClient:
         data = result.get("data")
         if not isinstance(data, dict):
             return None
-        identity = data.get("bot")
+        identity = data.get("bot") or data.get("profile") or data
         if not isinstance(identity, dict):
             return None
         return identity
