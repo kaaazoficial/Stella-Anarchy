@@ -58,10 +58,26 @@ def test_affection_without_address_does_not_trigger_stella():
     asyncio.run(b.handle_event({"type":"message","threadId":"r","message":{"content":"te quiero","author":{"uid":"u","nickname":"Persona"}}}))
     assert b.platform.sent == []
 
-def test_bare_name_is_a_direct_call():
+@pytest.mark.parametrize("content", [
+    "Stella", "@Stella", "Stella?", "Stella.", "Stella!", "oye Stella",
+    "Hey, Stella", "Hola Stella", "Stella, hola", "Stella ¿?",
+])
+def test_name_only_and_short_greeting_calls_get_a_natural_presence_reply(content):
     b=bot()
-    asyncio.run(b.handle_event({"type":"message","threadId":"r","message":{"content":"Stella","author":{"uid":"u","nickname":"Persona"}}}))
-    assert len(b.platform.sent)==1 and "Aquí estoy" in b.platform.sent[0][1]
+    calls=[]
+    async def capture_ai(*args):
+        calls.append(args)
+    b._ai_assist=capture_ai
+
+    asyncio.run(b.handle_event({
+        "type":"message",
+        "threadId":"r",
+        "message":{"content":content,"author":{"uid":"u","nickname":"Persona"}},
+    }))
+
+    assert len(b.platform.sent)==1
+    assert "Aquí estoy" in b.platform.sent[0][1]
+    assert calls == []
 
 def test_reply_to_stella_message_id_is_recognized():
     b=bot()
@@ -295,3 +311,18 @@ async def test_reply_strips_raw_urls_from_all_command_responses():
     assert "[enlace omitido]" in sent[0][1]
     assert "Wikimedia Commons" in sent[0][1]
     assert sent[0][2] == "msg-1"
+
+
+
+def test_name_only_vocative_removes_question_and_exclamation_punctuation():
+    from stella.identity import extract_stella_call
+
+    for content in ("Stella?", "Stella.", "Stella!", "@Stella?", "oye Stella..."):
+        assert extract_stella_call(content) == ""
+
+
+def test_real_question_after_name_is_preserved():
+    from stella.identity import extract_stella_call
+
+    assert extract_stella_call("Stella, ¿cómo estás?") == "¿cómo estás?"
+    assert extract_stella_call("Oye Stella, explícame esto") == "explícame esto"
