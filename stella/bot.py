@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from stella.ai import StellaAI
-from stella.ai_core import StellaAICore
+from stella.ai_core import AI_ADMIN_COMMANDS, AI_PUBLIC_COMMANDS, StellaAICore
 from stella.config import Settings, _uid_set
 from stella.language import split_arguments
 from stella.moderation import inspect_links, sanitize_reason
@@ -53,6 +53,7 @@ class StellaBot:
         )
         self.voice = MusicVoice(self.voice_platform)
         self.voice.ai = self.ai
+        self.voice.store = store
         # Only hashes and timestamps are held here. Message text is not retained.
         self._recent: dict[tuple[str, str], deque[tuple[float, str]]] = defaultdict(deque)
         self._warned_until: dict[tuple[str, str], float] = {}
@@ -61,20 +62,9 @@ class StellaBot:
         self._game_sessions: dict[str, dict[str, Any]] = {}
 
     def _ai_allowed_commands(self, uid: str) -> frozenset[str]:
-        allowed = {
-            "ayuda", "menu", "fecha", "zona", "miuid", "perfil", "puntos",
-            "ranking", "actividad", "investigar", "calcular", "traducir",
-            "multimedia", "imagen", "video", "audio", "afinidad", "muro",
-            "evento", "roast", "trivia", "responder", "adivina", "intento",
-            "duelo", "ship", "azar", "verdad", "8ball", "chiste", "frase",
-            "reto", "dj", "reproducir", "pausa", "reanudar", "saltar", "cola",
-            "join", "salirsala", "salas", "playlist", "leer", "noleer",
-            "silenciolectura", "tts", "volumen", "subirvolumen",
-            "bajarvolumen", "silencio", "ortografia", "analizartexto",
-            "analizar", "ping",
-        }
+        allowed = set(AI_PUBLIC_COMMANDS)
         if self._is_admin(uid):
-            allowed.update({"admin", "centro", "fuentes", "metricas", "autotest"})
+            allowed.update(AI_ADMIN_COMMANDS)
         return frozenset(allowed)
 
     async def _ai_assist(self, room_id: str, uid: str, name: str, prompt: str, message: dict[str, Any]) -> None:
@@ -113,7 +103,9 @@ class StellaBot:
         return uid, name
 
     def _is_admin(self, uid: str) -> bool:
-        return bool(uid) and uid in _uid_set(self.settings.admin_uids)
+        privileged = set(_uid_set(self.settings.admin_uids))
+        privileged.update(_uid_set(self.settings.sinner_uid))
+        return bool(uid) and uid in privileged
 
     async def _reply(self, room_id: str, text: str, message: dict[str, Any]) -> None:
         reply_id = message.get("messageId") or message.get("id")
@@ -148,7 +140,7 @@ class StellaBot:
 
         self.store.touch_user(uid, name)
         self.store.record_activity(room_id, uid)
-        blocked, reason = self._check_antispam(room_id, uid, content)
+        blocked, reason = self._check_antispam(room_id, uid, content, message)
         if blocked:
             if reason:
                 warning_id = self.store.add_warning(
@@ -166,7 +158,22 @@ class StellaBot:
             await self._command(room_id, uid, name, content[len(prefix):].strip(), message)
             return
         addressed = extract_stella_call(content)
-        if addressed:
+        if addressed is not None:
+            affection = detect_affectionate_expression(addressed)
+            if affection:
+                replies = {
+                    "love": "Qué bonito detalle. Gracias por decírmelo; me alegra acompañarte.",
+                    "care": "Gracias. Aprecio que te preocupes.",
+                    "gratitude": "De nada. Me alegra haber podido ayudarte.",
+                    "compliment": "Muchas gracias por el cumplido. Qué amable.",
+                    "greeting": "¡Hola! ¿En qué puedo ayudarte?",
+                    "miss_you": "Me alegra que hayas vuelto. ¿Qué hacemos hoy?",
+                }
+                await self._reply(room_id, replies.get(affection, "Gracias por tu mensaje."), message)
+                return
+            if not addressed.strip():
+                await self._reply(room_id, "¡Aquí estoy! ¿En qué puedo ayudarte?", message)
+                return
             natural = interpret_natural_request("Stella " + addressed)
             if natural and not natural.startswith("asistente "):
                 await self._command(room_id, uid, name, natural, message)
@@ -206,13 +213,37 @@ class StellaBot:
                 if key[0] == room_id:
                     mapping.pop(key, None)
 
-    def _check_antispam(self, room_id: str, uid: str, content: str) -> tuple[bool, str | None]:
-        if self.store.get_setting(room_id, "antispam_enabled", "1") != "1":
+    def _antispam_config(self, room_id: str) -> dict[str, int | bool]:
+        defaults = {
+            "antispam_enabled": "1", "antispam_max_messages": "7",
+            "antispam_window_seconds": "8", "antispam_repeat_limit": "3",
+            "antispam_max_links": "4", "antispam_max_mentions": "8",
+        }
+        values = {key: self.store.get_setting(room_id, key, default) for key, default in defaults.items()}
+        def bounded(key: str, default: int, low: int, high: int) -> int:
+            try:
+                return max(low, min(high, int(values[key])))
+            except (TypeError, ValueError):
+                return default
+        return {
+            "enabled": values["antispam_enabled"] == "1",
+            "max_messages": bounded("antispam_max_messages", 7, 3, 20),
+            "window_seconds": bounded("antispam_window_seconds", 8, 3, 60),
+            "repeat_limit": bounded("antispam_repeat_limit", 3, 2, 10),
+            "max_links": bounded("antispam_max_links", 4, 2, 12),
+            "max_mentions": bounded("antispam_max_mentions", 8, 3, 20),
+        }
+
+    def _check_antispam(self, room_id: str, uid: str, content: str, message: dict[str, Any] | None = None) -> tuple[bool, str | None]:
+        if self._is_admin(uid):
+            return False, None
+        config = self._antispam_config(room_id)
+        if not config["enabled"]:
             return False, None
         now = time.monotonic()
-        # Expire every user's recent hashes globally, not only on their next message.
         for tracked, queue in list(self._recent.items()):
-            while queue and now - queue[0][0] > ANTISPAM_WINDOW_SECONDS:
+            window = int(self._antispam_config(tracked[0])["window_seconds"])
+            while queue and now - queue[0][0] > window:
                 queue.popleft()
             if not queue:
                 self._recent.pop(tracked, None)
@@ -223,7 +254,6 @@ class StellaBot:
         for tracked, expiry in list(self._auto_reply_cooldown.items()):
             if expiry <= now:
                 self._auto_reply_cooldown.pop(tracked, None)
-
         key = (room_id, uid)
         if key not in self._recent and len(self._recent) >= MAX_TRACKED_USERS:
             oldest = min(self._recent, key=lambda item: self._recent[item][0][0] if self._recent[item] else now)
@@ -231,24 +261,27 @@ class StellaBot:
             self._warned_until.pop(oldest, None)
         queue = self._recent[key]
         digest = hashlib.sha256(content.casefold().encode("utf-8")).hexdigest()
-        while queue and now - queue[0][0] > ANTISPAM_WINDOW_SECONDS:
+        window = int(config["window_seconds"])
+        while queue and now - queue[0][0] > window:
             queue.popleft()
         queue.append((now, digest))
         repeats = sum(1 for _, item in queue if item == digest)
-        if len(queue) > 7 or repeats >= 4:
+        links = len(re.findall(r"(?:https?://|www\\.)\\S+", content, flags=re.I))
+        mentions = (message or {}).get("mentions") or []
+        mention_count = len(mentions) if isinstance(mentions, list) else 0
+        reason = ""
+        if links > int(config["max_links"]):
+            reason = f"Exceso de enlaces en un mensaje ({links})."
+        elif mention_count > int(config["max_mentions"]):
+            reason = f"Menciones masivas en un mensaje ({mention_count})."
+        elif len(queue) >= int(config["max_messages"]) or repeats >= int(config["repeat_limit"]):
+            reason = "Antispam automático: demasiados mensajes o contenido repetido."
+        if reason:
             if self._warned_until.get(key, 0) <= now:
                 self._warned_until[key] = now + ANTISPAM_WARNING_COOLDOWN
                 queue.clear()
-                return True, "Antispam automático: demasiados mensajes o contenido repetido."
+                return True, reason
             return True, None
-        # Remove empty and expired identities instead of retaining every user ever seen.
-        for tracked in list(self._recent):
-            if tracked != key and not self._recent[tracked]:
-                self._recent.pop(tracked, None)
-                self._warned_until.pop(tracked, None)
-        for tracked, expiry in list(self._warned_until.items()):
-            if expiry <= now and tracked not in self._recent:
-                self._warned_until.pop(tracked, None)
         return False, None
 
     async def _check_auto_replies(self, room_id: str, content: str, message: dict[str, Any]) -> None:
@@ -340,6 +373,7 @@ class StellaBot:
             "saltar": self._voice_command, "cola": self._voice_command,
             "djdetener": self._voice_command, "djstop": self._voice_command,
             "saludfuentes": self._sources,
+            "eliminarmensajes": self._delete_own_messages,
         }
         social_actions = {
             "abrazo", "abrazar", "beso", "besar", "patada", "golpe", "cachetada",
@@ -488,7 +522,7 @@ class StellaBot:
         if not self._is_admin(uid):
             await self._reply(room_id, "No tienes permisos para abrir el panel de administración.", message)
             return
-        activity = self.store.activity_summary(room_id, days=1)
+        activity = self.store.activity_summary(room_id)
         total = sum(int(row.get("total_messages", 0)) for row in activity)
         antispam = self.store.get_setting(room_id, "antispam_enabled", "1") == "1"
         await self._reply(room_id, f"✦ CENTRO DE ADMINISTRACIÓN · STELLA\nMensajes agregados recientes: {total}\nAdvertencias: {len(self.store.warnings(room_id))}\nEncuestas: {len(self.store.list_polls(room_id))}\nEventos: {len(self.store.list_events(room_id))}\nAntispam: {'activado' if antispam else 'desactivado'}\nUsa !actividad para el informe detallado.", message)
@@ -967,6 +1001,27 @@ class StellaBot:
             message,
         )
 
+    async def _delete_own_messages(self, room_id, uid, name, args, message):
+        if not self._is_admin(uid):
+            await self._reply(room_id, "Solo el equipo administrativo puede eliminar los mensajes propios de Stella.", message)
+            return
+        clients = []
+        for client in (self.platform, self.voice_platform):
+            if client not in clients:
+                clients.append(client)
+        totals = {"attempted": 0, "deleted": 0, "failed": 0}
+        for client in clients:
+            result = await client.delete_tracked_messages(room_id)
+            for key in totals:
+                totals[key] += int(result.get(key, 0))
+        await self._reply(
+            room_id,
+            "🧹 LIMPIEZA DE MENSAJES PROPIOS\\n"
+            f"Identificados: {totals['attempted']} · eliminados: {totals['deleted']} · pendientes por error: {totals['failed']}\\n"
+            "Solo se usan IDs confirmados por Anarchy y conservados temporalmente en memoria; no se guardan textos ni se eliminan mensajes ajenos.",
+            message,
+        )
+
     async def _random(self, room_id, uid, name, args, message):
         mode = args.casefold().strip()
         if mode in {"dado", "dice"}:
@@ -1042,15 +1097,47 @@ class StellaBot:
         if not self._is_admin(uid):
             await self._reply(room_id, "Solo el equipo administrativo puede configurar el antispam.", message)
             return
-        action = args.casefold()
+        parts = args.casefold().replace("í", "i").split(maxsplit=1)
+        action = parts[0] if parts else "estado"
+        value = parts[1].strip() if len(parts) > 1 else ""
+        settings = {
+            "limite": ("antispam_max_messages", 3, 20),
+            "mensajes": ("antispam_max_messages", 3, 20),
+            "ventana": ("antispam_window_seconds", 3, 60),
+            "repeticiones": ("antispam_repeat_limit", 2, 10),
+            "enlaces": ("antispam_max_links", 2, 12),
+            "menciones": ("antispam_max_mentions", 3, 20),
+        }
         if action in {"activar", "on", "encender"}:
             self.store.set_setting(room_id, "antispam_enabled", "1")
             response = "El antispam está activado en esta sala."
         elif action in {"desactivar", "off", "apagar"}:
             self.store.set_setting(room_id, "antispam_enabled", "0")
             response = "El antispam está desactivado en esta sala."
+        elif action in settings:
+            key, low, high = settings[action]
+            try:
+                number = int(value)
+            except ValueError:
+                number = -1
+            if not low <= number <= high:
+                response = f"Valor inválido. Rango permitido: {low}-{high}."
+            else:
+                self.store.set_setting(room_id, key, str(number))
+                response = f"Configuración antispam actualizada: {action} = {number}."
+        elif action in {"estado", "config", "configuracion", ""}:
+            cfg = self._antispam_config(room_id)
+            response = (
+                "🛡️ CONFIGURACIÓN ANTISPAM\\n"
+                f"Estado: {'activado' if cfg['enabled'] else 'desactivado'}\\n"
+                f"Límite: {cfg['max_messages']} mensajes / {cfg['window_seconds']} s\\n"
+                f"Repeticiones: {cfg['repeat_limit']}\\n"
+                f"Máximo de enlaces: {cfg['max_links']} · menciones: {cfg['max_mentions']}\\n"
+                f"Usos: {self.settings.command_prefix}antispam on|off; limite N; ventana N; "
+                "repeticiones N; enlaces N; menciones N."
+            )
         else:
-            response = f"Uso: {self.settings.command_prefix}antispam activar|desactivar"
+            response = f"Uso: {self.settings.command_prefix}antispam estado|on|off|limite N|ventana N|repeticiones N|enlaces N|menciones N"
         await self._reply(room_id, response, message)
 
     async def _poll(self, room_id, uid, name, args, message):
