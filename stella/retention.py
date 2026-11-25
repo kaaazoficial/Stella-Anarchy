@@ -24,7 +24,6 @@ def cleanup_database_retention(db, *, now: float | None = None, today: date | No
     moderation_cutoff = stamp - MODERATION_RETENTION_DAYS * 86400
     event_cutoff = stamp - EVENT_RETENTION_DAYS * 86400
     poll_cutoff = stamp - POLL_RETENTION_DAYS * 86400
-    activity_cutoff = (today.toordinal() - ACTIVITY_RETENTION_DAYS + 1)
     counts: dict[str, int] = {}
 
     def run(label: str, sql: str, parameters: tuple = ()) -> None:
@@ -34,7 +33,9 @@ def cleanup_database_retention(db, *, now: float | None = None, today: date | No
     run("profile_texts_expired",
         "UPDATE users SET bio='',status='',profile_updated_at=NULL WHERE profile_updated_at IS NOT NULL AND profile_updated_at < ? AND (bio<>'' OR status<>'')",
         (profile_cutoff,))
-    run("gifts_expired", "DELETE FROM gifts WHERE created_at < ?", (gift_cutoff,))
+    run("gifts_expired",
+        "DELETE FROM gifts WHERE sender_uid IN (SELECT uid FROM users WHERE last_seen < ?) OR target_uid IN (SELECT uid FROM users WHERE last_seen < ?) OR created_at < ?",
+        (user_cutoff, user_cutoff, gift_cutoff))
     run("affinities_expired",
         "DELETE FROM affinities WHERE uid IN (SELECT uid FROM users WHERE last_seen < ?) OR target_uid IN (SELECT uid FROM users WHERE last_seen < ?)",
         (user_cutoff, user_cutoff))
