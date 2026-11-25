@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import time
 from collections import defaultdict, deque
 from typing import Any
@@ -184,13 +185,32 @@ class AnarchyClient:
         return min(30.0, max(0.5, delay))
 
     async def send_message(
-        self, thread_id: str, content: str, *, reply_id: str | None = None
-    ) -> bool:
-        """Send one message with per-client pacing and bounded HTTP 429 retries."""
+        self,
+        thread_id: str,
+        content: str,
+        *,
+        reply_id: str | None = None,
+        buttons: list[dict[str, str]] | None = None,
+        return_message_id: bool = False,
+    ) -> bool | str:
+        """Send a paced Anarchy message; optionally return its ID for interactive buttons."""
         room_id = str(thread_id)
         body: dict[str, Any] = {"content": content[:1900]}
         if reply_id:
             body["replyMessageId"] = reply_id
+        if buttons is not None:
+            if len(buttons) > 5 or any(
+                not isinstance(button, dict)
+                or not re.fullmatch(r"[A-Za-z0-9_-]{1,32}", str(button.get("id") or ""))
+                or not 1 <= len(str(button.get("label") or "")) <= 40
+                for button in buttons
+            ):
+                log.warning("Refusing invalid Anarchy button payload.")
+                return False
+            body["buttons"] = [
+                {"id": str(button["id"]), "label": str(button["label"])}
+                for button in buttons
+            ]
 
         async with self._message_send_lock:
             for attempt in range(self._message_max_attempts):
@@ -208,6 +228,8 @@ class AnarchyClient:
                     message_id = self._extract_message_id(result.get("data"))
                     if message_id:
                         self._remember_sent_message(room_id, message_id)
+                    if return_message_id:
+                        return message_id or False
                     return True
 
                 if int(result.get("status") or 0) != 429:
@@ -234,3 +256,18 @@ class AnarchyClient:
                 await asyncio.sleep(retry_delay)
 
         return False
+
+    async def edit_message(
+        self, thread_id: str, message_id: str, *, remove_buttons: bool = True
+    ) -> bool:
+        """Remove native buttons from one of this bot's messages."""
+        room_id = str(thread_id or "").strip()
+        target_id = str(message_id or "").strip()
+        if not room_id or not target_id:
+            return False
+        result = await self.request(
+            "PATCH",
+            f"/threads/{quote(room_id, safe='')}/messages/{quote(target_id, safe='')}",
+            json_body={"removeButtons": True} if remove_buttons else {},
+        )
+        return bool(result.get("ok"))
