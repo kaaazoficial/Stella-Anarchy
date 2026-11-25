@@ -1,4 +1,4 @@
-"""Recognize deliberate calls and affectionate messages addressed to Stella."""
+"""Recognize deliberate calls and affectionate messages addressed to stella."""
 from __future__ import annotations
 
 import re
@@ -10,7 +10,7 @@ _NAME_RATIO = None
 
 
 def _name_similarity(left: str, right: str) -> float:
-    """Resolve fuzzy matching only when a non-exact Stella alias is tested."""
+    """Resolve fuzzy matching only when a non-exact stella alias is tested."""
     global _NAME_RATIO
     if _NAME_RATIO is None:
         from rapidfuzz.fuzz import ratio
@@ -19,7 +19,7 @@ def _name_similarity(left: str, right: str) -> float:
     return _NAME_RATIO(left, right)
 
 
-NAME_ALIASES = frozenset({"stella"})
+NAME_ALIASES = frozenset({"stella", "stell", "stela"})
 
 _GREETING_RE = re.compile(
     r"^[¡!¿?]*\s*(?:oye|ey|hey|hola|buenas(?:\s+(?:tardes|noches|dias))?|"
@@ -113,7 +113,7 @@ def _is_direct_vocative(text: str, match: re.Match) -> bool:
         )
 
     # Mid-sentence invocations must look like a request/question, not a casual
-    # reference such as "Hoy hablé con Stella en el chat".
+    # reference such as "Hoy hablé con stella en el chat".
     return bool(
         _DIRECT_REQUEST_RE.search(before)
         or _DIRECT_CALL_START_RE.search(after)
@@ -127,7 +127,7 @@ def _remove_vocative(text: str, start: int, end: int) -> str:
     before = text[:start].rstrip()
     after = text[end:].lstrip()
 
-    # Remove an address prefix that only served to call Stella.
+    # Remove an address prefix that only served to call stella.
     greeting = _CALL_PREFIX_RE.match(before + " ")
     if greeting:
         before = before[greeting.end():].strip()
@@ -147,7 +147,7 @@ def _remove_vocative(text: str, start: int, end: int) -> str:
 
 
 def extract_stella_call(message: str) -> str | None:
-    """Return the message body when Stella is addressed at the start, middle or end.
+    """Return the message body when stella is addressed at the start, middle or end.
 
     Exact nicknames and close spelling variants are recognized as separate name
     tokens. Mid/end-position occurrences require vocative punctuation, a request,
@@ -167,7 +167,7 @@ def extract_stella_call(message: str) -> str | None:
 
 
 def detect_affectionate_expression(message: str) -> str | None:
-    """Classify clear warm messages addressed to Stella without overreading them."""
+    """Classify clear warm messages addressed to stella without overreading them."""
     text = _normalize_name(str(message or ""))
     if not text:
         return None
