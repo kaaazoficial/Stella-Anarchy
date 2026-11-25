@@ -43,22 +43,22 @@ AI_CONVERSATION_TTL_SECONDS = 600
 MAX_ACTIVE_AI_CONVERSATIONS = 500
 
 _PLAYFUL_INSULT_PATTERNS = (
-    re.compile(r"\\b(?:idiota|imb[eé]cil|est[uú]pida?|tonta?|in[uú]til|pesada|tarada|boba|payasa|rid[ií]cula|basura|mierda)\\b", re.IGNORECASE),
-    re.compile(r"\\b(?:c[aá]llate|no sirves para nada|no vales nada|eres un desastre)\\b", re.IGNORECASE),
+    re.compile(r"\b(?:idiota|imb[eé]cil|est[uú]pida?|tonta?|in[uú]til|pesada|tarada|boba|payasa|rid[ií]cula|basura|mierda)\b", re.IGNORECASE),
+    re.compile(r"\b(?:c[aá]llate|no sirves para nada|no vales nada|eres un desastre)\b", re.IGNORECASE),
 )
 _PLAYFUL_JOKE_PATTERNS = (
-    re.compile(r"\\b(?:era broma|es broma|te estoy molestando|no te enojes|no te piques|jaj+a+|xd+|lmao)\\b", re.IGNORECASE),
-    re.compile(r"\\b(?:te gan[eé]|te humill[eé]|te destru[ií]|te dej[eé] en rid[ií]culo)\\b", re.IGNORECASE),
+    re.compile(r"\b(?:era broma|es broma|te estoy molestando|no te enojes|no te piques|jaj+a+|xd+|lmao)\b", re.IGNORECASE),
+    re.compile(r"\b(?:te gan[eé]|te humill[eé]|te destru[ií]|te dej[eé] en rid[ií]culo)\b", re.IGNORECASE),
 )
 _SERIOUS_DISTRESS_PATTERNS = (
-    re.compile(r"\\b(?:estoy sufriendo|me quiero morir|quiero hacerme daño|me voy a suicidar|me siento fatal|estoy llorando|necesito ayuda)\\b", re.IGNORECASE),
-    re.compile(r"\\b(?:me est[aá]s haciendo sentir mal|eso me doli[oó]|no es gracioso|para de bromear)\\b", re.IGNORECASE),
+    re.compile(r"\b(?:estoy sufriendo|me quiero morir|quiero hacerme daño|me voy a suicidar|me siento fatal|estoy llorando|necesito ayuda)\b", re.IGNORECASE),
+    re.compile(r"\b(?:me est[aá]s haciendo sentir mal|eso me doli[oó]|no es gracioso|para de bromear)\b", re.IGNORECASE),
 )
 
 
 def classify_playful_stella_message(value: str) -> str | None:
     """Classify light insults or teasing aimed at Stella, not general profanity."""
-    text = re.sub(r"\\s+", " ", str(value or "")).strip()
+    text = re.sub(r"\s+", " ", str(value or "")).strip()
     if not text:
         return None
     if any(pattern.search(text) for pattern in _SERIOUS_DISTRESS_PATTERNS):
