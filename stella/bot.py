@@ -42,6 +42,47 @@ _GLOBAL_CHAT_SILENCE_KEY = "chat_silence"
 AI_CONVERSATION_TTL_SECONDS = 600
 MAX_ACTIVE_AI_CONVERSATIONS = 500
 
+_PLAYFUL_INSULT_PATTERNS = (
+    re.compile(
+        r"\b(?:eres|estas|sos|pareces)\s+(?:(?:un|una)\s+)?"
+        r"(?:idiota|imb[eé]cil|est[uú]pida?|tonta?|in[uú]til|pesada|"
+        r"tarada|boba|payasa|rid[ií]cula|basura|mierda)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\b(?:c[aá]llate|no sirves para nada|no vales nada|eres un desastre)\b"
+        r"|\b(?:que|vaya)\s+(?:idiota|imb[eé]cil|est[uú]pida?|tonta?|in[uú]til|"
+        r"pesada|tarada|boba|payasa|rid[ií]cula)\s+eres\b"
+        r"|\b(?:idiota|imb[eé]cil|est[uú]pida?|tonta?|in[uú]til|pesada|"
+        r"tarada|boba|payasa|rid[ií]cula)\s*[.!?]*$",
+        re.IGNORECASE,
+    ),
+)
+_PLAYFUL_JOKE_PATTERNS = (
+    re.compile(r"\b(?:era broma|es broma|te estoy molestando|no te enojes|no te piques|jaj+a+|xd+|lmao)\b", re.IGNORECASE),
+    re.compile(r"\b(?:te gan[eé]|te humill[eé]|te destru[ií]|te dej[eé] en rid[ií]culo)\b", re.IGNORECASE),
+)
+_SERIOUS_DISTRESS_PATTERNS = (
+    re.compile(r"\b(?:estoy sufriendo|me quiero morir|quiero hacerme daño|me voy a suicidar|me siento fatal|estoy llorando|necesito ayuda)\b", re.IGNORECASE),
+    re.compile(r"\b(?:me est[aá]s haciendo sentir mal|eso me doli[oó]|no es gracioso|para de bromear)\b", re.IGNORECASE),
+)
+
+
+def classify_playful_stella_message(value: str) -> str | None:
+    """Classify light insults or teasing aimed at Stella, not general profanity."""
+    text = re.sub(r"\s+", " ", str(value or "")).strip()
+    if not text:
+        return None
+    if any(pattern.search(text) for pattern in _SERIOUS_DISTRESS_PATTERNS):
+        return None
+    if any(pattern.search(text) for pattern in _PLAYFUL_INSULT_PATTERNS):
+        return "insult"
+    if any(pattern.search(text) for pattern in _PLAYFUL_JOKE_PATTERNS):
+        return "teasing"
+    return None
+
+
+
 _SILENCE_REQUESTS = frozenset({
     "no le hables a nadie",
     "no les hables a nadie",
@@ -400,6 +441,18 @@ class StellaBot:
             self._mark_active_ai_conversation(room_id, uid)
             return
 
+        playful_tone = classify_playful_stella_message(request_text)
+        if playful_tone:
+            playful_prompt = (
+                "Responde como Stella a un mensaje dirigido a ti en tono de broma. "
+                "Devuelve un contraataque ingenioso, breve, confiado y divertido. "
+                "Puedes usar sarcasmo amistoso o una palabrota leve si encaja, "
+                "pero no ataques rasgos personales ni escales a amenazas o humillación. "
+                "No expliques que estás siguiendo instrucciones; responde como en una charla real. "
+                "Mensaje recibido: " + request_text
+            )
+            await self._ai_assist(room_id, uid, name, playful_prompt, message)
+            return
         affection = detect_affectionate_expression(request_text)
         if affection:
             replies = {

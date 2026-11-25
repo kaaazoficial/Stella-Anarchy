@@ -392,3 +392,74 @@ def test_presence_call_opens_a_short_lived_natural_chat_session():
 
     assert b._has_active_ai_conversation("room", "user")
     assert b._active_ai_conversations[("room", "user")] <= time.monotonic() + 601
+
+
+@pytest.mark.parametrize("content", [
+    "Stella, eres una idiota",
+    "Stella, qué tonta eres jajaja",
+    "Stella, cállate payasa",
+    "Stella, no sirves para nada XD",
+])
+def test_playful_insults_are_routed_to_ai_for_a_comeback(content):
+    b = bot()
+    calls = []
+
+    async def capture_ai(*args):
+        calls.append(args)
+
+    b._ai_assist = capture_ai
+    asyncio.run(b.handle_event({
+        "type": "message",
+        "threadId": "r",
+        "message": {"content": content, "author": {"uid": "u", "nickname": "Persona"}},
+    }))
+
+    assert len(calls) == 1
+    assert "contraataque ingenioso" in calls[0][3]
+    assert b.platform.sent == []
+
+
+@pytest.mark.parametrize("content", [
+    "Stella, era broma jajaja",
+    "Stella, te gané XD",
+    "Stella, no te piques, te estoy molestando",
+])
+def test_teasing_is_routed_to_ai_for_playful_banter(content):
+    b = bot()
+    calls = []
+
+    async def capture_ai(*args):
+        calls.append(args)
+
+    b._ai_assist = capture_ai
+    asyncio.run(b.handle_event({
+        "type": "message",
+        "threadId": "r",
+        "message": {"content": content, "author": {"uid": "u", "nickname": "Persona"}},
+    }))
+
+    assert len(calls) == 1
+    assert "Mensaje recibido:" in calls[0][3]
+
+
+@pytest.mark.parametrize("content", [
+    "Stella, no es gracioso, me hiciste sentir mal",
+    "Stella, estoy llorando y necesito ayuda",
+    "Stella, para de bromear, eso me dolió",
+])
+def test_distress_or_real_complaints_do_not_trigger_playful_comebacks(content):
+    b = bot()
+    calls = []
+
+    async def capture_ai(*args):
+        calls.append(args)
+
+    b._ai_assist = capture_ai
+    asyncio.run(b.handle_event({
+        "type": "message",
+        "threadId": "r",
+        "message": {"content": content, "author": {"uid": "u", "nickname": "Persona"}},
+    }))
+
+    assert len(calls) == 1
+    assert "contraataque ingenioso" not in calls[0][3]
