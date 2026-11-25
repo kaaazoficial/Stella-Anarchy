@@ -25,6 +25,9 @@ from stella.nexus import interpret_natural_request
 from stella.matching import suggest_command
 from stella.spelling import detect_spanish_spelling_issues
 from stella.anarchy_events import update_voice_room_event, clear_voice_room, format_voice_state
+from stella.text import format_stella_text
+from stella.utilities import calculate_expression, format_calculation_result
+from stella.link_analysis import extract_message_urls, inspect_link_signals, format_link_signals, classify_link_policy
 
 log = logging.getLogger("stella.bot")
 
@@ -68,7 +71,7 @@ class StellaBot:
     async def _reply(self, room_id: str, text: str, message: dict[str, Any]) -> None:
         reply_id = message.get("messageId") or message.get("id")
         await self.platform.send_message(
-            str(room_id), str(text)[:7000],
+            str(room_id), format_stella_text(str(text))[:7000],
             reply_id=str(reply_id) if reply_id else None,
         )
 
@@ -296,8 +299,8 @@ class StellaBot:
 
     async def _calculate(self, room_id, uid, name, args, message):
         try:
-            result = calculate(args)
-        except CalculationError as exc:
+            result = format_calculation_result(calculate_expression(args))
+        except ValueError as exc:
             await self._reply(room_id, f"Uso: !calcular <operación>\n{exc}", message)
             return
         await self._reply(room_id, f"🧮 {args[:160]} = {result}", message)
@@ -1242,15 +1245,20 @@ class StellaBot:
         await self._reply(room_id, "\n".join(lines), message)
 
     async def _inspect(self, room_id, uid, name, args, message):
-        findings = inspect_links(args)
-        if not findings:
+        urls = extract_message_urls(args)
+        if not urls:
             await self._reply(room_id, "No encontré enlaces en el texto indicado. Uso: !analizar <texto o enlaces>", message)
             return
         lines = ["🔗 REVISIÓN PRELIMINAR DE ENLACES"]
-        for item in findings:
-            lines.append(f"{item['risk'].upper()} · {item.get('domain', item['url'])}: {item['reason']}")
-        lines.append("Esto es una revisión superficial del formato y dominio, no una garantía de seguridad.")
-        await self._reply(room_id, "\n".join(lines), message)
+        for url in urls[:8]:
+            policy = classify_link_policy(url)
+            if policy.get("blocked"):
+                lines.append(f"⛔ {url}\n{policy.get('reason') or 'Destino restringido por la política de la comunidad.'}")
+                continue
+            signals = inspect_link_signals(url)
+            lines.append(url + "\n" + format_link_signals(signals))
+        lines.append("La revisión es heurística y no garantiza que un destino sea seguro. No se descargan ni ejecutan archivos.")
+        await self._reply(room_id, "\n\n".join(lines), message)
 
     def _help(self, topic: str = "") -> str:
         p = self.settings.command_prefix
