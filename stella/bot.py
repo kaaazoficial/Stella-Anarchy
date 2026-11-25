@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from stella.ai import StellaAI
+from stella.ai_core import StellaAICore
 from stella.config import Settings, _uid_set
 from stella.language import split_arguments
 from stella.moderation import inspect_links, sanitize_reason
@@ -43,6 +44,7 @@ class StellaBot:
         self.platform = platform
         self.services = StellaServices()
         self.ai = StellaAI()
+        self.ai_core = StellaAICore(memory_ttl=300, memory_turns=2)
         community_token = settings.community_bot_token or settings.bot_token
         self.voice_platform = (
             AnarchyClient(settings.api_base, community_token)
@@ -57,6 +59,47 @@ class StellaBot:
         self._auto_reply_cooldown: dict[tuple[str, int], float] = {}
         # Game sessions exist only in RAM and expire automatically.
         self._game_sessions: dict[str, dict[str, Any]] = {}
+
+    def _ai_allowed_commands(self, uid: str) -> frozenset[str]:
+        allowed = {
+            "ayuda", "menu", "fecha", "zona", "miuid", "perfil", "puntos",
+            "ranking", "actividad", "investigar", "calcular", "traducir",
+            "multimedia", "imagen", "video", "audio", "afinidad", "muro",
+            "evento", "roast", "trivia", "responder", "adivina", "intento",
+            "duelo", "ship", "azar", "verdad", "8ball", "chiste", "frase",
+            "reto", "dj", "reproducir", "pausa", "reanudar", "saltar", "cola",
+            "join", "salirsala", "salas", "playlist", "leer", "noleer",
+            "silenciolectura", "tts", "volumen", "subirvolumen",
+            "bajarvolumen", "silencio", "ortografia", "analizartexto",
+            "analizar", "ping",
+        }
+        if self._is_admin(uid):
+            allowed.update({"admin", "centro", "fuentes", "metricas", "autotest"})
+        return frozenset(allowed)
+
+    async def _ai_assist(self, room_id: str, uid: str, name: str, prompt: str, message: dict[str, Any]) -> None:
+        result = await self.ai_core.assist(
+            prompt,
+            session_key=str(room_id) + ":" + str(uid),
+            request_func=self.services.ai_request,
+            allowed_commands=self._ai_allowed_commands(uid),
+            rate_key=uid,
+        )
+        kind = result.get("kind")
+        if kind == "command":
+            invocation = " ".join(part for part in (str(result.get("command") or ""), str(result.get("args") or "")) if part)
+            await self._command(room_id, uid, name, invocation, message)
+            return
+        if kind == "plan":
+            for step in result.get("steps", [])[:3]:
+                if not isinstance(step, dict):
+                    continue
+                invocation = " ".join(part for part in (str(step.get("command") or ""), str(step.get("args") or "")) if part)
+                await self._command(room_id, uid, name, invocation, message)
+            return
+        answer = str(result.get("answer") or "").strip()
+        if answer:
+            await self._reply(room_id, answer, message)
 
     @staticmethod
     def _author(message: dict[str, Any]) -> tuple[str, str]:
