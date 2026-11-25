@@ -816,7 +816,7 @@ class StellaBot:
         if not self._is_admin(uid):
             await self._reply(room_id, "Solo un administrador puede consultar las fuentes.", message)
             return
-        await self._reply(room_id, "FUENTES Y PROVEEDORES\n" + self.ai.status() + "\nInvestigación: DuckDuckGo, Wikipedia, Wikidata, GDELT, OpenAlex, Crossref, arXiv, Europe PMC, NASA, Internet Archive, MusicBrainz y Jamendo.\nMúsica: Internet Archive, Wikimedia Commons, Openverse, ccMixter, Audius y Jamendo.\\nMultimedia: Wikimedia Commons e Internet Archive.", message)
+        await self._reply(room_id, "FUENTES Y PROVEEDORES\n" + self.ai.status() + "\nInvestigación: DuckDuckGo, Wikipedia, Wikidata, GDELT, OpenAlex, Crossref, arXiv, Europe PMC, NASA, Internet Archive, MusicBrainz y Jamendo.\nMúsica: Internet Archive, Wikimedia Commons, Openverse, ccMixter, Audius y Jamendo. YouTube: búsqueda externa, reproducción oficial fuera de LiveKit.\\nMultimedia: Wikimedia Commons e Internet Archive.", message)
 
     async def _metrics(self, room_id, uid, name, args, message):
         if not self._is_admin(uid):
@@ -1711,6 +1711,9 @@ class StellaBot:
             command, args = "noleer", ""
         if command == "dj":
             action, _, rest = args.partition(" ")
+            if action.casefold() in {"youtube", "yt"}:
+                await self._reply(room_id, self.voice.youtube_search_message(rest), message)
+                return
             if action.casefold() in {"buscar", "search"}:
                 await self.voice.search_music_interactive(
                     room_id, rest, reply_id=str(message.get("messageId") or message.get("id") or "") or None

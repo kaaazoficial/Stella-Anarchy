@@ -1909,10 +1909,59 @@ class MusicVoice:
             return True, await self._dj_command(room_id, args)
         return False, ""
 
+    @staticmethod
+    def youtube_search_message(query: str) -> str:
+        """Build a first-party YouTube search/watch link; never extract or relay its media."""
+        text = " ".join(str(query or "").split())[:180]
+        if not text:
+            return "Uso: !dj youtube <artista, canción o enlace de YouTube>."
+
+        parsed = urlparse(text)
+        host = (parsed.hostname or "").casefold().rstrip(".")
+        video_id = ""
+        try:
+            port = parsed.port
+        except ValueError:
+            port = -1
+        if (
+            parsed.scheme in {"https", "http"}
+            and host in {"youtube.com", "www.youtube.com", "m.youtube.com", "youtu.be"}
+            and not parsed.username and not parsed.password
+            and port in {None, 80, 443}
+        ):
+            if host == "youtu.be":
+                candidate = parsed.path.strip("/").split("/", 1)[0]
+                if re.fullmatch(r"[A-Za-z0-9_-]{11}", candidate):
+                    video_id = candidate
+            else:
+                match = re.search(r"(?:^|&)v=([A-Za-z0-9_-]{11})(?:&|$)", parsed.query)
+                if match:
+                    video_id = match.group(1)
+                else:
+                    parts = [part for part in parsed.path.split("/") if part]
+                    if len(parts) >= 2 and parts[0] in {"shorts", "embed", "live"}:
+                        if re.fullmatch(r"[A-Za-z0-9_-]{11}", parts[1]):
+                            video_id = parts[1]
+
+        if video_id:
+            target = f"https://www.youtube.com/watch?v={quote(video_id, safe='')}"
+            heading = "VÍDEO EN YOUTUBE"
+        else:
+            target = "https://www.youtube.com/results?search_query=" + quote(text, safe="")
+            heading = "BÚSQUEDA EN YOUTUBE"
+        return (
+            f"▶️ {heading}\n{target}\n"
+            "La reproducción ocurre en YouTube. Stella no descarga, separa ni retransmite "
+            "el audio de YouTube a LiveKit.\n"
+            "Términos de YouTube: https://www.youtube.com/t/terms"
+        )
+
     async def _dj_command(self, room_id: str, raw_args: str) -> str:
         parts = raw_args.split(maxsplit=1)
         action = parts[0].casefold() if parts else "ayuda"
         rest = parts[1].strip() if len(parts) > 1 else ""
+        if action in {"youtube", "yt"}:
+            return self.youtube_search_message(rest)
         if action in {"buscar", "search"}:
             ok, message = await self.search_music(room_id, rest)
             return message
@@ -1990,7 +2039,12 @@ class MusicVoice:
             return message
         if action in {"fuentes", "sources"}:
             jamendo = "disponible" if os.getenv("JAMENDO_CLIENT_ID", "").strip() else "sin configurar"
-            return f"Catálogos musicales: Internet Archive, Wikimedia Commons, Openverse, ccMixter, Audius y Jamendo ({jamendo}); solo pistas con licencia abierta verificada."
+            return (
+                f"Catálogos para LiveKit: Internet Archive, Wikimedia Commons, Openverse, ccMixter, "
+                f"Audius y Jamendo ({jamendo}); solo pistas con licencia abierta verificada. "
+                "YouTube está disponible por separado con !dj youtube <tema> y abre el contenido "
+                "en YouTube; no se retransmite a LiveKit."
+            )
         if action in {"quitar", "remove"}:
             state = self.rooms.get(room_id)
             try:

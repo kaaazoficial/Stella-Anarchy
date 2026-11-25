@@ -823,3 +823,31 @@ async def test_interaction_event_is_routed_to_music_voice_handler():
     })
 
     assert received == ["play_1"]
+
+
+def test_youtube_music_search_creates_only_official_youtube_links():
+    voice = object.__new__(MusicVoice)
+    message = voice.youtube_search_message("Daft Punk One More Time")
+
+    assert "https://www.youtube.com/results?search_query=Daft%20Punk%20One%20More%20Time" in message
+    assert "https://www.youtube.com/t/terms" in message
+    assert "no descarga" in message.casefold()
+    assert "LiveKit" in message
+
+
+def test_youtube_music_accepts_official_video_links_without_proxying_media():
+    voice = object.__new__(MusicVoice)
+    message = voice.youtube_search_message("https://youtu.be/dQw4w9WgXcQ")
+
+    assert "https://www.youtube.com/watch?v=dQw4w9WgXcQ" in message
+    assert "results?search_query=" not in message
+    assert "LiveKit" in message
+
+
+@pytest.mark.asyncio
+async def test_dj_youtube_action_returns_external_search_not_livekit_audio():
+    voice = object.__new__(MusicVoice)
+    message = await voice._dj_command("room-1", "youtube lofi chill")
+
+    assert "https://www.youtube.com/results?search_query=lofi%20chill" in message
+    assert "retransmite" in message
