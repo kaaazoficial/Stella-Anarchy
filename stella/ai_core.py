@@ -353,7 +353,7 @@ def clarification_for_unspecified_topic(value: str) -> str | None:
 
 def is_contextual_followup_request(value: str) -> bool:
     """Recognize short references that depend on the immediately previous turn."""
-    text = re.sub(r"^[¿¡\\s]+", "", _normalize_ai_request(value)).strip()
+    text = re.sub(r"^[¿¡\s]+", "", _normalize_ai_request(value)).strip()
     if not text:
         return False
     topic_change_markers = (
