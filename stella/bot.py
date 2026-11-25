@@ -51,7 +51,7 @@ _PLAYFUL_INSULT_PATTERNS = (
     ),
     re.compile(
         r"\b(?:c[aá]llate|no sirves para nada|no vales nada|eres un desastre)\b"
-        r"|\b(?:que|vaya)\s+(?:idiota|imb[eé]cil|est[uú]pida?|tonta?|in[uú]til|"
+        r"|\b(?:qu[eé]|vaya)\s+(?:idiota|imb[eé]cil|est[uú]pida?|tonta?|in[uú]til|"
         r"pesada|tarada|boba|payasa|rid[ií]cula)\s+eres\b"
         r"|\b(?:idiota|imb[eé]cil|est[uú]pida?|tonta?|in[uú]til|pesada|"
         r"tarada|boba|payasa|rid[ií]cula)\s*[.!?]*$",

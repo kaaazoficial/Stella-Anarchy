@@ -112,3 +112,49 @@ def test_ai_context_is_ephemeral_bounded_and_isolated():
     ai.forget("room:user-a")
     assert ai._history("room:user-a") == []
     assert ai._history("room:user-b")
+
+
+def test_stella_identity_guidance_uses_her_name_without_ai_self_labelling():
+    from stella.ai_core import STELLA_IDENTITY_GUIDANCE
+
+    normalized = STELLA_IDENTITY_GUIDANCE.casefold()
+    assert "eres stella" in normalized
+    assert "no introduzcas espontáneamente" in normalized
+    assert "no afirmes ser una persona humana" in normalized
+    assert "responde de forma sencilla" in normalized
+
+
+@pytest.mark.parametrize("question", [
+    "¿quién eres?",
+    "¿cómo te llamas?",
+    "¿eres una IA?",
+    "¿eres IA?",
+    "¿eres un bot?",
+    "¿eres un chatbot?",
+    "¿eres un modelo de lenguaje?",
+    "¿qué eres?",
+])
+def test_direct_identity_questions_keep_stella_identity(question):
+    answer = resolve_community_faq(question)
+
+    assert answer
+    assert "stella" in answer.casefold()
+    assert "modelo de lenguaje" not in answer.casefold()
+    assert "inteligencia artificial" not in answer.casefold()
+    assert "integración comunitaria" not in answer.casefold()
+
+
+def test_stella_does_not_claim_to_be_a_human_when_asked():
+    answer = resolve_community_faq("¿eres humana?")
+
+    assert answer
+    assert "no soy una persona humana" in answer.casefold()
+    assert "inteligencia artificial" not in answer.casefold()
+
+
+def test_general_conversation_prompt_does_not_frame_stella_as_an_ai():
+    prompt = build_ai_instructions(frozenset(), "conversation")
+
+    assert "Stella también está aquí para conversar" in prompt
+    assert "la IA también está para conversar" not in prompt
+    assert "No introduzcas espontáneamente explicaciones sobre inteligencia artificial" in prompt
