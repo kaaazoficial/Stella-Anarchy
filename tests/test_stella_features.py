@@ -20,7 +20,7 @@ def test_stella_help_catalog_has_general_categories_only():
     assert "teyvat" not in full.casefold()
     assert "katheryne" not in full.casefold()
     social = filter_commands_help_text(full, "social")
-    assert "SOCIAL Y PERFILES" in social
+    assert "PERFILES Y COMUNIDAD" in social
     assert "ECONOMÍA" not in social
 
 
