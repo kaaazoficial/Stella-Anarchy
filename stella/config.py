@@ -30,6 +30,19 @@ class StellaSettings(BaseSettings):
     tts_voice: str = Field(
         default="es-CL-CatalinaNeural", validation_alias="TTS_VOICE"
     )
+    bot_token: str = Field(default="", validation_alias="ANARCHY_BOT_TOKEN")
+    webhook_secret: str = Field(default="", validation_alias="ANARCHY_WEBHOOK_SECRET")
+    community_bot_token: str = Field(default="", validation_alias="ANARCHY_COMMUNITY_BOT_TOKEN")
+    api_base: str = Field(default="https://api.anarchyapps.org/bot-api/v1", validation_alias="ANARCHY_API_BASE")
+    version: str = Field(default="1.0.0", validation_alias="STELLA_VERSION")
+
+    @property
+    def database_path(self) -> Path:
+        return self.data_dir / "stella.sqlite3"
+
+    @classmethod
+    def from_env(cls) -> "StellaSettings":
+        return cls()
 
     @field_validator("command_prefix", mode="before")
     @classmethod
@@ -45,4 +58,4 @@ class StellaSettings(BaseSettings):
         return str(value or "").strip() or "es-CL-CatalinaNeural"
 
 
-SETTINGS = StellaSettings()
+Settings = StellaSettings\nSETTINGS = StellaSettings()
