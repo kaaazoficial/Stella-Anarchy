@@ -194,7 +194,7 @@ def test_non_owner_cannot_enable_global_silence():
 
     assert b.store.get_setting("__stella_global__", "chat_silence", "0") == "0"
     assert len(b.platform.sent) == 1
-    assert "reservado al propietario" in b.platform.sent[0][1]
+    assert "Solo el propietario de Stella puede activar" in b.platform.sent[0][1]
 
 
 def test_global_silence_blocks_commands_chat_replies_and_voice():
