@@ -5,7 +5,7 @@ Stella is an independent Python bot for Anarchy Apps. It has its own codebase, c
 ## Current feature set
 
 - Signed Anarchy webhook receiver with timestamp validation, HMAC-SHA256 verification, streamed payload limits, 15-minute in-memory event de-duplication and bounded caches.
-- Anarchy API client for sending chat messages and replies.
+- Anarchy API client for sending chat messages and replies. At startup, Stella calls `GET /me` and logs its authenticated `botId` and account `uid`; this works before Stella joins any chat.
 - General commands: `!ayuda`, `!ping`, `!miuid`, `!azar`, `!frase`.
 - Moderation records: `!advertir`, `!advertencias`, `!quitaradvertencia`.
 - Room anti-spam configuration: `!antispam activar|desactivar`.
