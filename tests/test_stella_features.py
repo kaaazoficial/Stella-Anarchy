@@ -116,3 +116,19 @@ def test_profiles_economy_gifts_and_affinity_expire_operational_data(tmp_path: P
     store.cleanup_expired()
     assert store.get_profile("u1")["bio"] == ""
     assert store.received_gifts("u2") == []
+
+def test_avatar_validation_rejects_unsupported_mime_and_invalid_hosts():
+    import pytest
+
+    from stella.images import validate_avatar_image_bytes
+    from stella.services import StellaServices
+
+    with pytest.raises(ValueError):
+        validate_avatar_image_bytes(b"not-image", "text/html")
+    services = StellaServices()
+    async def check():
+        with pytest.raises(ValueError):
+            await services.fetch_avatar_image("https://example.com/avatar.png")
+        await services.close()
+    import asyncio
+    asyncio.run(check())
