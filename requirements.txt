@@ -13,3 +13,4 @@ defusedxml>=0.7.1,<1
 selectolax>=0.3.0,<1
 rapidfuzz>=3.0.0,<4
 prometheus-client>=0.21.0,<1
+Pillow>=10.0.0,<13
