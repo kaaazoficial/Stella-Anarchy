@@ -347,15 +347,15 @@ def is_contextual_followup_request(value: str) -> bool:
     if any(marker in text for marker in topic_change_markers):
         return False
     pronoun_reference = re.search(
-        r"\\b(?:ella|ellas|ellos|eso|ese|esa|lo anterior|la anterior|el anterior|"
+        r"\b(?:ella|ellas|ellos|eso|ese|esa|lo anterior|la anterior|el anterior|"
         r"la misma|el mismo|a ella|con ella|para ella|sobre ella|de ella|"
         r"le sirve|le sirven|le conviene|le queda|su historia|sus ideas|sus opciones|"
-        r"sus caracteristicas|sus funciones|sus pasos)\\b",
+        r"sus caracteristicas|sus funciones|sus pasos)\b",
         text,
     )
     return bool(
         (pronoun_reference and len(text.split()) <= 18)
-        or re.match(r"^y (?:que|cual|como|con|para|sobre|la|respecto a)\\b", text)
+        or re.match(r"^y (?:que|cual|como|con|para|sobre|la|respecto a)\b", text)
     )
 
 
