@@ -146,9 +146,13 @@ class StellaBot:
             "!",
             "-",
         )))
-        # A prefix alone is never an invocation: commands must be called by name,
-        # explicitly mention Stella, or reply to one of Stella's own messages.
-        addressed = direct_call is not None or mentioned or replied
+        # A command prefix is an explicit invocation. Ordinary conversation stays
+        # silent, while !ayuda, !menu and every other routed command remain usable.
+        prefixed_command = next(
+            (item for item in prefixes if content.startswith(item) and len(content) > len(item)),
+            None,
+        )
+        addressed = direct_call is not None or mentioned or replied or prefixed_command is not None
 
         self.store.touch_user(uid, name)
         self.store.record_activity(room_id, uid)
