@@ -168,8 +168,7 @@ class StellaBot:
                 await self._command(room_id, uid, name, natural, message)
             else:
                 prompt = natural.removeprefix("asistente ").strip() if natural else addressed
-                answer = await self.ai.ask(prompt, session_key=str(room_id) + ":" + str(uid))
-                await self._reply(room_id, answer, message)
+                await self._ai_assist(room_id, uid, name, prompt, message)
             return
         affection = detect_affectionate_expression(content)
         if affection:
@@ -195,6 +194,9 @@ class StellaBot:
         for session_key in list(self.ai._memory):
             if session_key.startswith(str(room_id) + ":"):
                 self.ai.forget_session(session_key)
+        for session_key in list(self.ai_core._memory):
+            if session_key.startswith(str(room_id) + ":"):
+                self.ai_core._memory.pop(session_key, None)
         for mapping in (self._recent, self._warned_until, self._auto_reply_cooldown):
             for key in list(mapping):
                 if key[0] == room_id:
@@ -1191,23 +1193,23 @@ class StellaBot:
     async def _ai(self, room_id, uid, name, args, message):
         action, _, query = args.partition(" ")
         action = action.casefold().strip()
-        if action in {"estado", "status"}:
-            await self._reply(room_id, self.ai.status(), message)
-            return
         session_key = str(room_id) + ":" + str(uid)
+        if action in {"estado", "status"}:
+            await self._reply(room_id, self.ai_core.status() + "\\n" + self.ai.status(), message)
+            return
         if action in {"olvidar", "forget", "limpiar"}:
             removed = self.ai.forget_session(session_key)
-            await self._reply(room_id, "Contexto temporal eliminado." if removed else "No había contexto temporal activo para esta sala.", message)
+            core_removed = self.ai_core._memory.pop(session_key, None) is not None
+            await self._reply(room_id, "Contexto temporal eliminado." if removed or core_removed else "No había contexto temporal activo en esta sala.", message)
             return
         if action in {"ayuda", "help"}:
-            await self._reply(room_id, "🤖 ASISTENTE STELLA\n!ia <consulta> o !asistente <consulta>\n!ia preguntar <consulta> para formular una pregunta directa.\n!ia estado consulta los proveedores.\n!ia olvidar elimina el contexto temporal de esta sala.\nEl contexto es volátil, dura como máximo cinco minutos y nunca se guarda en la base de datos.", message)
+            await self._reply(room_id, "🤖 ASISTENTE STELLA\\n!ia <consulta> o !asistente <consulta>\\n!ia preguntar <consulta> para formular una pregunta directa.\\n!ia estado consulta proveedores y límites.\\n!ia olvidar elimina el contexto temporal de esta sala.\\nEl contexto es volátil, dura como máximo cinco minutos y nunca se guarda en la base de datos.", message)
             return
         prompt = query.strip() if action in {"preguntar", "ask"} else args.strip()
         if not prompt:
             await self._reply(room_id, f"Uso: {self.settings.command_prefix}ia <consulta>, !ia estado o !ia olvidar.", message)
             return
-        answer = await self.ai.ask(prompt, session_key=session_key)
-        await self._reply(room_id, answer, message)
+        await self._ai_assist(room_id, uid, name, prompt, message)
 
     async def _voice_command(self, room_id, uid, name, args, message):
         command = str(message.get("_stella_command") or "").casefold().strip()
