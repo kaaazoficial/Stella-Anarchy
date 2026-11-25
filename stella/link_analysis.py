@@ -270,13 +270,13 @@ def classify_link_policy(url: str) -> dict:
                 "category": "other_anarchy_community",
             }
 
-    # Also catch an explicitly named Stella community/page when it uses a
+    # Also catch an explicitly named stella community/page when it uses a
     # readable slug. Numeric Anarchy community IDs are already covered above.
     path_segments = [segment.casefold() for segment in path.split("/") if segment]
     if "stella" in path_segments or host.startswith("stella."):
         return {
             "blocked": True,
-            "reason": "Los enlaces a la página de Stella están bloqueados.",
+            "reason": "Los enlaces a la página de stella están bloqueados.",
             "category": "blocked_page",
         }
 
@@ -337,7 +337,7 @@ async def inspect_message_links(
                 "url": url,
                 "blocked": True,
                 "category": "blocked_page",
-                "reason": "El destino es una página identificada como Stella.",
+                "reason": "El destino es una página identificada como stella.",
             }
 
         signals = inspect_link_signals(
