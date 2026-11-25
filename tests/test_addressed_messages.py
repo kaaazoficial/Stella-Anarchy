@@ -108,3 +108,20 @@ def test_reply_to_stella_allows_prefixed_command_without_name():
     asyncio.run(b.handle_event({"type":"message","threadId":"r","message":{"content":"!menu","replyMessageId":"stella-msg","author":{"uid":"u","nickname":"Persona"}}}))
     assert len(calls) == 1
     assert calls[0][3] == "menu"
+
+def test_help_command_sends_all_six_pages():
+    b=bot()
+    asyncio.run(b._help_command("r", "u", "Persona", "", {"messageId":"request"}))
+    assert len(b.platform.sent) == 6
+    expected_titles = (
+        "1. AYUDA E INTELIGENCIA ARTIFICIAL",
+        "2. SOCIAL Y PERFILES",
+        "3. JUEGOS, ECONOMÍA Y COMUNIDAD",
+        "4. MÚSICA, VOZ Y LECTURA",
+        "5. UTILIDADES Y MULTIMEDIA",
+        "6. ADMINISTRACIÓN Y ESTADO",
+    )
+    delivered = "\\n".join(message for _, message, _ in b.platform.sent)
+    for title in expected_titles:
+        assert title in delivered
+
