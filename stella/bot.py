@@ -234,7 +234,7 @@ class StellaBot:
         if not identity:
             await self._reply(room_id, "No pude verificar la identidad de Stella con Anarchy. Revisa el token y los permisos de la API.", message)
             return
-        bot_id = str(identity.get("botId") or identity.get("bot_id") or "").strip()
+        bot_id = str(identity.get("botId") or identity.get("bot_id") or identity.get("id") or "").strip()
         account_uid = str(identity.get("uid") or "").strip()
         if not bot_id:
             await self._reply(room_id, "Anarchy autenticó el token, pero no devolvió botId. No usaré el UID de cuenta como sustituto.", message)
@@ -242,6 +242,9 @@ class StellaBot:
         response = f"ID de bot de Stella: {bot_id}"
         if account_uid:
             response += f"\nUID de cuenta asociado: {account_uid}"
+        thread_ids = identity.get("threadIds") or identity.get("thread_ids")
+        if isinstance(thread_ids, list) and thread_ids:
+            response += "\nSalas vinculadas: " + ", ".join(str(item) for item in thread_ids[:20])
         await self._reply(room_id, response, message)
 
     async def _status(self, room_id, uid, name, args, message):
