@@ -15,7 +15,7 @@ from email.utils import parsedate_to_datetime
 from collections import OrderedDict, defaultdict, deque
 from typing import Any, Awaitable, Callable
 
-from stella_topics import is_specialized_subject_related_request, normalize_topic_text
+from stella.topics import is_specialized_subject_related_request, normalize_topic_text
 from urllib.parse import quote, urlsplit
 
 RequestFunc = Callable[..., Awaitable[Any]]
@@ -30,7 +30,7 @@ AI_PUBLIC_COMMANDS = frozenset({
     "bio", "miestado", "afinidad", "amistad", "interaccion", "regalo", "muro",
     "evento", "roast",
     # specialized subject / 
-    "", # Juegos y economía personal
+ Juegos y economía personal
     "trivia", "responder", "adivina", "intento", "diario", "daily", "trabajar",
     "pagar", "transferir", "encuesta", "elige", "duelo", "ship", "azar",
     "verdad", "8ball", "chiste", "frase", "reto",
@@ -293,7 +293,7 @@ def _retry_header_seconds(value: Any) -> float | None:
 def resolve_community_faq(question: str) -> str | None:
     """Resolve short, domain-independent conversational replies."""
     text = normalize_topic_text(question)
-    text = re.sub(r"^(?:stella)\\s+", "", text).strip()
+    text = re.sub(r"^(?:stella)\s+", "", text).strip()
     if text in {"hola", "buenas", "buenos dias", "buenas tardes", "buenas noches"}:
         return "¡Hola! Soy Stella. ¿En qué puedo ayudarte?"
     if text in {"gracias", "muchas gracias", "te lo agradezco"}:
