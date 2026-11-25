@@ -119,44 +119,33 @@ class StellaServices:
 
     async def research(self, query: str) -> list[dict[str, str]]:
         term = str(query or "").strip()
-        if not term or len(term) > 300:
+        if not 3 <= len(term) <= 160:
             return []
         try:
+            from stella.research import search_web
+
             async with httpx.AsyncClient(
                 timeout=self.timeout,
-                headers={"User-Agent": "StellaCommunityBot/0.1 (+https://github.com/kaaazoficial/Stella-Anarchy)"},
-                follow_redirects=True,
+                headers={"User-Agent": "StellaCommunityBot/1.0 (+https://github.com/kaaazoficial/Stella-Anarchy)"},
+                follow_redirects=False,
             ) as client:
-                response = await client.get(
-                    "https://html.duckduckgo.com/html/?q=" + quote_plus(term)
-                )
-                response.raise_for_status()
-            parser = _SearchParser()
-            parser.feed(response.text[:1_000_000])
-            results = []
-            for item in parser.results:
-                url = html.unescape(item["url"]).strip()
-                if url.startswith("//"):
-                    url = "https:" + url
-                elif url.startswith("/"):
-                    url = urljoin("https://duckduckgo.com", url)
-                parsed = urlparse(url)
-                if parsed.netloc.casefold().endswith("duckduckgo.com"):
-                    target = parse_qs(parsed.query).get("uddg", [""])[0]
-                    if target:
-                        url = unquote(target)
-                        parsed = urlparse(url)
-                if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-                    continue
-                results.append({
-                    "title": html.unescape(item["title"])[:180],
-                    "url": url[:700],
-                    "snippet": html.unescape(item["snippet"])[:500],
-                    "domain": parsed.netloc[:120],
-                })
-                if len(results) >= 6:
-                    break
-            return results
-        except (httpx.HTTPError, ValueError):
+                async def request_func(method: str, url: str, **kwargs):
+                    kwargs.setdefault("timeout", self.timeout)
+                    return await client.request(method, url, **kwargs)
+
+                sources = await search_web(term, request_func, limit=8)
+            return [
+                {
+                    "title": str(item.get("title") or "Fuente pública")[:180],
+                    "url": str(item.get("url") or "")[:700],
+                    "snippet": str(item.get("excerpt") or item.get("snippet") or "")[:700],
+                    "domain": str(item.get("domain") or urlparse(str(item.get("url") or "")).netloc)[:120],
+                    "source_type": str(item.get("source_type") or "web"),
+                    "attribution": str(item.get("attribution") or "")[:240],
+                }
+                for item in sources[:8]
+                if item.get("url")
+            ]
+        except (httpx.HTTPError, ValueError, RuntimeError, ImportError):
             log.exception("Research request failed")
             return []
