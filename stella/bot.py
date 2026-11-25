@@ -382,7 +382,11 @@ class StellaBot:
             "extraer": "Extrae los datos, nombres, fechas y puntos importantes que aparezcan explícitamente.",
             "contradicciones": "Identifica contradicciones internas. Distingue contradicciones reales de datos que simplemente no se relacionan.",
         }[mode]
-        answer = await self.ai.ask(content[:5500], system=instructions)
+        answer = await self.ai_core.task_response(
+            "text_analysis", content[:5500], self.services.ai_request,
+            extra_instructions=instructions[mode] if isinstance(instructions, dict) else instructions,
+            rate_key=uid,
+        )
         await self._reply(room_id, answer, message)
 
     def _mentioned_user(self, message: dict[str, Any]) -> tuple[str, str] | None:
@@ -1194,7 +1198,7 @@ class StellaBot:
         if not separator:
             await self._reply(room_id, f"Uso: {self.settings.command_prefix}traducir <idioma> | <texto>", message)
             return
-        await self._reply(room_id, await self.ai.translate(language, text), message)
+        await self._reply(room_id, await self.ai_core.task_response("translation", text[:5000], self.services.ai_request, extra_instructions=f"Idioma de destino: {language.strip()[:80]}.", rate_key=uid), message)
 
     async def _ai(self, room_id, uid, name, args, message):
         action, _, query = args.partition(" ")
