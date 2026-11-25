@@ -450,7 +450,7 @@ class StellaBot:
             return
         lines = ["🎙️ SALAS DE VOZ ACTIVAS"]
         lines.extend(f"• {room}" for room in active[:20])
-        await self._reply(room_id, "\\n".join(lines), message)
+        await self._reply(room_id, "\n".join(lines), message)
 
     async def _bot_profile(self, room_id, uid, name, args, message):
         if not self._is_admin(uid):
@@ -585,7 +585,7 @@ class StellaBot:
             return
         lines = ["🏆 RANKING DE PUNTOS"]
         lines.extend(f"{i}. {row['nickname']} · {row['points']} pts" for i, row in enumerate(rows, 1))
-        await self._reply(room_id, "\\n".join(lines), message)
+        await self._reply(room_id, "\n".join(lines), message)
 
     async def _daily(self, room_id, uid, name, args, message):
         ok, result = self.store.claim_reward(uid, "daily", 100, 86400)
@@ -645,7 +645,7 @@ class StellaBot:
             return
         lines = ["🎁 TU MURO · ÚLTIMOS REGALOS"]
         lines.extend(f"• {gift['sender_name']}: {gift['message'] or 'Te envió un detalle.'}" for gift in gifts)
-        await self._reply(room_id, "\\n".join(lines), message)
+        await self._reply(room_id, "\n".join(lines), message)
 
     async def _affinity(self, room_id, uid, name, args, message):
         target = self._mentioned_user(message)
@@ -1127,7 +1127,7 @@ class StellaBot:
             await self._reply(room_id, "Contexto temporal eliminado." if removed else "No había contexto temporal activo para esta sala.", message)
             return
         if action in {"ayuda", "help"}:
-            await self._reply(room_id, "🤖 ASISTENTE STELLA\\n!ia <consulta> o !asistente <consulta>\\n!ia preguntar <consulta> para formular una pregunta directa.\\n!ia estado consulta los proveedores.\\n!ia olvidar elimina el contexto temporal de esta sala.\\nEl contexto es volátil, dura como máximo cinco minutos y nunca se guarda en la base de datos.", message)
+            await self._reply(room_id, "🤖 ASISTENTE STELLA\n!ia <consulta> o !asistente <consulta>\n!ia preguntar <consulta> para formular una pregunta directa.\n!ia estado consulta los proveedores.\n!ia olvidar elimina el contexto temporal de esta sala.\nEl contexto es volátil, dura como máximo cinco minutos y nunca se guarda en la base de datos.", message)
             return
         prompt = query.strip() if action in {"preguntar", "ask"} else args.strip()
         if not prompt:
@@ -1146,8 +1146,8 @@ class StellaBot:
                     self.store.create_playlist(room_id, uid, "Favoritos")
                 if not rest.strip():
                     tracks = self.store.playlist_tracks(room_id, uid, "Favoritos")
-                    body = "\\n".join(f"{i}. {track['title']} — {track['creator']}" for i, track in enumerate(tracks, 1)) or "Todavía no guardaste pistas."
-                    await self._reply(room_id, "⭐ TUS FAVORITOS\\n" + body, message)
+                    body = "\n".join(f"{i}. {track['title']} — {track['creator']}" for i, track in enumerate(tracks, 1)) or "Todavía no guardaste pistas."
+                    await self._reply(room_id, "⭐ TUS FAVORITOS\n" + body, message)
                     return
                 try:
                     number = int(rest.strip())
