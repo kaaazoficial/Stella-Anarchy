@@ -80,7 +80,7 @@ def _command_help_sections(prefix: str):
         (CATEGORY_TITLES[3], [
             (True, "▸ Llamadas"),
             (False, f"• {prefix}join | {prefix}salirsala | {prefix}salas — Entrar, salir y consultar salas."),
-            (False, f"• {prefix}voz — Consulta el estado de la conexión de voz y TTS."),
+            (False, f"• {prefix}voz participantes|hablando|estado — Consulta participantes y rol de hablante en tiempo real."),
             (True, "▸ Reproductor DJ"),
             (False, f"• {prefix}dj buscar <tema> | ambiente <mood> — Busca pistas con licencia abierta."),
             (False, f"• {prefix}dj reproducir <n> | encolar <n> — Reproducir o añadir resultados."),
