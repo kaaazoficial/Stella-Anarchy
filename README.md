@@ -17,15 +17,18 @@ Stella is an independent Python bot for Anarchy Apps. It has its own codebase, c
 - Community events with date/time, location, RSVPs and closure: `!evento crear|lista|apuntarse|cerrar`.
 - Aggregate activity reports for administrators: `!actividad`.
 - Exact-match automatic replies, configured by administrators: `!respuesta añadir|quitar|lista`.
-- Preliminary link inspection: `!analizar`.
+- Preliminary link inspection: `!analizar`, with domain, redirect-format, suspicious-TLD and adult-content signals. It is heuristic, not an antivirus verdict.
+- Multimedia search: `!multimedia imagen|video|audio`, `!imagen`, `!video`, and `!audio` using Wikimedia Commons and Internet Archive. Image results include license attribution where available.
 - Gemini-first AI with Groq fallback. Models are configurable through environment variables. Commands: `!ia`, `!ia ayuda`, `!ia estado`, `!ia olvidar`, `!traducir`, and `!investigar` with general, comparison, verification, chronology and report modes. AI context is limited to two recent exchanges per room/user, expires after five minutes and can be cleared immediately.
-- LiveKit voice-room connection for active Anarchy calls: `!join`, `!salirsala`, `!voz`.
+- LiveKit voice-room connection for active Anarchy calls: `!join`, `!salirsala`, `!salas`, and `!voz participantes|hablando|estado`. Participant state is volatile and expires.
+- Per-user, per-room music playlists and favorites: `!playlist crear|lista|agregar|ver|reproducir|borrar` and `!dj favorito|favoritos`. Playlists only save results from the supported music catalogues.
 - Text-to-speech with Edge TTS, Spanish voices, speed and volume controls: `!leer`, `!noleer`, `!tts voces`, `!tts voz`, `!tts velocidad`, `!tts volumen`.
 - Music DJ with open-license music catalogues (Internet Archive and Jamendo where configured), exact result selection, bounded queues, pause/resume/skip/stop and volume: `!dj buscar`, `!dj reproducir`, `!dj encolar`, `!dj cola`, `!dj pausa`, `!dj reanudar`, `!dj saltar`, `!dj detener`.
-- Music is not downloaded from YouTube or arbitrary URLs. Tracks must come from the supported catalogues and pass source/license validation.
+- Music is not downloaded from YouTube or arbitrary URLs. Tracks must come from the supported catalogues and pass source/license validation. DJ controls include repeat, queue editing, ambience search, favorites, and source diagnostics.
 - Profiles and social economy: `!perfil`, `!bio`, `!miestado`, `!puntos`, `!ranking`, `!diario`, `!trabajar`, `!pagar`, `!regalo`, `!muro`, `!afinidad` and `!duelo`.
 - High-confidence command typo suggestions; suggestions are never executed automatically.
-- Exact UID-based administrator permissions. `/metrics` exposes aggregate Prometheus counters and can be protected with `PROMETHEUS_METRICS_TOKEN`; `/health` includes a SQLite integrity check.
+- Exact UID-based administrator permissions. Admins can update Stella's name/status with `!perfilbot` and set its avatar with `!avatarbot`; avatar uploads are restricted to direct HTTPS images from Wikimedia Commons, Imgur, Unsplash or Pexels, validated for real image format, dimensions and a 512 KB cap.
+- `/metrics` exposes aggregate Prometheus counters and can be protected with `PROMETHEUS_METRICS_TOKEN`; `/health` includes a SQLite integrity check.
 
 ## Privacy, data and retention
 
