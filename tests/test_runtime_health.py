@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from types import SimpleNamespace
 
 import main
@@ -30,8 +31,10 @@ def test_health_reports_component_status_without_exposing_secrets(monkeypatch):
     monkeypatch.setenv("GEMINI_API_KEY", "private-ai-key")
     monkeypatch.delenv("GROQ_API_KEY", raising=False)
 
-    result = asyncio.run(main.health())
+    response = asyncio.run(main.health())
+    result = json.loads(response.body)
 
+    assert response.status_code == 200
     assert result["ok"] is True
     assert result["status"] == "healthy"
     assert result["checks"]["database"] == "ok"
@@ -90,3 +93,39 @@ def test_readiness_reports_missing_credentials_without_values(monkeypatch):
     assert b"ANARCHY_WEBHOOK_SECRET" in response.body
     assert b"database" in response.body
     assert b"configured" not in response.body
+
+
+
+def test_health_returns_service_unavailable_when_database_is_unhealthy(monkeypatch):
+    monkeypatch.setattr(
+        main,
+        "verify_sqlite_database",
+        lambda path: {"ok": False, "integrity": "database disk image is malformed"},
+    )
+    monkeypatch.setattr(
+        main,
+        "settings",
+        SimpleNamespace(
+            database_path="unused",
+            version="test",
+            bot_token="private-token",
+            webhook_secret="private-secret",
+        ),
+    )
+    monkeypatch.setattr(
+        main,
+        "bot",
+        SimpleNamespace(vector_memory=SimpleNamespace(status="conectada")),
+    )
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
+
+    response = asyncio.run(main.health())
+    result = json.loads(response.body)
+
+    assert response.status_code == 503
+    assert result["ok"] is False
+    assert result["status"] == "unhealthy"
+    assert result["checks"]["database"] == "database disk image is malformed"
+    assert "private-token" not in response.body.decode()
+    assert "private-secret" not in response.body.decode()

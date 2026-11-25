@@ -175,7 +175,7 @@ async def root() -> dict[str, str]:
 
 
 @app.get("/health")
-async def health() -> dict[str, Any]:
+async def health() -> JSONResponse:
     """Liveness and privacy-safe component diagnostics for Render and operators."""
     database = verify_sqlite_database(settings.database_path)
     database_ok = bool(database.get("ok"))
@@ -188,7 +188,7 @@ async def health() -> dict[str, Any]:
         os.getenv("GEMINI_API_KEY", "").strip()
         or os.getenv("GROQ_API_KEY", "").strip()
     )
-    return {
+    payload = {
         "ok": database_ok,
         "status": "healthy" if database_ok else "unhealthy",
         "bot": "Stella",
@@ -202,6 +202,9 @@ async def health() -> dict[str, Any]:
             "vector_memory": vector_status,
         },
     }
+    # Render and other HTTP monitors must receive a failing status when the
+    # database is unhealthy; a JSON field alone is not enough for health checks.
+    return JSONResponse(status_code=200 if database_ok else 503, content=payload)
 
 
 @app.get("/ready")
