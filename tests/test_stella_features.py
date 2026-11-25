@@ -56,6 +56,36 @@ def test_ai_context_is_ephemeral_and_can_be_forgotten():
     assert "expired" not in ai._memory
 
 
+def test_music_playlists_store_only_validated_catalog_metadata(tmp_path: Path):
+    store = Store(tmp_path / "stella.sqlite3")
+    store.initialize()
+    store.touch_user("u1", "Uno")
+    assert store.create_playlist("room", "u1", "Favoritos")
+    assert not store.create_playlist("room", "u1", "favoritos")
+    track = {
+        "title": "Instrumental track",
+        "creator": "Artist",
+        "license": "CC BY",
+        "source": "Internet Archive",
+        "url": "https://archive.org/download/example/track.mp3",
+        "item_url": "https://archive.org/details/example",
+        "identifier": "example",
+    }
+    assert store.add_playlist_track("room", "u1", "Favoritos", track) == "ok"
+    rows = store.list_playlists("room", "u1")
+    assert rows[0]["tracks"] == 1
+    assert store.playlist_tracks("room", "u1", "Favoritos")[0]["title"] == "Instrumental track"
+    assert store.delete_playlist("room", "u1", "Favoritos")
+    assert store.list_playlists("room", "u1") == []
+
+
+def test_music_mood_helper_normalizes_spanish_accents():
+    from stella.astra import resolve_music_mood
+
+    assert resolve_music_mood("concentración") == "instrumental focus study ambient"
+    assert resolve_music_mood("dormir") == "soft ambient sleep meditation"
+
+
 def test_profiles_economy_gifts_and_affinity_expire_operational_data(tmp_path: Path):
     store = Store(tmp_path / "stella.sqlite3")
     store.initialize()
