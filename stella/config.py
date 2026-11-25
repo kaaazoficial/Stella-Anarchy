@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import re
 
 from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -56,6 +57,10 @@ class StellaSettings(BaseSettings):
     @classmethod
     def normalize_tts_voice(cls, value: object) -> str:
         return str(value or "").strip() or "es-CL-CatalinaNeural"
+
+
+def _uid_set(value: object) -> frozenset[str]:
+    return frozenset(item.strip() for item in re.split(r"[,;\\s]+", str(value or "")) if item.strip())
 
 
 Settings = StellaSettings
