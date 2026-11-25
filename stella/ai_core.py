@@ -58,7 +58,7 @@ EXCLUDED_TOOL_COMMANDS = frozenset()
 # as individual explicit actions only.
 AI_PLAN_SAFE_COMMANDS = frozenset({
     "ayuda", "comandos", "estado", "fuentes", "saludfuentes", "fecha", "zona",
-    "perfil", "puntos", "ranking", "actividad", "", "investigar", "calcular", "traducir", "multimedia", "media", "imagen",
+    "perfil", "puntos", "ranking", "actividad", "investigar", "calcular", "traducir", "multimedia", "media", "imagen",
     "video", "audio",
 })
 
@@ -78,7 +78,6 @@ AI_COMMAND_CATALOG = {
     "metricas": "sin argumentos: muestra métricas agregadas del proceso (solo administradores).",
     "autotest": "sin argumentos: ejecuta pruebas internas (solo administradores).",
     "admin": "[resumen|actividad|antispam|avisos|historial]: panel administrativo.",
-    "respuestas": "[estado|on|off]: consulta o activa respuestas automáticas (administradores).",
     "respuesta": "añadir palabra | respuesta; lista; eliminar ID (administradores).",
     "advertir": "@usuario [motivo]: registra una advertencia (administradores).",
     "advertencias": "[@usuario]: consulta advertencias (administradores).",
