@@ -1,4 +1,4 @@
-"""Bounded public-web research helpers for Stella.
+"""Bounded public-web research helpers for stella.
 
 Only HTTPS public pages are fetched. Redirects are not followed, responses are
 size-limited, and page contents are treated as untrusted source material.
@@ -39,7 +39,7 @@ ET = _LazyElementTree()
 
 RequestFunc = Callable[..., Awaitable[Any]]
 SEARCH_URL = "https://html.duckduckgo.com/html/"
-USER_AGENT = "StellaBot/4.0 (+public-page research)"
+USER_AGENT = "stellaBot/4.0 (+public-page research)"
 
 
 def is_safe_public_url(value: str) -> bool:
@@ -475,16 +475,66 @@ def _normalized_query(query: str) -> str:
 
 
 def classify_research_intent(query: str) -> dict[str, bool]:
-    """Route general research to relevant public sources."""
+    """Route research to specialist sources without mixing unrelated subjects."""
     text = _normalized_query(query)
-    music = bool(re.search(r"\b(musica|cancion(?:es)?|album(?:es)?|discografia|artista|banda|grupo musical|soundtrack|bso|ost|music|song|track|recording|musicbrainz|jamendo)\b", text))
-    nasa = bool(re.search(r"\b(nasa|astronomia|astronomico|astronomica|espacio|cosmos|planeta|planetas|luna|marte|jupiter|saturno|galaxia|nebulosa|telescopio|exoplaneta|sistema solar|space|astronomy)\b", text))
-    biomedical = bool(re.search(r"\b(pubmed|europe pmc|biomedicina|biomedical|medicina|medico|medica|salud|enfermedad(?:es)?|diagnostico|tratamiento(?:s)?|farmacologia|estudio(?:s)? clinico(?:s)?|ensayo clinico|clinical trial|clinical research|medical research|diabetes|alzheimer|cancer|oncologia|tumor(?:es)?|biomarcador(?:es)?|sintoma(?:s)?|terapia(?:s)?|disease(?:s)?|epidemiologia|neurociencia|genetica|genomica|microbiologia|proteina|proteinas|celula|celular|biologia|biology|medicamento|medicamentos|vacuna|vacunas)\b", text))
-    academic = biomedical or bool(re.search(r"\b(paper|papers|articulo cientifico|articulos cientificos|estudio cientifico|estudios cientificos|investigacion academica|literatura cientifica|doi|crossref|openalex|revista cientifica|publicacion academica|metaanalisis|meta analisis|scientific study|research paper|academic research|arxiv|preprint|preprints)\b", text))
-    archive = bool(re.search(r"\b(internet archive|archive.org|wayback machine|libro|libros|ebook|ebooks|obra de dominio publico|dominio publico|archivo historico|hemeroteca|documento historico|publicacion antigua|old book|historical archive)\b", text))
-    fandom = bool(re.search(r"\b(fandom|wiki comunitaria|anime|manga|videojuego|videojuegos|personaje de videojuego|franquicia de ficcion)\b", text))
-    news = bool(re.search(r"\b(noticia|noticias|actualidad|ultimas noticias|ultimas novedades|noticias recientes|hoy|ayer|esta semana|esta manana|este mes|breaking news|latest news|current events)\b", text))
-    return {"music": music, "nasa": nasa, "academic": academic, "biomedical": biomedical, "news": news, "archive": archive, "fandom": fandom}
+    genshin = bool(re.search(
+        r"\b(genshin(?: impact)?|teyvat|natlan|fontaine|sumeru|inazuma|mondstadt|"
+        r"liyue|cyno|nahida|furina|arlecchino|neuvillette|mavuika|"
+        r"keqing|zhongli|hu tao|kazuha|raiden shogun)\b", text
+    ))
+    music = bool(re.search(
+        r"\b(musica|cancion(?:es)?|album(?:es)?|discografia|artista|banda|"
+        r"grupo musical|soundtrack|bso|ost|music|song|track|recording|"
+        r"musicbrainz|jamendo)\b", text
+    ))
+    nasa = not genshin and bool(re.search(
+        r"\b(nasa|astronomia|astronomico|astronomica|espacio|cosmos|"
+        r"planeta|planetas|luna|marte|jupiter|saturno|galaxia|nebulosa|"
+        r"telescopio|exoplaneta|sistema solar|space|astronomy)\b", text
+    ))
+    biomedical = bool(re.search(
+        r"\b(pubmed|europe pmc|biomedicina|biomedical|medicina|medico|medica|"
+        r"salud|enfermedad(?:es)?|diagnostico|tratamiento(?:s)?|farmacologia|"
+        r"estudio(?:s)? clinico(?:s)?|ensayo clinico|ensayos clinicos|"
+        r"clinical trial|clinical trials|clinical research|medical research|"
+        r"diabetes|alzheimer|cancer|oncologia|tumor(?:es)?|biomarcador(?:es)?|"
+        r"sintoma(?:s)?|terapia(?:s)?|disease(?:s)?|"
+        r"epidemiologia|neurociencia|genetica|genomica|microbiologia|"
+        r"proteina|proteinas|celula|celular|biologia|biology|"
+        r"medicamento|medicamentos|vacuna|vacunas)\b", text
+    ))
+    academic = biomedical or bool(re.search(
+        r"\b(paper|papers|articulo cientifico|articulos cientificos|"
+        r"estudio cientifico|estudios cientificos|investigacion academica|"
+        r"literatura cientifica|doi|crossref|openalex|revista cientifica|"
+        r"publicacion academica|metaanalisis|meta analisis|scientific study|"
+        r"research paper|academic research|arxiv|preprint|preprints)\b", text
+    ))
+    archive = bool(re.search(
+        r"\b(internet archive|archive.org|wayback machine|libro|libros|"
+        r"ebook|ebooks|obra de dominio publico|dominio publico|"
+        r"archivo historico|hemeroteca|documento historico|"
+        r"publicacion antigua|old book|historical archive)\b", text
+    ))
+    fandom = genshin or bool(re.search(
+        r"\b(fandom|wiki comunitaria|anime|manga|videojuego|videojuegos|"
+        r"personaje de videojuego|franquicia de ficcion)\b", text
+    ))
+    news = bool(re.search(
+        r"\b(noticia|noticias|actualidad|ultimas noticias|ultimas novedades|"
+        r"noticias recientes|hoy|ayer|esta semana|esta manana|este mes|"
+        r"breaking news|latest news|current events)\b", text
+    ))
+    return {
+        "genshin": genshin,
+        "music": music,
+        "nasa": nasa,
+        "academic": academic,
+        "biomedical": biomedical,
+        "news": news,
+        "archive": archive,
+        "fandom": fandom,
+    }
 
 
 async def search_wikidata(
@@ -672,7 +722,7 @@ async def search_crossref(
         "rows": max(1, min(4, int(limit))),
         "select": "DOI,title,author,published,created,type,container-title,URL,abstract",
     }
-    contact = os.getenv("STELLA_CONTACT_EMAIL", "").strip()
+    contact = os.getenv("stella_CONTACT_EMAIL", "").strip()
     if contact and "@" in contact and len(contact) <= 254:
         params["mailto"] = contact
     response = await request_func(
@@ -1039,7 +1089,7 @@ async def search_musicbrainz(
             "GET", f"https://musicbrainz.org/ws/2/{entity}/",
             params={"query": search_text, "fmt": "json", "limit": max(1, min(3, int(limit)))},
             headers={
-                "User-Agent": "StellaBot/4.0 (Anarchy Apps; public music metadata research)",
+                "User-Agent": "stellaBot/4.0 (Anarchy Apps; public music metadata research)",
                 "Accept": "application/json",
             },
             timeout=15, follow_redirects=False,
@@ -1275,6 +1325,22 @@ async def search_web(
         ])
     if intent["fandom"]:
         jobs.append(("fandom", search_fandom_wikis(search_text, request_func, limit=2)))
+    if intent["genshin"]:
+        jobs.extend([
+            ("keqingmains", search_scoped_site(
+                search_text, "keqingmains.com", request_func,
+                source_type="keqingmains",
+                attribution="KeqingMains, guías y theorycraft comunitario de Genshin Impact; distingue guía general de recomendaciones dependientes de versión.",
+                limit=2,
+            )),
+            ("hoyolab", search_scoped_site(
+                search_text, "hoyolab.com", request_func,
+                source_type="hoyolab",
+                attribution="HoYoLAB, publicaciones y contenido de la comunidad de HoYoverse; comprueba autoría, fecha y si la publicación es oficial.",
+                limit=2,
+            )),
+        ])
+
     software_targets = _software_document_targets(search_text)
     for domain, label in software_targets:
         jobs.append((
@@ -1317,6 +1383,8 @@ async def search_web(
     priority: list[str] = []
     if intent["news"]:
         priority.extend(["news", "web"])
+    if intent["genshin"]:
+        priority.extend(["keqingmains", "hoyolab", "fandom"])
     if intent["nasa"]:
         priority.extend(["nasa_web", "nasa"])
     if intent["music"]:
@@ -1427,12 +1495,12 @@ def summarize_source_coverage(sources: list[dict[str, str]]) -> dict[str, int]:
     official = sum(
         1 for item in normalized
         if any(term in str(item.get("source_type") or "").casefold()
-               for term in ("official", "nasa", "wikidata", "wikipedia", "official_software_docs"))
+               for term in ("official", "nasa", "hoyolab"))
     )
     community = sum(
         1 for item in normalized
         if any(term in str(item.get("source_type") or "").casefold()
-               for term in ("fandom", "community", "archive"))
+               for term in ("fandom", "community", "keqingmains"))
     )
     return {
         "sources": len(normalized),
