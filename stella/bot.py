@@ -445,7 +445,7 @@ class StellaBot:
             await self._reply(room_id, f"Prueba otra vez: el número es {hint}. Intentos: {game['attempts']}/6.", message)
 
     async def _help_command(self, room_id, uid, name, args, message):
-        await self._reply(room_id, self._help(), message)
+        await self._reply(room_id, self._help(args), message)
 
     async def _ping(self, room_id, uid, name, args, message):
         await self._reply(room_id, "Pong. Stella está activa.", message)
@@ -781,7 +781,7 @@ class StellaBot:
         lines.append("Esto es una revisión superficial del formato y dominio, no una garantía de seguridad.")
         await self._reply(room_id, "\n".join(lines), message)
 
-    def _help(self) -> str:
+    def _help(self, topic: str = "") -> str:
         p = self.settings.command_prefix
         sections = {
             "GENERAL E IA": [
@@ -811,11 +811,22 @@ class StellaBot:
                 f"{p}dj buscar · reproducir · encolar · cola · pausa · reanudar · saltar · detener · volumen",
             ],
         }
-        lines = ["✦ STELLA · COMANDOS", f"Prefijo: {p}", "Usa !ayuda <categoría> para consultar un bloque."]
-        topic = args = None
+        aliases = {
+            "ia": "GENERAL E IA", "inteligencia": "GENERAL E IA", "general": "GENERAL E IA",
+            "social": "SOCIAL Y COMUNIDAD", "comunidad": "SOCIAL Y COMUNIDAD",
+            "juegos": "JUEGOS", "entretenimiento": "JUEGOS",
+            "admin": "MODERACIÓN Y ADMINISTRACIÓN", "administracion": "MODERACIÓN Y ADMINISTRACIÓN",
+            "moderacion": "MODERACIÓN Y ADMINISTRACIÓN",
+            "musica": "MÚSICA Y VOZ", "voz": "MÚSICA Y VOZ", "dj": "MÚSICA Y VOZ",
+        }
+        requested = str(topic or "").strip().casefold()
+        selected = aliases.get(requested)
+        if requested and requested not in {"todo", "todos", "completo", "all"} and not selected:
+            return "Categorías disponibles: ia, social, juegos, comunidad, musica y admin.\nEjemplo: !ayuda social"
+        lines = ["✦ STELLA · COMANDOS", f"Prefijo: {p}", f"Consulta una categoría con {p}ayuda <categoría>."]
         for title, entries in sections.items():
-            if topic is not None and title.casefold() != topic:
+            if selected and title != selected:
                 continue
             lines.append(f"\n{title}")
             lines.extend(entries)
-        return "\\n".join(lines)
+        return "\n".join(lines)
