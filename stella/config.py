@@ -60,7 +60,7 @@ class StellaSettings(BaseSettings):
 
 
 def _uid_set(value: object) -> frozenset[str]:
-    return frozenset(item.strip() for item in re.split(r"[,;\\s]+", str(value or "")) if item.strip())
+    return frozenset(item.strip() for item in re.split(r"[,;\s]+", str(value or "")) if item.strip())
 
 
 Settings = StellaSettings
