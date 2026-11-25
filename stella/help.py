@@ -28,7 +28,6 @@ def _command_help_sections(prefix: str):
             (False, f"• {prefix}asistente <consulta> — Conversación y solicitudes en lenguaje natural."),
             (False, f"• {prefix}ia ayuda — Guía de IA."),
             (False, f"• {prefix}ia preguntar <consulta> — Consulta directa al asistente."),
-            (False, f"• {prefix}ia genshin <consulta> — Consulta especializada de Teyvat."),
             (False, f"• {prefix}ia estado — Revisa el proveedor y la sesión actual."),
             (False, f"• {prefix}ia olvidar — Borra el contexto temporal de la charla."),
             (True, "▸ Investigación y Herramientas"),
