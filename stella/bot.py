@@ -149,6 +149,9 @@ class StellaBot:
         return bool(author.get("isBot") or author.get("bot"))
 
     def _forget_room(self, room_id: str) -> None:
+        for session_key in list(self.ai._memory):
+            if session_key.startswith(str(room_id) + ":"):
+                self.ai.forget_session(session_key)
         for mapping in (self._recent, self._warned_until, self._auto_reply_cooldown):
             for key in list(mapping):
                 if key[0] == room_id:
