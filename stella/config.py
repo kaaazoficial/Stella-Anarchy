@@ -1,42 +1,48 @@
+"""Validated, environment-backed configuration for Stella."""
 from __future__ import annotations
 
-import os
-from dataclasses import dataclass
 from pathlib import Path
 
+from pydantic import AliasChoices, Field, field_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
-def _uid_set(value: str) -> frozenset[str]:
-    return frozenset(
-        item.strip()
-        for item in value.replace(";", ",").replace("\n", ",").split(",")
-        if item.strip()
+
+class StellaSettings(BaseSettings):
+    """Validate only stable process settings; secrets remain outside the model."""
+
+    model_config = SettingsConfigDict(
+        case_sensitive=False,
+        env_file=None,
+        extra="ignore",
+        populate_by_name=True,
     )
 
+    port: int = Field(default=3000, ge=1, le=65535, validation_alias="PORT")
+    command_prefix: str = Field(
+        default="!", min_length=1, max_length=3, validation_alias="COMMAND_PREFIX"
+    )
+    sinner_uid: str = Field(default="", validation_alias="SINNER_UID")
+    admin_uids: str = Field(
+        default="",
+        validation_alias=AliasChoices("ADMIN_UIDS", "ADMINUIDS"),
+    )
+    data_dir: Path = Field(default=Path("./data"), validation_alias="DATA_DIR")
+    tts_voice: str = Field(
+        default="es-CL-CatalinaNeural", validation_alias="TTS_VOICE"
+    )
 
-@dataclass(frozen=True)
-class Settings:
-    bot_token: str
-    community_bot_token: str
-    webhook_secret: str
-    admin_uids: frozenset[str]
-    command_prefix: str
-    api_base: str
-    database_path: Path
-    version: str
-
+    @field_validator("command_prefix", mode="before")
     @classmethod
-    def from_env(cls) -> "Settings":
-        data_dir = Path(os.getenv("DATA_DIR", "./data")).expanduser()
-        data_dir.mkdir(parents=True, exist_ok=True)
-        return cls(
-            bot_token=os.getenv("ANARCHY_BOT_TOKEN", "").strip(),
-            community_bot_token=os.getenv("ANARCHY_COMMUNITY_BOT_TOKEN", "").strip(),
-            webhook_secret=os.getenv("ANARCHY_WEBHOOK_SECRET", "").strip(),
-            admin_uids=_uid_set(os.getenv("ADMIN_UIDS", "")),
-            command_prefix=os.getenv("COMMAND_PREFIX", "!").strip() or "!",
-            api_base=os.getenv(
-                "ANARCHY_API_BASE", "https://api.anarchyapps.org/bot-api/v1"
-            ).rstrip("/"),
-            database_path=data_dir / "stella.sqlite3",
-            version=os.getenv("RENDER_GIT_COMMIT", "development")[:12],
-        )
+    def normalize_command_prefix(cls, value: object) -> str:
+        prefix = str(value or "").strip() or "!"
+        if len(prefix) > 3 or any(character.isspace() for character in prefix):
+            raise ValueError("COMMAND_PREFIX debe tener 1-3 caracteres sin espacios.")
+        return prefix
+
+    @field_validator("tts_voice", mode="before")
+    @classmethod
+    def normalize_tts_voice(cls, value: object) -> str:
+        return str(value or "").strip() or "es-CL-CatalinaNeural"
+
+
+SETTINGS = StellaSettings()
