@@ -157,6 +157,7 @@ class MusicVoice:
         )
         self.rooms: dict[str, dict[str, Any]] = {}
         self.search_results: dict[str, dict[str, Any]] = {}
+        self.interaction_sessions: dict[tuple[str, str], dict[str, Any]] = {}
         self.connect_locks: dict[str, asyncio.Lock] = {}
         self.ready_events: dict[str, asyncio.Event] = {}
         self.ready_failures: set[str] = set()
@@ -1096,21 +1097,138 @@ class MusicVoice:
                 return False, "Los catálogos de música no están disponibles en este momento. Intenta nuevamente más tarde."
             return False, "No encontré pistas con licencia abierta que pudiera validar. Prueba con el nombre de un artista, canción o un género más concreto."
 
-        self.search_results[room_id] = {"items": unique, "expires": time.monotonic() + 600}
-        lines = [
-            f"🎧 RESULTADOS PARA: {text}",
-            "Selecciona una pista con !dj reproducir <número> o añádela con !dj encolar <número>.",
-        ]
+        self.search_results[room_id] = {
+            "items": unique,
+            "query": text,
+            "expires": time.monotonic() + 600,
+        }
+        lines = [f"🎧 RESULTADOS PARA: {text}"]
         for index, item in enumerate(unique, 1):
-            item_url = str(item.get("item_url") or "").strip()
-            credit = str(item.get("credit_line") or "").strip()
             lines.append(
-                f"{index}. {item.get('title', 'Pista sin título')} — {item.get('creator', 'Autor no indicado')}\n"
-                f"{item.get('source', 'Catálogo público')} · {item.get('license', 'Licencia abierta')}"
-                + (f"\n{item_url}" if item_url else "")
-                + (f"\nCrédito: {credit}" if credit and credit not in item_url else "")
+                f"{index}. {_clean(item.get('title') or 'Pista sin título', 120)} — "
+                f"{_clean(item.get('creator') or 'Autor no indicado', 80)}\n"
+                f"{_clean(item.get('source') or 'Catálogo público', 50)} · "
+                f"{_clean(item.get('license') or 'Licencia abierta', 80)}"
             )
+        lines.append("Elige una pista con los botones o usa !dj reproducir|encolar <número>.")
         return True, "\n".join(lines)
+
+    async def send_search_page(
+        self, room_id: str, page: int = 1, *, reply_id: str | None = None
+    ) -> bool:
+        """Send one paginated music result page with native Anarchy selection buttons."""
+        saved = self.search_results.get(room_id) or {}
+        if saved.get("expires", 0) <= time.monotonic():
+            self.search_results.pop(room_id, None)
+            await self.platform.send_message(
+                room_id, "Los resultados caducaron. Usa !dj buscar <tema> nuevamente.",
+                reply_id=reply_id,
+            )
+            return False
+        items = saved.get("items") or []
+        page_size = 4
+        page_count = max(1, (len(items) + page_size - 1) // page_size)
+        page = max(1, min(int(page), page_count))
+        start = (page - 1) * page_size
+        selected = items[start:start + page_size]
+        buttons: list[dict[str, str]] = []
+        for offset, item in enumerate(selected):
+            number = start + offset + 1
+            title = _clean(item.get("title") or "Pista", 30)
+            buttons.append({"id": f"play_{number}", "label": f"▶ {number}. {title}"[:40]})
+        if page < page_count:
+            buttons.append({"id": f"page_{page + 1}", "label": "Siguientes pistas →"})
+        elif page > 1:
+            buttons.append({"id": f"page_{page - 1}", "label": "← Pistas anteriores"})
+
+        lines = [
+            f"🎧 {_clean(saved.get('query') or 'BÚSQUEDA MUSICAL', 120)}",
+            f"Página {page}/{page_count} · {len(items)} pistas · Pulsa una pista para reproducirla.",
+        ]
+        for offset, item in enumerate(selected):
+            number = start + offset + 1
+            title = _clean(item.get("title") or "Pista sin título", 120)
+            creator = _clean(item.get("creator") or "Autor no indicado", 70)
+            source = _clean(item.get("source") or "Catálogo público", 40)
+            license_name = _clean(item.get("license") or "Licencia abierta", 70)
+            lines.append(f"{number}. {title} — {creator}\n{source} · {license_name}")
+        lines.append("También puedes usar !dj encolar <número> para añadir sin interrumpir la pista actual.")
+        response = await self.platform.send_message(
+            room_id,
+            "\n".join(lines)[:1900],
+            reply_id=reply_id,
+            buttons=buttons,
+            return_message_id=True,
+        )
+        if not isinstance(response, str) or not response:
+            await self.platform.send_message(
+                room_id,
+                "No pude activar los botones. Usa !dj reproducir <número> o !dj encolar <número>.",
+                reply_id=reply_id,
+            )
+            return False
+
+        now = time.monotonic()
+        for key, session in list(self.interaction_sessions.items()):
+            if session.get("expires", 0) <= now or key[0] == room_id:
+                self.interaction_sessions.pop(key, None)
+        self.interaction_sessions[(room_id, response)] = {
+            "items": items,
+            "page": page,
+            "expires": saved["expires"],
+        }
+        return True
+
+    async def search_music_interactive(
+        self, room_id: str, query: str, *, reply_id: str | None = None
+    ) -> bool:
+        ok, message = await self.search_music(room_id, query)
+        if not ok:
+            await self.platform.send_message(room_id, message, reply_id=reply_id)
+            return False
+        return await self.send_search_page(room_id, 1, reply_id=reply_id)
+
+    async def handle_interaction(self, event: dict[str, Any]) -> bool:
+        """Consume Anarchy button presses once, then remove the buttons from that message."""
+        room_id = str(event.get("threadId") or event.get("thread_id") or "").strip()
+        message_id = str(event.get("messageId") or event.get("message_id") or "").strip()
+        button_id = str(event.get("buttonId") or "").strip()
+        key = (room_id, message_id)
+        session = self.interaction_sessions.pop(key, None)
+        if not room_id or not message_id or not session:
+            return False
+        if session.get("expires", 0) <= time.monotonic():
+            await self.platform.edit_message(room_id, message_id, remove_buttons=True)
+            return False
+
+        await self.platform.edit_message(room_id, message_id, remove_buttons=True)
+        if button_id.startswith("page_"):
+            try:
+                next_page = int(button_id.removeprefix("page_"))
+            except ValueError:
+                return False
+            saved = self.search_results.get(room_id) or {}
+            if saved.get("expires", 0) <= time.monotonic():
+                return False
+            return await self.send_search_page(room_id, next_page, reply_id=message_id)
+
+        match = re.fullmatch(r"play_(\d{1,2})", button_id)
+        if not match:
+            return False
+        number = int(match.group(1))
+        items = session.get("items") or []
+        if not 1 <= number <= len(items):
+            return False
+        track = items[number - 1]
+        if not _allowed_audio_url(str(track.get("url") or "")) or not _is_open_license(str(track.get("license") or "")):
+            await self.platform.send_message(
+                room_id, "La pista seleccionada ya no supera la validación de fuente o licencia.",
+                reply_id=message_id,
+            )
+            return False
+        ok, response = await self._queue_track(room_id, track, enqueue=False)
+        await self.platform.send_message(room_id, response, reply_id=message_id)
+        return ok
 
     async def _start_player(self, room_id: str, state: dict[str, Any]) -> None:
         task = state.get("music_task")
@@ -1200,11 +1318,10 @@ class MusicVoice:
                 else:
                     data = await self._download_audio(str(track.get("url") or ""))
                 details = f"Fuente: {track['source']} · Licencia: {track['license']}"
-                item_url = str(track.get("item_url") or "").strip()
                 await self._send(
                     room_id,
-                    f"🎧 Ahora suena: {track['title']} — {track['creator']}\n"
-                    + details + (f"\n{item_url}" if item_url else ""),
+                    f"🎧 Ahora suena: {_clean(track.get('title') or 'Pista')} — "
+                    f"{_clean(track.get('creator') or 'Autor no indicado')}\n" + details,
                 )
                 await self._play_audio_bytes(
                     state["music_source"], data, state["music_volume"],
@@ -1616,7 +1733,7 @@ class MusicVoice:
             return message
         if action in {"fuentes", "sources"}:
             jamendo = "disponible" if os.getenv("JAMENDO_CLIENT_ID", "").strip() else "sin configurar"
-            return f"Catálogos musicales: Internet Archive (licencia verificada) y Jamendo ({jamendo})."
+            return f"Catálogos musicales: Internet Archive, Wikimedia Commons, Openverse y Jamendo ({jamendo}); se muestran pistas con licencia verificada."
         if action in {"quitar", "remove"}:
             state = self.rooms.get(room_id)
             try:
