@@ -149,6 +149,39 @@ class StellaServices:
         except (httpx.HTTPError, ValueError, RuntimeError, ImportError):
             log.exception("Research request failed")
             return []
+    async def fetch_avatar_image(self, source_url: str) -> tuple[bytes, str, dict[str, Any]]:
+        from stella.images import validate_avatar_image_bytes
+        from stella.research import is_safe_public_url
+
+        raw = str(source_url or "").strip()
+        if not is_safe_public_url(raw):
+            raise ValueError("Usa una URL HTTPS pública.")
+        parsed = urlparse(raw)
+        allowed_hosts = {"upload.wikimedia.org", "i.imgur.com", "images.unsplash.com", "images.pexels.com"}
+        host = (parsed.hostname or "").casefold()
+        if host not in allowed_hosts:
+            raise ValueError("Por seguridad, solo acepto imágenes directas de Wikimedia Commons, Imgur, Unsplash o Pexels.")
+        async with httpx.AsyncClient(timeout=15, follow_redirects=False, trust_env=False) as client:
+            async with client.stream("GET", raw, headers={"User-Agent": "StellaCommunityBot/1.0", "Accept": "image/png,image/jpeg,image/webp,image/gif"}) as response:
+                if response.status_code != 200:
+                    raise ValueError(f"La imagen respondió HTTP {response.status_code}. No se siguieron redirecciones.")
+                mime = str(response.headers.get("content-type") or "").split(";", 1)[0].strip().casefold()
+                if mime not in {"image/png", "image/jpeg", "image/webp", "image/gif"}:
+                    raise ValueError("El enlace no devuelve PNG, JPG, WebP o GIF.")
+                length = response.headers.get("content-length")
+                if length and length.isdigit() and int(length) > 512 * 1024:
+                    raise ValueError("La imagen supera el límite de 512 KB.")
+                chunks = []
+                received = 0
+                async for chunk in response.aiter_bytes():
+                    received += len(chunk)
+                    if received > 512 * 1024:
+                        raise ValueError("La imagen supera el límite de 512 KB.")
+                    chunks.append(chunk)
+        content = b"".join(chunks)
+        details = validate_avatar_image_bytes(content, mime, max_bytes=512 * 1024)
+        return content, mime, details
+
     async def multimedia(self, kind: str, query: str, limit: int = 5) -> str:
         search_text = " ".join(str(query or "").split())[:120]
         media_kind = str(kind or "").casefold().strip()
