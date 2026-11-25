@@ -222,7 +222,7 @@ class StellaBot:
     async def _reply(self, room_id: str, text: str, message: dict[str, Any]) -> None:
         reply_id = message.get("messageId") or message.get("id")
         # Keep chat replies link-free; source names and attribution remain in the text.
-        safe_text = re.sub(r"https?://[^\\s<>]+", "[enlace omitido]", str(text), flags=re.IGNORECASE)
+        safe_text = re.sub(r"(?:https?://|www\\.)[^\\s<>]+", "[enlace omitido]", str(text), flags=re.IGNORECASE)
         await self.platform.send_message(
             str(room_id), format_stella_text(safe_text)[:7000],
             reply_id=str(reply_id) if reply_id else None,
@@ -245,6 +245,9 @@ class StellaBot:
             clear_voice_room(room_id)
             await self.voice.leave_room(room_id, request_leave=False)
             self.voice.search_results.pop(room_id, None)
+            for interaction_key in list(self.voice.interaction_sessions):
+                if interaction_key[0] == room_id:
+                    self.voice.interaction_sessions.pop(interaction_key, None)
             return
         if event_type in {"room.join", "room.leave", "room.speaker"}:
             update_voice_room_event(event)
@@ -803,7 +806,7 @@ class StellaBot:
         if not self._is_admin(uid):
             await self._reply(room_id, "Solo un administrador puede consultar las fuentes.", message)
             return
-        await self._reply(room_id, "FUENTES Y PROVEEDORES\n" + self.ai.status() + "\nInvestigación: DuckDuckGo, Wikipedia, Wikidata, GDELT, OpenAlex, Crossref, arXiv, Europe PMC, NASA, Internet Archive, MusicBrainz y Jamendo.\nMultimedia: Wikimedia Commons e Internet Archive.", message)
+        await self._reply(room_id, "FUENTES Y PROVEEDORES\n" + self.ai.status() + "\nInvestigación: DuckDuckGo, Wikipedia, Wikidata, GDELT, OpenAlex, Crossref, arXiv, Europe PMC, NASA, Internet Archive, MusicBrainz y Jamendo.\nMúsica: Internet Archive, Wikimedia Commons, Openverse, ccMixter, Audius y Jamendo.\\nMultimedia: Wikimedia Commons e Internet Archive.", message)
 
     async def _metrics(self, room_id, uid, name, args, message):
         if not self._is_admin(uid):
