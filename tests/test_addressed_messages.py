@@ -158,8 +158,9 @@ def test_autotest_command_suggestion_check_passes():
     asyncio.run(b._autotest("r", "u", "Admin", "", {}))
 
     assert len(b.platform.sent) == 1
-    assert "4/4 correctas" in b.platform.sent[0][1]
+    assert "5/5 correctas" in b.platform.sent[0][1]
     assert "✓ sugerencia de comandos" in b.platform.sent[0][1]
+    assert "✓ silencio global" in b.platform.sent[0][1]
 
 def _message(content, uid="u"):
     return {
@@ -247,3 +248,23 @@ def test_autotest_silence_phrase_recognition():
     assert b._is_silence_request("por favor no le hables a nadie")
     assert b._is_resume_request("Ya puedes volver a hablar")
 
+
+
+def test_voice_reading_queue_is_cleared_and_worker_cancelled_on_global_silence():
+    from stella.music_voice import MusicVoice
+
+    async def scenario():
+        voice = object.__new__(MusicVoice)
+        queue = asyncio.Queue()
+        queue.put_nowait("pending speech")
+        task = asyncio.create_task(asyncio.sleep(30))
+        state = {"speech_queue":queue, "speech_task":task}
+        voice.rooms = {"room-a":state}
+
+        await voice.stop_all_speech()
+
+        assert queue.empty()
+        assert task.cancelled()
+        assert state["speech_task"] is None
+
+    asyncio.run(scenario())
