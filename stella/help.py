@@ -21,7 +21,7 @@ def _sections(prefix: str):
             f"▸ {p}traducir <idioma> | <texto> · {p}ortografia <texto> · {p}calcular <operación>",
             f"▸ {p}fecha · {p}zona <Area/Ciudad> · {p}azar <mín> <máx>",
         ]),
-        ("SOCIAL Y PERFILES", [
+        ("PERFILES Y COMUNIDAD", [
             f"▸ {p}perfil [@usuario] · {p}bio <texto|-> · {p}miestado <texto|->",
             f"▸ {p}afinidad|amistad|reputacion @usuario · {p}regalo @usuario [mensaje] · {p}muro",
             f"▸ {p}puntos|saldo · {p}ranking|top · {p}diario|daily · {p}trabajar",
