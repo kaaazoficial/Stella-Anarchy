@@ -340,6 +340,12 @@ class Store:
         if not clean:
             return False
         with self._session(self.connect()) as db:
+            exists = db.execute(
+                "SELECT 1 FROM dj_playlists WHERE room_id=? AND owner_uid=? AND name=? COLLATE NOCASE",
+                (str(room_id), str(owner_uid), clean),
+            ).fetchone()
+            if exists:
+                return False
             try:
                 db.execute(
                     "INSERT INTO dj_playlists(room_id,owner_uid,name,created_at) VALUES(?,?,?,?)",
