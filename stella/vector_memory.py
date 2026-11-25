@@ -228,7 +228,7 @@ class VectorMemory:
                 self._schedule_retry()
                 self._report_failure("message indexing", exc)
 
-    async def search(self, room: str, query: str, limit: int = 5) -> list[dict[str, Any]]:
+    async def search(self, room: str, query: str, uid: str, limit: int = 5) -> list[dict[str, Any]]:
         if not self._can_embed() or not query.strip():
             return []
         try:
@@ -245,6 +245,7 @@ class VectorMemory:
                     "filter": {
                         "must": [
                             {"key": "room_id", "match": {"value": room}},
+                            {"key": "uid", "match": {"value": uid}},
                             {"key": "expires_at", "range": {"gt": int(time.time())}},
                         ]
                     },
