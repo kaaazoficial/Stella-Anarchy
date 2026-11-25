@@ -177,30 +177,11 @@ class Store:
             )
 
     def cleanup_expired(self, now: float | None = None) -> dict[str, int]:
+        from stella.retention import cleanup_database_retention
+
         stamp = time.time() if now is None else float(now)
-        warning_cutoff = stamp - WARNING_RETENTION_DAYS * 86400
-        daily_cutoff = stamp - 7 * 86400
-        event_cutoff = stamp - 30 * 86400
-        poll_cutoff = stamp - 30 * 86400
         with self._session(self.connect()) as db:
-            counts = {}
-            db.execute("UPDATE users SET bio='',status='',profile_updated_at=NULL WHERE profile_updated_at IS NOT NULL AND profile_updated_at < ?", (stamp - 30 * 86400,))
-            db.execute("DELETE FROM gifts WHERE created_at < ?", (stamp - 30 * 86400,))
-            db.execute("DELETE FROM affinities WHERE uid IN (SELECT uid FROM users WHERE last_seen < ?) OR target_uid IN (SELECT uid FROM users WHERE last_seen < ?)", (stamp - 90 * 86400, stamp - 90 * 86400))
-            db.execute("DELETE FROM reward_claims WHERE uid IN (SELECT uid FROM users WHERE last_seen < ?)", (stamp - 90 * 86400,))
-            db.execute("DELETE FROM dj_playlist_tracks WHERE playlist_id IN (SELECT id FROM dj_playlists WHERE owner_uid IN (SELECT uid FROM users WHERE last_seen < ?))", (stamp - 90 * 86400,))
-            db.execute("DELETE FROM dj_playlists WHERE owner_uid IN (SELECT uid FROM users WHERE last_seen < ?)", (stamp - 90 * 86400,))
-            db.execute("DELETE FROM users WHERE last_seen < ?", (stamp - 90 * 86400,))
-            statements = (
-                ("warnings", "DELETE FROM moderation_warnings WHERE created_at < ?", warning_cutoff),
-                ("activity", "DELETE FROM activity_daily WHERE day_key < date(?, 'unixepoch')", daily_cutoff),
-                ("events", "DELETE FROM community_events WHERE starts_at < ?", event_cutoff),
-                ("polls", "DELETE FROM polls WHERE created_at < ?", poll_cutoff),
-            )
-            for label, sql, value in statements:
-                cursor = db.execute(sql, (value,))
-                counts[label] = max(0, cursor.rowcount)
-            return counts
+            return cleanup_database_retention(db, now=stamp)
 
 
     def touch_user(self, uid: str, nickname: str = "Usuario", now: float | None = None) -> None:
