@@ -194,7 +194,7 @@ class StellaBot:
         if not raw:
             return
         parts = raw.split(maxsplit=1)
-        command = parts[0].casefold()
+        command = parts[0].casefold().translate(str.maketrans("áéíóúüñ", "aeiouun"))
         args = parts[1].strip() if len(parts) > 1 else ""
         routes = {
             "ayuda": self._help_command, "help": self._help_command, "comandos": self._help_command, "menu": self._help_command,
@@ -223,6 +223,16 @@ class StellaBot:
             "diario": self._daily, "trabajar": self._work, "pagar": self._pay,
             "regalo": self._gift, "muro": self._wall, "afinidad": self._affinity,
             "duelo": self._duel,
+            "playlist": self._playlist,
+            "multimedia": self._multimedia, "imagen": self._image_search,
+            "video": self._video_search, "audio": self._audio_search,
+            "admin": self._admin_panel, "centro": self._admin_panel,
+            "fuentes": self._sources, "metricas": self._metrics,
+            "autotest": self._autotest, "perfilbot": self._bot_profile,
+            "volumen": self._music_volume, "subirvolumen": self._music_volume_up,
+            "bajarvolumen": self._music_volume_down, "silencio": self._music_mute,
+            "volumenlectura": self._tts_volume, "subirvolumenlectura": self._tts_volume_up,
+            "bajarvolumenlectura": self._tts_volume_down, "silenciolectura": self._tts_mute,
             "interaccion": self._interaction_help,
             "roast": self._roast, "ship": self._ship,
             "trivia": self._trivia, "responder": self._trivia_answer,
