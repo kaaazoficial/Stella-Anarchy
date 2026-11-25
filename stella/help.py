@@ -8,11 +8,11 @@ from functools import lru_cache
 SEPARATOR = "[C] ───────────── ✦ ─────────────"
 CATEGORY_TITLES = (
     "1. AYUDA E INTELIGENCIA ARTIFICIAL",
-    "3. SOCIAL Y PERFILES",
-    "4. JUEGOS, ECONOMÍA Y COMUNIDAD",
-    "5. MÚSICA Y VOZ",
-    "6. UTILIDADES Y MULTIMEDIA",
-    "7. ADMINISTRACIÓN Y ESTADO",
+    "2. SOCIAL Y PERFILES",
+    "3. JUEGOS, ECONOMÍA Y COMUNIDAD",
+    "4. MÚSICA Y VOZ",
+    "5. UTILIDADES Y MULTIMEDIA",
+    "6. ADMINISTRACIÓN Y ESTADO",
 )
 
 
@@ -56,7 +56,7 @@ def _command_help_sections(prefix: str):
             (False, f"• {prefix}regalo @usuario [mensaje] — Envía un regalo."),
             (False, f"• {prefix}muro — Consulta los regalos recibidos."),
         ]),
-        (CATEGORY_TITLES[1], [
+        (CATEGORY_TITLES[2], [
             (True, "▸ Juegos y Entretenimiento"),
             (False, f"• {prefix}trivia — Inicia trivia | {prefix}responder <1-4> — Responde."),
             (False, f"• {prefix}adivina — Inicia adivinanza | {prefix}intento <número> — Prueba tu respuesta."),
@@ -77,7 +77,7 @@ def _command_help_sections(prefix: str):
             (False, f"• {prefix}encuesta <pregunta> | <opciones> — Crea una votación."),
             (False, f"• {prefix}evento | {prefix}eventos — Consulta, crea o cierra eventos (según permisos)."),
         ]),
-        (CATEGORY_TITLES[1], [
+        (CATEGORY_TITLES[3], [
             (True, "▸ Llamadas"),
             (False, f"• {prefix}join | {prefix}salirsala | {prefix}salas — Entrar, salir y consultar salas."),
             (False, f"• {prefix}voz participantes|hablando|estado — Consultar participantes y roles."),
@@ -97,7 +97,7 @@ def _command_help_sections(prefix: str):
             (False, f"• {prefix}tts voces|voz|velocidad|volumen|enlaces|menciones — Configura la lectura."),
             (False, f"• {prefix}volumenlectura <0-100> | {prefix}subirvolumenlectura | {prefix}bajarvolumenlectura | {prefix}silenciolectura — Controles de voz."),
         ]),
-        (CATEGORY_TITLES[1], [
+        (CATEGORY_TITLES[4], [
             (True, "▸ Fecha, Hora e Idiomas"),
             (False, f"• {prefix}fecha — Fecha y hora actual."),
             (False, f"• {prefix}zona <Area/Ciudad> — Hora de otra zona horaria."),
@@ -108,7 +108,7 @@ def _command_help_sections(prefix: str):
             (False, f"• {prefix}video <búsqueda> — Busca vídeos."),
             (False, f"• {prefix}audio <búsqueda> — Busca recursos de audio."),
         ]),
-        (CATEGORY_TITLES[1], [
+        (CATEGORY_TITLES[5], [
             (True, "▸ Identidad y Estado"),
             (False, f"• {prefix}miuid — Consulta tu UID."),
             (False, f"• {prefix}estado — Estado general del bot [ADMIN]."),
@@ -241,7 +241,7 @@ def filter_commands_help_text(help_text: str, topic: str | None = None) -> str:
         return (
             "[CB] ✦ STELLA · GUÍA DE COMANDOS ✦\n"
             f"[C] Categoría no reconocida. Disponibles: ia, social, juegos, musica, multimedia y admin.\n"
-            f"[C] Ejemplo: {prefix}ayuda genshin."
+            f"[C] Ejemplo: {prefix}ayuda social."
         )
 
     prefix = _help_prefix(help_text)
