@@ -12,11 +12,14 @@ from typing import Any
 
 import httpx
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import Response
 
 from stella.bot import StellaBot
 from stella.config import Settings
 from stella.platform import AnarchyClient
 from stella.storage import Store
+from stella.metrics import render_prometheus_metrics
+from stella.storage_manager import verify_sqlite_database
 
 logging.basicConfig(
     level=os.getenv("LOG_LEVEL", "INFO").upper(),
@@ -34,6 +37,17 @@ SIGNATURE_TOLERANCE_SECONDS = 300
 SEEN_EVENTS_LIMIT = 3000
 seen_events: OrderedDict[str, float] = OrderedDict()
 last_retention_cleanup = 0.0
+PROCESS_STARTED_AT = time.monotonic()
+METRICS: dict[str, float] = {
+    "webhook_events": 0,
+    "webhook_dispatch_completed": 0,
+    "webhook_dispatch_failures": 0,
+    "text_messages_received": 0,
+    "commands_received": 0,
+    "ai_requests": 0,
+    "messages_sent": 0,
+    "api_requests": 0,
+}
 
 
 def log_bot_identity(identity: dict[str, Any] | None) -> None:
