@@ -1211,6 +1211,27 @@ class StellaBot:
         if action in {"ayuda", "help"}:
             await self._reply(room_id, "🤖 ASISTENTE STELLA\n!ia <consulta> o !asistente <consulta>\n!ia preguntar <consulta> para formular una pregunta directa.\n!ia estado consulta proveedores y límites.\n!ia olvidar elimina el contexto temporal de esta sala.\nEl contexto es volátil, dura como máximo cinco minutos y nunca se guarda en la base de datos.", message)
             return
+        task_map = {
+            "guardian": ("guardian", query, ""),
+            "diagnostico": ("diagnostics", query, ""),
+            "diagnostics": ("diagnostics", query, ""),
+            "resumir": ("chat_summary", query, ""),
+            "corregir": ("text_analysis", query, "Corrige ortografía, gramática y concordancia sin alterar el significado."),
+            "reescribir": ("text_analysis", query, "Reescribe con naturalidad y claridad, conservando todos los datos."),
+            "extraer": ("text_analysis", query, "Extrae nombres, fechas, cifras y puntos explícitos."),
+            "contradicciones": ("text_analysis", query, "Identifica contradicciones internas y distingue datos incompatibles de datos no relacionados."),
+        }
+        if action in task_map:
+            task, task_text, extra = task_map[action]
+            if not task_text.strip():
+                await self._reply(room_id, f"Uso: !ia {action} <texto>.", message)
+                return
+            answer = await self.ai_core.task_response(
+                task, task_text, self.services.ai_request,
+                extra_instructions=extra, rate_key=uid,
+            )
+            await self._reply(room_id, answer, message)
+            return
         prompt = query.strip() if action in {"preguntar", "ask"} else args.strip()
         if not prompt:
             await self._reply(room_id, f"Uso: {self.settings.command_prefix}ia <consulta>, !ia estado o !ia olvidar.", message)
