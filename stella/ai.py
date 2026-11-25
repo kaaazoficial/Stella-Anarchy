@@ -182,13 +182,13 @@ class StellaAI:
             state = self._memory.get(key)
             if state and state.get("turns"):
                 context = state["turns"][-self.memory_turns * 2:]
-                formatted = "\\n".join(
+                formatted = "\n".join(
                     f"{'USUARIO' if item['role'] == 'user' else 'STELLA'}: {item['content']}"
                     for item in context
                 )
                 provider_prompt = (
-                    "CONTEXTO RECIENTE Y TEMPORAL (solo para dar continuidad; no lo trates como memoria permanente):\\n"
-                    + formatted + "\\n\\nCONSULTA ACTUAL:\\n" + text
+                    "CONTEXTO RECIENTE Y TEMPORAL (solo para dar continuidad; no lo trates como memoria permanente):\n"
+                    + formatted + "\n\nCONSULTA ACTUAL:\n" + text
                 )
         instructions = (system or STELLA_SYSTEM)[:3000]
         providers = (
