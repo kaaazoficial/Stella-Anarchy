@@ -510,6 +510,136 @@ async def test_dj_search_uses_available_catalogs_without_api_keys(monkeypatch):
     assert len(voice.search_results["thread-1"]["items"]) == 2
 
 
+
+
+@pytest.mark.asyncio
+async def test_music_search_page_uses_native_buttons_and_never_posts_source_urls():
+    class FakePlatform:
+        def __init__(self):
+            self.sent = []
+        async def send_message(self, room_id, content, **kwargs):
+            self.sent.append((room_id, content, kwargs))
+            return "msg-1"
+
+    voice = object.__new__(MusicVoice)
+    voice.platform = FakePlatform()
+    voice.search_results = {
+        "room": {
+            "query": "lofi",
+            "expires": __import__("time").monotonic() + 600,
+            "items": [
+                {
+                    "title": f"Track {i}",
+                    "creator": "Artist",
+                    "source": "Wikimedia Commons",
+                    "license": "CC BY",
+                    "url": f"https://upload.wikimedia.org/audio{i}.ogg",
+                    "item_url": f"https://commons.wikimedia.org/item{i}",
+                }
+                for i in range(1, 7)
+            ],
+        }
+    }
+    voice.interaction_sessions = {}
+
+    assert await voice.send_search_page("room", 1)
+    _, content, options = voice.platform.sent[0]
+    assert len(options["buttons"]) == 5
+    assert options["buttons"][-1] == {"id": "page_2", "label": "Siguientes pistas →"}
+    assert "https://" not in content
+    assert ("room", "msg-1") in voice.interaction_sessions
+
+
+@pytest.mark.asyncio
+async def test_music_button_interaction_removes_buttons_and_queues_selected_track():
+    class FakePlatform:
+        def __init__(self):
+            self.edits = []
+            self.sent = []
+        async def edit_message(self, room_id, message_id, *, remove_buttons=True):
+            self.edits.append((room_id, message_id, remove_buttons))
+            return True
+        async def send_message(self, room_id, content, **kwargs):
+            self.sent.append((room_id, content, kwargs))
+            return True
+
+    voice = object.__new__(MusicVoice)
+    voice.platform = FakePlatform()
+    voice.interaction_sessions = {
+        ("room", "msg-1"): {
+            "items": [{
+                "title": "Track 1",
+                "creator": "Artist",
+                "source": "Archive",
+                "license": "CC0",
+                "url": "https://archive.org/audio.mp3",
+            }],
+            "expires": __import__("time").monotonic() + 600,
+        }
+    }
+    queued = []
+
+    async def queue_track(room_id, track, *, enqueue):
+        queued.append((room_id, track["title"], enqueue))
+        return True, "Reproduciendo Track 1."
+
+    voice._queue_track = queue_track
+
+    assert await voice.handle_interaction({
+        "type": "interaction",
+        "threadId": "room",
+        "messageId": "msg-1",
+        "buttonId": "play_1",
+        "user": {"uid": "user-1"},
+    })
+    assert queued == [("room", "Track 1", False)]
+    assert voice.platform.edits == [("room", "msg-1", True)]
+    assert "https://" not in voice.platform.sent[0][1]
+    assert ("room", "msg-1") not in voice.interaction_sessions
+
+
+@pytest.mark.asyncio
+async def test_music_button_navigation_invalidates_old_buttons_and_sends_next_page():
+    class FakePlatform:
+        def __init__(self):
+            self.edits = []
+            self.sent = []
+        async def edit_message(self, room_id, message_id, *, remove_buttons=True):
+            self.edits.append((room_id, message_id))
+            return True
+        async def send_message(self, room_id, content, **kwargs):
+            self.sent.append((room_id, content, kwargs))
+            return "msg-2"
+
+    voice = object.__new__(MusicVoice)
+    voice.platform = FakePlatform()
+    voice.interaction_sessions = {
+        ("room", "msg-1"): {
+            "items": [],
+            "expires": __import__("time").monotonic() + 600,
+        }
+    }
+    voice.search_results = {
+        "room": {
+            "query": "lofi",
+            "expires": __import__("time").monotonic() + 600,
+            "items": [
+                {"title": f"Track {i}", "creator": "Artist", "source": "Archive", "license": "CC0"}
+                for i in range(1, 7)
+            ],
+        }
+    }
+
+    assert await voice.handle_interaction({
+        "type": "interaction",
+        "threadId": "room",
+        "messageId": "msg-1",
+        "buttonId": "page_2",
+    })
+    assert voice.platform.edits == [("room", "msg-1")]
+    assert voice.platform.sent[0][2]["buttons"][0]["id"] == "play_5"
+    assert ("room", "msg-2") in voice.interaction_sessions
+
 @pytest.mark.asyncio
 async def test_concurrent_leave_requests_call_anarchy_once():
     class FakePlatform:
@@ -546,3 +676,27 @@ async def test_concurrent_leave_requests_call_anarchy_once():
     assert platform.leave_calls == 1
     await voice.http.aclose()
 
+
+
+
+@pytest.mark.asyncio
+async def test_interaction_event_is_routed_to_music_voice_handler():
+    from stella.bot import StellaBot
+
+    received = []
+
+    class FakeVoice:
+        async def handle_interaction(self, event):
+            received.append(event["buttonId"])
+            return True
+
+    bot = object.__new__(StellaBot)
+    bot.voice = FakeVoice()
+    await bot.handle_event({
+        "type": "interaction",
+        "threadId": "thread-1",
+        "messageId": "message-1",
+        "buttonId": "play_1",
+    })
+
+    assert received == ["play_1"]
