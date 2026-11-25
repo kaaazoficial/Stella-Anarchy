@@ -96,6 +96,10 @@ def _allowed_audio_url(url: str) -> bool:
         or host == "jamendo.com"
         or host.endswith(".jamendo.com")
         or host == "upload.wikimedia.org"
+        or host == "ccmixter.org"
+        or host.endswith(".ccmixter.org")
+        or host == "audius.co"
+        or host.endswith(".audius.co")
     )
     return (
         parsed.scheme == "https"
@@ -119,6 +123,38 @@ def _license_label(value: str) -> str | None:
             return "CC0"
         if "/mark/" in license_url:
             return "Dominio público"
+    return None
+
+
+def _audius_license_label(value: str) -> tuple[str, str] | None:
+    """Normalize only explicit permissive Audius license declarations."""
+    normalized = re.sub(r"[^a-z0-9]+", "-", str(value or "").strip().casefold()).strip("-")
+    if not normalized:
+        return None
+    # NonCommercial and NoDerivatives declarations are intentionally excluded.
+    if any(marker in normalized for marker in (
+        "noncommercial", "non-commercial", "by-nc",
+        "no-derivatives", "noderivatives", "by-nd",
+    )):
+        return None
+    if "cc0" in normalized or normalized in {"public-domain", "publicdomain"}:
+        return "CC0", "https://creativecommons.org/publicdomain/zero/1.0/"
+    if (
+        "by-sa" in normalized
+        or "attribution-sharealike" in normalized
+        or "attribution-share-alike" in normalized
+        or normalized in {"share-alike", "sharealike"}
+    ):
+        return "Creative Commons BY-SA", "https://creativecommons.org/licenses/by-sa/4.0/"
+    if "public-domain" in normalized:
+        return "Dominio público", "https://creativecommons.org/publicdomain/mark/1.0/"
+    if (
+        normalized in {"by", "cc-by", "attribution"}
+        or normalized.startswith("cc-by-")
+        or normalized.startswith("attribution-")
+        or "creative-commons-attribution" in normalized
+    ):
+        return "Creative Commons BY", "https://creativecommons.org/licenses/by/4.0/"
     return None
 
 
@@ -1012,6 +1048,225 @@ class MusicVoice:
                 break
         return results[:limit]
 
+    @staticmethod
+    def _ccmixter_rows(payload: Any) -> list[dict[str, Any]]:
+        if isinstance(payload, list):
+            return [row for row in payload if isinstance(row, dict)]
+        if isinstance(payload, dict):
+            for key in ("results", "data", "items", "response"):
+                value = payload.get(key)
+                if isinstance(value, list):
+                    return [row for row in value if isinstance(row, dict)]
+        return []
+
+    @staticmethod
+    def _ccmixter_license(info: dict[str, Any]) -> tuple[str, str] | None:
+        license_url = str(info.get("license_url") or info.get("licenseurl") or "").strip()
+        label = _license_label(license_url)
+        if label:
+            return label, license_url
+        name = re.sub(r"[^a-z0-9]+", "-", str(info.get("license_name") or "").casefold()).strip("-")
+        if name in {"public-domain", "public-domain-dedication", "pd"}:
+            return "Dominio público", "https://creativecommons.org/publicdomain/mark/1.0/"
+        if name in {"attribution-sharealike", "attribution-share-alike", "cc-by-sa", "by-sa"}:
+            return "Creative Commons BY-SA", "https://creativecommons.org/licenses/by-sa/4.0/"
+        if name in {"attribution", "cc-by", "by"}:
+            return "Creative Commons BY", "https://creativecommons.org/licenses/by/4.0/"
+        return None
+
+    async def search_ccmixter(self, query: str, limit: int = 5) -> list[dict[str, Any]]:
+        """Search ccMixter's official API and verify each upload's license and audio file."""
+        terms = re.findall(r"[\wáéíóúñü-]+", str(query or ""), flags=re.I)[:8]
+        if not terms:
+            return []
+        search_text = " ".join(terms)
+        base = "https://ccmixter.org/api/query"
+
+        async def search_license(license_code: str) -> list[dict[str, Any]]:
+            response = await self.http.get(
+                base,
+                params={
+                    "f": "json",
+                    "search": search_text,
+                    "search_type": "any",
+                    "lic": license_code,
+                    "limit": max(6, min(12, limit * 2)),
+                },
+                headers={"Accept": "application/json"},
+            )
+            response.raise_for_status()
+            return self._ccmixter_rows(response.json())
+
+        search_results = await asyncio.gather(
+            *(search_license(code) for code in ("by", "sa", "pd")),
+            return_exceptions=True,
+        )
+        candidates: dict[str, dict[str, Any]] = {}
+        for outcome in search_results:
+            if isinstance(outcome, BaseException):
+                log.debug("ccMixter query failed (%s).", type(outcome).__name__)
+                continue
+            for row in outcome:
+                upload_id = str(row.get("upload_id") or row.get("id") or "").strip()
+                if re.fullmatch(r"\d{1,12}", upload_id):
+                    candidates.setdefault(upload_id, row)
+        if not candidates:
+            return []
+
+        semaphore = asyncio.Semaphore(3)
+
+        async def inspect_upload(upload_id: str, search_row: dict[str, Any]) -> dict[str, Any] | None:
+            async with semaphore:
+                try:
+                    info_response, files_response = await asyncio.gather(
+                        self.http.get(
+                            base,
+                            params={"f": "json", "dataview": "info", "ids": upload_id},
+                            headers={"Accept": "application/json"},
+                        ),
+                        self.http.get(
+                            base,
+                            params={"f": "json", "dataview": "files", "ids": upload_id},
+                            headers={"Accept": "application/json"},
+                        ),
+                    )
+                    info_response.raise_for_status()
+                    files_response.raise_for_status()
+                    info_rows = self._ccmixter_rows(info_response.json())
+                    file_rows = self._ccmixter_rows(files_response.json())
+                    info = info_rows[0] if info_rows else search_row
+                    licensed = self._ccmixter_license(info)
+                    if not licensed:
+                        return None
+                    license_label, license_url = licensed
+
+                    title = _clean(
+                        info.get("file_name") or info.get("upload_name")
+                        or search_row.get("file_name") or search_row.get("upload_name")
+                        or f"ccMixter {upload_id}",
+                        160,
+                    )
+                    creator = _clean(
+                        info.get("user_real_name") or info.get("user_name")
+                        or search_row.get("user_real_name") or search_row.get("user_name")
+                        or "Autor no indicado",
+                        100,
+                    )
+                    artist_slug = str(info.get("user_name") or search_row.get("user_name") or "").strip()
+                    item_url = str(info.get("file_page_url") or search_row.get("file_page_url") or "").strip()
+                    if not item_url and re.fullmatch(r"[A-Za-z0-9_.-]{1,80}", artist_slug):
+                        item_url = f"https://ccmixter.org/files/{quote(artist_slug, safe='')}/{upload_id}"
+
+                    for file_item in file_rows:
+                        audio_url = str(file_item.get("download_url") or file_item.get("file_url") or "").strip()
+                        extension = Path(urlparse(audio_url).path).suffix.casefold()
+                        if not _allowed_audio_url(audio_url) or extension not in AUDIO_EXTENSIONS:
+                            continue
+                        try:
+                            size = int(file_item.get("filesize") or file_item.get("file_rawsize") or 0)
+                        except (TypeError, ValueError, OverflowError):
+                            size = 0
+                        if size > MAX_TRACK_BYTES:
+                            continue
+                        return {
+                            "identifier": upload_id,
+                            "title": title,
+                            "creator": creator,
+                            "license": license_label,
+                            "license_url": license_url,
+                            "item_url": item_url,
+                            "url": audio_url,
+                            "source": "ccMixter",
+                        }
+                    return None
+                except (httpx.HTTPError, ValueError, TypeError, KeyError, OverflowError):
+                    log.debug("ccMixter upload validation failed for %s.", upload_id, exc_info=True)
+                    return None
+
+        inspected = await asyncio.gather(
+            *(
+                inspect_upload(upload_id, row)
+                for upload_id, row in list(candidates.items())[:max(12, limit * 3)]
+            ),
+            return_exceptions=True,
+        )
+        results: list[dict[str, Any]] = []
+        for item in inspected:
+            if isinstance(item, dict):
+                results.append(item)
+                if len(results) >= limit:
+                    break
+        return results
+
+    async def search_audius(self, query: str, limit: int = 5) -> list[dict[str, Any]]:
+        """Search public Audius tracks and stream only those with explicit CC/PD metadata."""
+        text = " ".join(str(query or "").split())[:140]
+        if not text:
+            return []
+        response = await self.http.get(
+            "https://api.audius.co/v1/tracks/search",
+            params={"query": text, "limit": max(5, min(20, limit * 3)), "app_name": "StellaAnarchy"},
+            headers={"Accept": "application/json"},
+        )
+        response.raise_for_status()
+        payload = response.json()
+        records = (payload.get("data") or []) if isinstance(payload, dict) else []
+        if not isinstance(records, list):
+            return []
+
+        results: list[dict[str, Any]] = []
+        seen_ids: set[str] = set()
+        for item in records:
+            if not isinstance(item, dict):
+                continue
+            track_id = str(item.get("id") or "").strip()
+            if not re.fullmatch(r"[A-Za-z0-9_-]{1,100}", track_id) or track_id in seen_ids:
+                continue
+            is_streamable = item.get("is_streamable", item.get("isStreamable"))
+            if is_streamable not in (True, 1, "true", "True", "1"):
+                continue
+            licensed = _audius_license_label(item.get("license") or item.get("license_type") or "")
+            if not licensed:
+                continue
+            license_label, license_url = licensed
+            try:
+                duration = float(item.get("duration") or 0)
+            except (TypeError, ValueError, OverflowError):
+                duration = 0
+            if duration > MAX_TRACK_SECONDS:
+                continue
+
+            user = item.get("user") or {}
+            if not isinstance(user, dict):
+                user = {}
+            creator = _clean(
+                user.get("name") or user.get("handle") or user.get("username")
+                or item.get("artist_name") or "Artista de Audius",
+                100,
+            )
+            title = _clean(item.get("title") or "Pista de Audius", 160)
+            permalink = str(item.get("permalink") or "").strip()
+            if not permalink.startswith("https://audius.co/"):
+                permalink = f"https://audius.co/tracks/{quote(track_id, safe='')}"
+            stream_url = (
+                f"https://api.audius.co/v1/tracks/{quote(track_id, safe='')}/stream"
+                "?app_name=StellaAnarchy"
+            )
+            results.append({
+                "identifier": track_id,
+                "title": title,
+                "creator": creator,
+                "license": license_label,
+                "license_url": license_url,
+                "item_url": permalink,
+                "url": stream_url,
+                "source": "Audius",
+            })
+            seen_ids.add(track_id)
+            if len(results) >= limit:
+                break
+        return results
+
     async def search_jamendo(self, query: str, limit: int = 4) -> list[dict[str, Any]]:
         client_id = os.getenv("JAMENDO_CLIENT_ID", "").strip()
         if not client_id:
@@ -1066,6 +1321,8 @@ class MusicVoice:
             ("Internet Archive", self.search_archive, lookup, 5),
             ("Wikimedia Commons", self.search_wikimedia, lookup, 5),
             ("Openverse", self.search_openverse, lookup, 5),
+            ("ccMixter", self.search_ccmixter, lookup, 5),
+            ("Audius", self.search_audius, lookup, 5),
         ]
         if os.getenv("JAMENDO_CLIENT_ID", "").strip():
             providers.append(("Jamendo", self.search_jamendo, lookup, 4))
@@ -1733,7 +1990,7 @@ class MusicVoice:
             return message
         if action in {"fuentes", "sources"}:
             jamendo = "disponible" if os.getenv("JAMENDO_CLIENT_ID", "").strip() else "sin configurar"
-            return f"Catálogos musicales: Internet Archive, Wikimedia Commons, Openverse y Jamendo ({jamendo}); se muestran pistas con licencia verificada."
+            return f"Catálogos musicales: Internet Archive, Wikimedia Commons, Openverse, ccMixter, Audius y Jamendo ({jamendo}); solo pistas con licencia abierta verificada."
         if action in {"quitar", "remove"}:
             state = self.rooms.get(room_id)
             try:
