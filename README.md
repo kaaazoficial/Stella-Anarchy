@@ -1,6 +1,6 @@
 # Stella — Anarchy Community Bot
 
-Stella is an independent Python bot for Anarchy Apps. It has its own codebase, configuration, storage and deployment. It is not a renamed copy of Katheryne and does not include Genshin Impact commands or integrations.
+Stella is an independent Python bot for Anarchy Apps. It has its own codebase, configuration, storage and deployment. Its modules are built around general community, AI, research, moderation, profile, entertainment, music and voice features.
 
 ## Current feature set
 
