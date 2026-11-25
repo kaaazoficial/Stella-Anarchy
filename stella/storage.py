@@ -73,6 +73,29 @@ class Store:
                     claimed_at REAL NOT NULL,
                     PRIMARY KEY(uid,action)
                 );
+                CREATE TABLE IF NOT EXISTS dj_playlists (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    room_id TEXT NOT NULL,
+                    owner_uid TEXT NOT NULL,
+                    name TEXT NOT NULL,
+                    created_at REAL NOT NULL,
+                    UNIQUE(room_id,owner_uid,name)
+                );
+                CREATE TABLE IF NOT EXISTS dj_playlist_tracks (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    playlist_id INTEGER NOT NULL,
+                    title TEXT NOT NULL,
+                    creator TEXT NOT NULL,
+                    license TEXT NOT NULL,
+                    source TEXT NOT NULL,
+                    url TEXT NOT NULL,
+                    item_url TEXT NOT NULL,
+                    identifier TEXT NOT NULL DEFAULT '',
+                    created_at REAL NOT NULL,
+                    FOREIGN KEY(playlist_id) REFERENCES dj_playlists(id) ON DELETE CASCADE
+                );
+                CREATE INDEX IF NOT EXISTS idx_dj_playlists_owner ON dj_playlists(room_id,owner_uid);
+                CREATE INDEX IF NOT EXISTS idx_dj_tracks_playlist ON dj_playlist_tracks(playlist_id,id);
                 CREATE TABLE IF NOT EXISTS moderation_warnings (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     room_id TEXT NOT NULL,
@@ -165,6 +188,8 @@ class Store:
             db.execute("DELETE FROM gifts WHERE created_at < ?", (stamp - 30 * 86400,))
             db.execute("DELETE FROM affinities WHERE uid IN (SELECT uid FROM users WHERE last_seen < ?) OR target_uid IN (SELECT uid FROM users WHERE last_seen < ?)", (stamp - 90 * 86400, stamp - 90 * 86400))
             db.execute("DELETE FROM reward_claims WHERE uid IN (SELECT uid FROM users WHERE last_seen < ?)", (stamp - 90 * 86400,))
+            db.execute("DELETE FROM dj_playlist_tracks WHERE playlist_id IN (SELECT id FROM dj_playlists WHERE owner_uid IN (SELECT uid FROM users WHERE last_seen < ?))", (stamp - 90 * 86400,))
+            db.execute("DELETE FROM dj_playlists WHERE owner_uid IN (SELECT uid FROM users WHERE last_seen < ?)", (stamp - 90 * 86400,))
             db.execute("DELETE FROM users WHERE last_seen < ?", (stamp - 90 * 86400,))
             statements = (
                 ("warnings", "DELETE FROM moderation_warnings WHERE created_at < ?", warning_cutoff),
@@ -308,6 +333,81 @@ class Store:
                 (str(uid), time.time() - 30 * 86400, max(1, min(5, int(limit)))),
             ).fetchall()
             return [dict(row) for row in rows]
+
+
+    def create_playlist(self, room_id: str, owner_uid: str, name: str) -> bool:
+        clean = " ".join(str(name or "").split())[:48]
+        if not clean:
+            return False
+        with self._session(self.connect()) as db:
+            try:
+                db.execute(
+                    "INSERT INTO dj_playlists(room_id,owner_uid,name,created_at) VALUES(?,?,?,?)",
+                    (str(room_id), str(owner_uid), clean, time.time()),
+                )
+                return True
+            except sqlite3.IntegrityError:
+                return False
+
+    def list_playlists(self, room_id: str, owner_uid: str) -> list[dict[str, Any]]:
+        with self._session(self.connect()) as db:
+            rows = db.execute(
+                """SELECT p.id,p.name,p.created_at,COUNT(t.id) AS tracks
+                   FROM dj_playlists p LEFT JOIN dj_playlist_tracks t ON t.playlist_id=p.id
+                   WHERE p.room_id=? AND p.owner_uid=? GROUP BY p.id ORDER BY p.name COLLATE NOCASE""",
+                (str(room_id), str(owner_uid)),
+            ).fetchall()
+            return [dict(row) for row in rows]
+
+    def add_playlist_track(self, room_id: str, owner_uid: str, name: str, track: dict[str, Any]) -> str:
+        with self._session(self.connect()) as db:
+            playlist = db.execute(
+                "SELECT id FROM dj_playlists WHERE room_id=? AND owner_uid=? AND name=? COLLATE NOCASE",
+                (str(room_id), str(owner_uid), str(name).strip()),
+            ).fetchone()
+            if not playlist:
+                return "missing"
+            count = db.execute("SELECT COUNT(*) AS n FROM dj_playlist_tracks WHERE playlist_id=?", (playlist["id"],)).fetchone()["n"]
+            if int(count) >= 40:
+                return "full"
+            required = ("title", "creator", "license", "source", "url", "item_url")
+            if any(not str(track.get(key) or "").strip() for key in required):
+                return "invalid"
+            db.execute(
+                """INSERT INTO dj_playlist_tracks
+                   (playlist_id,title,creator,license,source,url,item_url,identifier,created_at)
+                   VALUES(?,?,?,?,?,?,?,?,?)""",
+                (playlist["id"], *(str(track.get(key) or "")[:1000] for key in required),
+                 str(track.get("identifier") or "")[:120], time.time()),
+            )
+            return "ok"
+
+    def playlist_tracks(self, room_id: str, owner_uid: str, name: str) -> list[dict[str, Any]]:
+        with self._session(self.connect()) as db:
+            playlist = db.execute(
+                "SELECT id FROM dj_playlists WHERE room_id=? AND owner_uid=? AND name=? COLLATE NOCASE",
+                (str(room_id), str(owner_uid), str(name).strip()),
+            ).fetchone()
+            if not playlist:
+                return []
+            rows = db.execute(
+                """SELECT title,creator,license,source,url,item_url,identifier
+                   FROM dj_playlist_tracks WHERE playlist_id=? ORDER BY id LIMIT 40""",
+                (playlist["id"],),
+            ).fetchall()
+            return [dict(row) for row in rows]
+
+    def delete_playlist(self, room_id: str, owner_uid: str, name: str) -> bool:
+        with self._session(self.connect()) as db:
+            row = db.execute(
+                "SELECT id FROM dj_playlists WHERE room_id=? AND owner_uid=? AND name=? COLLATE NOCASE",
+                (str(room_id), str(owner_uid), str(name).strip()),
+            ).fetchone()
+            if not row:
+                return False
+            db.execute("DELETE FROM dj_playlist_tracks WHERE playlist_id=?", (row["id"],))
+            db.execute("DELETE FROM dj_playlists WHERE id=?", (row["id"],))
+            return True
 
     def add_warning(
         self, room_id: str, target_uid: str, target_name: str,
