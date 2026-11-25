@@ -1338,9 +1338,6 @@ class StellaBot:
             await self._reply(room_id, f"Uso: {self.settings.command_prefix}evento crear|lista|apuntarse|cerrar ...", message)
 
     async def _activity(self, room_id, uid, name, args, message):
-        if not self._is_admin(uid):
-            await self._reply(room_id, "Solo el equipo administrativo puede consultar la actividad.", message)
-            return
         period = args.casefold().strip()
         if period not in {"", "hoy", "semana"}:
             await self._reply(room_id, "Uso: !actividad hoy|semana.", message)
@@ -1350,9 +1347,15 @@ class StellaBot:
         if not rows:
             await self._reply(room_id, "No hay actividad agregada para ese periodo.", message)
             return
-        lines = ["📈 ACTIVIDAD · " + ("HOY" if days == 1 else "ÚLTIMOS SIETE DÍAS")]
-        lines.extend(f"{i}. UID {row['user_uid']}: {row['total_messages']} mensajes" for i, row in enumerate(rows, 1))
-        await self._reply(room_id, "\n".join(lines), message)
+        total = sum(int(row.get("total_messages", 0)) for row in rows)
+        label = "HOY" if days == 1 else "ÚLTIMOS SIETE DÍAS"
+        await self._reply(
+            room_id,
+            f"📈 ACTIVIDAD · {label}\n"
+            f"Mensajes registrados: {total}\n"
+            f"Participantes activos: {len(rows)}",
+            message,
+        )
 
     async def _auto_reply(self, room_id, uid, name, args, message):
         if not self._is_admin(uid):
