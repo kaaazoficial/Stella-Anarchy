@@ -268,3 +268,29 @@ def test_voice_reading_queue_is_cleared_and_worker_cancelled_on_global_silence()
         assert state["speech_task"] is None
 
     asyncio.run(scenario())
+
+
+@pytest.mark.asyncio
+async def test_reply_strips_raw_urls_from_all_command_responses():
+    from stella.bot import StellaBot
+
+    sent = []
+
+    class FakePlatform:
+        async def send_message(self, room_id, content, *, reply_id=None):
+            sent.append((room_id, content, reply_id))
+            return True
+
+    bot = object.__new__(StellaBot)
+    bot.platform = FakePlatform()
+    await bot._reply(
+        "room-1",
+        "Fuente: Wikimedia Commons https://commons.wikimedia.org/wiki/File:Music.ogg",
+        {"messageId": "msg-1"},
+    )
+
+    assert len(sent) == 1
+    assert "https://" not in sent[0][1]
+    assert "[enlace omitido]" in sent[0][1]
+    assert "Wikimedia Commons" in sent[0][1]
+    assert sent[0][2] == "msg-1"
