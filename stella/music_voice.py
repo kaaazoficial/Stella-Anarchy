@@ -216,130 +216,273 @@ class MusicVoice:
     def _room_id(room: dict[str, Any]) -> str:
         return str(room.get("threadId") or room.get("thread_id") or "").strip()
 
+    @staticmethod
+    def _room_is_connected(room: Any, state: dict[str, Any] | None = None) -> bool:
+        checker = getattr(room, "isconnected", None)
+        if callable(checker):
+            try:
+                return bool(checker())
+            except Exception:
+                pass
+        return bool(state and state.get("connected"))
+
+    async def _close_audio_sources(self, state: dict[str, Any] | None) -> None:
+        if not isinstance(state, dict) or state.get("_audio_resources_closed"):
+            return
+        state["_audio_resources_closed"] = True
+        sources = []
+        seen: set[int] = set()
+        for key in ("audio_source", "music_source", "speech_source"):
+            source = state.get(key)
+            if source is None or id(source) in seen:
+                continue
+            seen.add(id(source))
+            sources.append(source)
+        for source in sources:
+            closer = getattr(source, "aclose", None)
+            if not callable(closer):
+                closer = getattr(source, "close", None)
+            if not callable(closer):
+                continue
+            try:
+                result = closer()
+                if asyncio.iscoroutine(result) or hasattr(result, "__await__"):
+                    await result
+            except Exception as exc:
+                log.warning("LiveKit AudioSource cleanup failed (%s)", type(exc).__name__)
+
     async def ensure_room(self, room_id: str) -> tuple[bool, str]:
         thread_id = str(room_id or "").strip()
         if not thread_id:
             return False, "No pude identificar el chat que corresponde a la llamada."
+
         current = self.rooms.get(thread_id)
-        if current and current.get("connected"):
-            return True, "Stella ya está dentro de la llamada."
-        lock = self.connect_locks.setdefault(thread_id, asyncio.Lock())
-        async with lock:
-            current = self.rooms.get(thread_id)
-            if current and current.get("connected"):
+        if current:
+            connection_state = str(current.get("connection_state") or "").casefold()
+            if connection_state in {"connecting", "reconnecting"}:
+                return False, "La conexión de voz todavía está iniciándose o recuperándose. Espera a que termine antes de volver a usar !join."
+            if current.get("connected") and self._room_is_connected(current.get("room"), current):
                 return True, "Stella ya está dentro de la llamada."
+            await self.leave_room(thread_id, request_leave=True)
 
-            rooms_result = await self.platform.request("GET", "/live-rooms")
-            if not rooms_result.get("ok"):
-                return False, (
-                    f"No pude consultar las llamadas disponibles (HTTP {rooms_result.get('status')}). "
-                    "Comprueba que el token de Stella tenga acceso a la comunidad."
+        lock = self.connect_locks.setdefault(thread_id, asyncio.Lock())
+        try:
+            async with lock:
+                current = self.rooms.get(thread_id)
+                if current:
+                    connection_state = str(current.get("connection_state") or "").casefold()
+                    if connection_state in {"connecting", "reconnecting"}:
+                        return False, "La conexión de voz todavía está iniciándose o recuperándose."
+                    if current.get("connected") and self._room_is_connected(current.get("room"), current):
+                        return True, "Stella ya está dentro de la llamada."
+                    await self.leave_room(thread_id, request_leave=True)
+
+                rooms_result = await self.platform.request("GET", "/live-rooms")
+                if not rooms_result.get("ok"):
+                    return False, (
+                        f"No pude consultar las llamadas disponibles (HTTP {rooms_result.get('status')}). "
+                        "Comprueba que el token de Stella tenga acceso a la comunidad."
+                    )
+                rooms = _payload_data(rooms_result).get("roomList")
+                if not isinstance(rooms, list):
+                    return False, "Anarchy no devolvió una lista válida de llamadas."
+                active = next(
+                    (item for item in rooms if isinstance(item, dict) and self._room_id(item) == thread_id),
+                    None,
                 )
-            rooms = _payload_data(rooms_result).get("roomList")
-            if not isinstance(rooms, list):
-                return False, "Anarchy no devolvió una lista válida de llamadas."
-            active = next(
-                (item for item in rooms if isinstance(item, dict) and self._room_id(item) == thread_id),
-                None,
-            )
-            if active is None:
-                return False, (
-                    "No hay una llamada de voz activa para este chat. Abre primero una llamada "
-                    "en Anarchy y luego vuelve a usar !join."
-                )
-            if not self._load_rtc():
-                return False, (
-                    "La dependencia LiveKit no está disponible. "
-                    f"Detalle técnico: {self._load_errors.get('livekit', 'error de carga')}."
-                )
+                if active is None:
+                    return False, (
+                        "No hay una llamada de voz activa para este chat. Abre primero una llamada "
+                        "en Anarchy y luego vuelve a usar !join."
+                    )
+                if not self._load_rtc():
+                    return False, (
+                        "La dependencia LiveKit no está disponible. "
+                        f"Detalle técnico: {self._load_errors.get('livekit', 'error de carga')}."
+                    )
 
-            joined_api = False
-            room = None
-            try:
-                result = await self.platform.request("POST", f"/live-rooms/{quote(thread_id, safe='')}/join")
-                if not result.get("ok"):
-                    return False, f"Anarchy rechazó la entrada a la llamada (HTTP {result.get('status')})."
-                joined_api = True
-                grant = _payload_data(result)
-                room_url = str(grant.get("url") or "")
-                room_token = str(grant.get("token") or "")
-                if not room_url or not room_token:
-                    await self.platform.request("POST", f"/live-rooms/{quote(thread_id, safe='')}/leave")
-                    return False, "Anarchy no entregó las credenciales temporales de LiveKit."
-                room = self._rtc.Room()
-                await room.connect(room_url, room_token)
+                joined_api = False
+                stage = "create_room"
+                room = None
+                state: dict[str, Any] | None = None
+                room_token = ""
+                try:
+                    result = await self.platform.request("POST", f"/live-rooms/{quote(thread_id, safe='')}/join")
+                    if not result.get("ok"):
+                        return False, f"Anarchy rechazó la entrada a la llamada (HTTP {result.get('status')})."
+                    joined_api = True
+                    grant = _payload_data(result)
+                    room_url = str(grant.get("url") or "")
+                    room_token = str(grant.get("token") or "")
+                    if not room_url or not room_token:
+                        await self.platform.request("POST", f"/live-rooms/{quote(thread_id, safe='')}/leave")
+                        return False, "Anarchy no entregó las credenciales temporales de LiveKit."
 
-                music_source = self._rtc.AudioSource(SAMPLE_RATE, CHANNELS, queue_size_ms=600)
-                music_track = self._rtc.LocalAudioTrack.create_audio_track("stella-music", music_source)
-                await room.local_participant.publish_track(
-                    music_track,
-                    self._rtc.TrackPublishOptions(source=self._rtc.TrackSource.SOURCE_MICROPHONE),
-                )
+                    room = self._rtc.Room()
+                    state = {
+                        "room": room,
+                        "audio_source": None,
+                        "music_source": None,
+                        "speech_source": None,
+                        "audio_track": None,
+                        "audio_publication_sid": None,
+                        "capture_lock": asyncio.Lock(),
+                        "connected": False,
+                        "connection_state": "connecting",
+                        "connection_error": None,
+                        "music_queue": deque(),
+                        "music_task": None,
+                        "music_current": None,
+                        "music_paused": asyncio.Event(),
+                        "music_skip": asyncio.Event(),
+                        "music_volume": 0.75,
+                        "repeat_mode": "off",
+                        "transition_ms": self._bounded_setting(thread_id, "dj_transition_ms", 500, 0, 2000),
+                        "duck_enabled": self._bool_setting(thread_id, "dj_duck_enabled", True),
+                        "music_duck_gain": 0.28,
+                        "tts_active": asyncio.Event(),
+                        "speech_queue": asyncio.Queue(maxsize=15),
+                        "speech_task": None,
+                        "tts_enabled": False,
+                        "tts_voice": os.getenv("TTS_VOICE", "es-CL-CatalinaNeural"),
+                        "tts_rate": "+0%",
+                        "tts_volume": 0.75,
+                        "last_tts_volume": 0.75,
+                        "tts_read_links": bool(self.store and self.store.get_setting(thread_id, "tts_read_links", "0") == "1"),
+                        "tts_read_mentions": bool(self.store and self.store.get_setting(thread_id, "tts_read_mentions", "0") == "1"),
+                        "created_at": time.monotonic(),
+                    }
+                    state["music_paused"].set()
+                    self.rooms[thread_id] = state
 
-                speech_source = self._rtc.AudioSource(SAMPLE_RATE, CHANNELS, queue_size_ms=300)
-                speech_track = self._rtc.LocalAudioTrack.create_audio_track("stella-tts", speech_source)
-                await room.local_participant.publish_track(
-                    speech_track,
-                    self._rtc.TrackPublishOptions(source=self._rtc.TrackSource.SOURCE_MICROPHONE),
-                )
+                    def on_disconnected(*args):
+                        existing = self.rooms.get(thread_id)
+                        if existing is not state:
+                            return
+                        reason = args[0] if args else None
+                        state["connected"] = False
+                        state["connection_state"] = "disconnected"
+                        log.warning(
+                            "LiveKit disconnected for room %s (reason=%s).",
+                            thread_id[:80],
+                            str(reason)[:120] if reason is not None else "unspecified",
+                        )
+                        cleanup = state.get("cleanup_task")
+                        if cleanup is None or cleanup.done():
+                            state["cleanup_task"] = asyncio.create_task(
+                                self.leave_room(thread_id, request_leave=True)
+                            )
 
-                state = {
-                    "room": room,
-                    "music_source": music_source,
-                    "speech_source": speech_source,
-                    "connected": True,
-                    "music_queue": deque(),
-                    "music_task": None,
-                    "music_current": None,
-                    "music_paused": asyncio.Event(),
-                    "music_skip": asyncio.Event(),
-                    "music_volume": 0.75,
-                    "repeat_mode": "off",
-                    "transition_ms": self._bounded_setting(thread_id, "dj_transition_ms", 500, 0, 2000),
-                    "duck_enabled": self._bool_setting(thread_id, "dj_duck_enabled", True),
-                    "music_duck_gain": 0.28,
-                    "tts_active": asyncio.Event(),
-                    "speech_queue": asyncio.Queue(maxsize=15),
-                    "speech_task": None,
-                    "tts_enabled": False,
-                    "tts_voice": os.getenv("TTS_VOICE", "es-CL-CatalinaNeural"),
-                    "tts_rate": "+0%",
-                    "tts_volume": 0.75,
-                    "last_tts_volume": 0.75,
-                    "tts_read_links": bool(self.store and self.store.get_setting(thread_id, "tts_read_links", "0") == "1"),
-                    "tts_read_mentions": bool(self.store and self.store.get_setting(thread_id, "tts_read_mentions", "0") == "1"),
-                    "created_at": time.monotonic(),
-                }
-                state["music_paused"].set()
+                    def on_reconnecting(*_args):
+                        if self.rooms.get(thread_id) is state:
+                            state["connection_state"] = "reconnecting"
+                            state["music_paused"].clear()
+                            log.warning("LiveKit is reconnecting for room %s.", thread_id[:80])
 
-                def disconnected(*_args):
-                    existing = self.rooms.get(thread_id)
-                    if existing is state:
-                        existing["connected"] = False
-                        asyncio.create_task(self.leave_room(thread_id, request_leave=False))
+                    def on_reconnected(*_args):
+                        if self.rooms.get(thread_id) is state:
+                            state["connection_state"] = "connected"
+                            state["connected"] = True
+                            state["music_paused"].set()
+                            log.info("LiveKit reconnected for room %s.", thread_id[:80])
 
-                room.on("disconnected", disconnected)
-                self.rooms[thread_id] = state
-                return True, "Stella se unió a la llamada y publicó sus canales de música y lectura."
-            except Exception as exc:
-                log.warning("LiveKit join failed (%s)", type(exc).__name__)
-                if room is not None:
-                    try:
-                        await room.disconnect()
-                    except Exception:
-                        pass
-                if joined_api:
-                    await self.platform.request("POST", f"/live-rooms/{quote(thread_id, safe='')}/leave")
-                return False, f"No pude conectarme a LiveKit ({type(exc).__name__})."
-            finally:
-                if not self.rooms.get(thread_id):
-                    self.connect_locks.pop(thread_id, None)
+                    def on_connection_state_changed(connection_state, *_args):
+                        if self.rooms.get(thread_id) is not state:
+                            return
+                        raw_state = getattr(connection_state, "name", connection_state)
+                        normalized = str(raw_state).casefold()
+                        state["connection_state"] = normalized
+                        if "reconnect" in normalized or "connecting" in normalized:
+                            state["music_paused"].clear()
+                        elif "connected" in normalized and "disconnected" not in normalized:
+                            state["connected"] = True
+                            state["music_paused"].set()
+
+                    room.on("disconnected", on_disconnected)
+                    room.on("reconnecting", on_reconnecting)
+                    room.on("reconnected", on_reconnected)
+                    room.on("connection_state_changed", on_connection_state_changed)
+
+                    stage = "connect"
+                    room_options_factory = getattr(self._rtc, "RoomOptions", None)
+                    if callable(room_options_factory):
+                        room_options = room_options_factory(
+                            auto_subscribe=False,
+                            connect_timeout=20.0,
+                        )
+                        await room.connect(room_url, room_token, options=room_options)
+                    else:
+                        await room.connect(room_url, room_token)
+                    if self.rooms.get(thread_id) is not state:
+                        raise RuntimeError("LiveKit se desconectó durante la conexión.")
+
+                    state["connection_state"] = "connected"
+                    state["connected"] = True
+                    stage = "create_audio_source"
+                    audio_source = self._rtc.AudioSource(
+                        SAMPLE_RATE, CHANNELS, queue_size_ms=1000
+                    )
+                    # One published microphone-source track carries both DJ and TTS audio.
+                    # Anarchy/LiveKit grants may reject multiple publications of the same source.
+                    state["audio_source"] = audio_source
+                    state["music_source"] = audio_source
+                    state["speech_source"] = audio_source
+                    audio_track = self._rtc.LocalAudioTrack.create_audio_track(
+                        "stella-audio", audio_source
+                    )
+                    state["audio_track"] = audio_track
+
+                    stage = "publish_audio"
+                    publication = await room.local_participant.publish_track(
+                        audio_track,
+                        self._rtc.TrackPublishOptions(
+                            source=self._rtc.TrackSource.SOURCE_MICROPHONE
+                        ),
+                    )
+                    state["audio_publication_sid"] = getattr(publication, "sid", None)
+                    if self.rooms.get(thread_id) is not state or not self._room_is_connected(room, state):
+                        raise RuntimeError("La conexión LiveKit se perdió después de publicar el audio.")
+
+                    log.info(
+                        "LiveKit connected for room %s; one audio track published (sid=%s).",
+                        thread_id[:80],
+                        str(state.get("audio_publication_sid") or "unavailable")[:80],
+                    )
+                    return True, "Stella se unió a la llamada y publicó su canal de audio para música y lectura."
+                except Exception as exc:
+                    detail = str(exc or "").replace(room_token, "[redacted]")[:320]
+                    log.warning(
+                        "LiveKit join failed at stage=%s (%s): %s",
+                        stage,
+                        type(exc).__name__,
+                        detail or "sin detalle del SDK",
+                    )
+                    if state is not None and self.rooms.get(thread_id) is state:
+                        await self.leave_room(thread_id, request_leave=joined_api)
+                    else:
+                        if room is not None:
+                            try:
+                                await room.disconnect()
+                            except Exception:
+                                pass
+                        await self._close_audio_sources(state)
+                        if joined_api and not (state and state.get("_leave_requested")):
+                            await self.platform.request(
+                                "POST", f"/live-rooms/{quote(thread_id, safe='')}/leave"
+                            )
+                    return False, f"No pude conectarme a LiveKit durante {stage} ({type(exc).__name__})."
+        finally:
+            if self.rooms.get(thread_id) is None and not lock.locked():
+                self.connect_locks.pop(thread_id, None)
 
     async def leave_room(self, room_id: str, *, request_leave: bool) -> None:
         thread_id = str(room_id)
         state = self.rooms.pop(thread_id, None)
         if state:
             state["connected"] = False
+            state["connection_state"] = "disconnecting"
+            if request_leave:
+                state["_leave_requested"] = True
             current = asyncio.current_task()
             for key in ("music_task", "speech_task"):
                 task = state.get(key)
@@ -357,12 +500,25 @@ class MusicVoice:
                     await room.disconnect()
                 except Exception:
                     log.exception("Could not disconnect Stella from LiveKit")
+            await self._close_audio_sources(state)
+
         if request_leave:
             try:
-                await self.platform.request("POST", f"/live-rooms/{quote(thread_id, safe='')}/leave")
-            except Exception:
-                log.exception("Could not leave Anarchy voice room")
-        self.connect_locks.pop(thread_id, None)
+                result = await self.platform.request(
+                    "POST", f"/live-rooms/{quote(thread_id, safe='')}/leave"
+                )
+                if not result.get("ok"):
+                    log.warning(
+                        "Anarchy voice leave returned HTTP %s for room %s.",
+                        result.get("status"),
+                        thread_id[:80],
+                    )
+            except Exception as exc:
+                log.warning("Could not leave Anarchy voice room (%s).", type(exc).__name__)
+
+        lock = self.connect_locks.get(thread_id)
+        if lock is not None and not lock.locked():
+            self.connect_locks.pop(thread_id, None)
 
     @staticmethod
     def _frame_samples(frame: Any, volume: float, np: Any):
@@ -371,16 +527,31 @@ class MusicVoice:
             samples = samples * max(0.0, min(1.0, float(volume)))
         return np.clip(samples, -32768, 32767).astype(np.int16, copy=False)
 
-    async def _capture_pcm(self, source: Any, frame: Any, samples: Any) -> None:
-        rtc_frame = self._rtc.AudioFrame.create(SAMPLE_RATE, CHANNELS, int(samples.size))
-        destination = self._np.frombuffer(rtc_frame.data, dtype=self._np.int16)
-        destination[: samples.size] = samples
-        await source.capture_frame(rtc_frame)
+    async def _capture_pcm(
+        self, source: Any, frame: Any, samples: Any, capture_lock: asyncio.Lock | None = None
+    ) -> None:
+        flat = self._np.asarray(samples, dtype=self._np.int16).reshape(-1)
+        # LiveKit's realtime audio example uses 10 ms PCM frames at 48 kHz.
+        for offset in range(0, int(flat.size), 480):
+            chunk = flat[offset:offset + 480]
+            if chunk.size == 0:
+                continue
+            rtc_frame = self._rtc.AudioFrame.create(
+                SAMPLE_RATE, CHANNELS, int(chunk.size)
+            )
+            destination = self._np.frombuffer(rtc_frame.data, dtype=self._np.int16)
+            destination[: chunk.size] = chunk
+            if capture_lock is None:
+                await source.capture_frame(rtc_frame)
+            else:
+                async with capture_lock:
+                    await source.capture_frame(rtc_frame)
 
     async def _play_audio_bytes(
         self, source: Any, data: bytes, volume: float, *, room_id: str,
         skip_event=None, pause_event=None, fade_ms: int = 0,
         duck_state: dict[str, Any] | None = None,
+        capture_lock: asyncio.Lock | None = None,
     ) -> None:
         if not self._load_audio():
             raise RuntimeError("No se pudieron cargar PyAV/NumPy para reproducir audio.")
@@ -429,7 +600,7 @@ class MusicVoice:
                             -32768, 32767,
                         ).astype(self._np.int16)
                 if samples.size:
-                    await self._capture_pcm(source, frame, samples)
+                    await self._capture_pcm(source, frame, samples, capture_lock=capture_lock)
                     position += int(samples.size)
 
             for decoded in container.decode(stream):
@@ -687,6 +858,7 @@ class MusicVoice:
                 return
             track = state["music_queue"].popleft()
             state["music_current"] = track
+            playback_succeeded = False
             try:
                 local_path = track.get("local_path")
                 if local_path:
@@ -709,18 +881,24 @@ class MusicVoice:
                     pause_event=state["music_paused"],
                     fade_ms=int(state.get("transition_ms", 500)),
                     duck_state=state,
+                    capture_lock=state.get("capture_lock"),
                 )
+                playback_succeeded = not state["music_skip"].is_set()
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
-                log.warning("Music playback failed (%s)", type(exc).__name__)
+                log.warning(
+                    "Music playback failed (%s): %s",
+                    type(exc).__name__,
+                    str(exc)[:280] or "sin detalle",
+                )
                 await self._send(room_id, f"No pude reproducir «{track.get('title', 'la pista')}». Puedes elegir otra de la búsqueda.")
             finally:
                 skipped = state["music_skip"].is_set()
                 state["music_skip"].clear()
-                if not skipped and state.get("repeat_mode") == "one":
+                if playback_succeeded and not skipped and state.get("repeat_mode") == "one":
                     state["music_queue"].appendleft(track)
-                elif not skipped and state.get("repeat_mode") == "queue":
+                elif playback_succeeded and not skipped and state.get("repeat_mode") == "queue":
                     state["music_queue"].append(track)
                 state["music_current"] = None
 
@@ -882,6 +1060,8 @@ class MusicVoice:
                     try:
                         await self._play_audio_bytes(
                             state["speech_source"], data, state["tts_volume"], room_id=room_id,
+                            pause_event=state.get("music_paused"),
+                            capture_lock=state.get("capture_lock"),
                         )
                     finally:
                         if active is not None:
@@ -894,7 +1074,7 @@ class MusicVoice:
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
-                log.warning("TTS playback failed (%s)", type(exc).__name__)
+                log.warning("TTS playback failed (%s): %s", type(exc).__name__, str(exc)[:280] or "sin detalle")
             finally:
                 queue.task_done()
 
@@ -977,7 +1157,10 @@ class MusicVoice:
             if not state:
                 return True, "Stella no está conectada a una llamada. Usa !join."
             return True, (
-                "🎙️ VOZ ACTIVA\n"
+                "🎙️ ESTADO DE VOZ Y LIVEKIT\n"
+                f"Conexión: {state.get('connection_state', 'desconocida')} · "
+                f"{'conectada' if self._room_is_connected(state.get('room'), state) else 'sin conexión'}\n"
+                f"Pista de audio: {'publicada' if state.get('audio_publication_sid') else 'no publicada'}\n"
                 f"Lectura: {'activada' if state['tts_enabled'] else 'desactivada'}\n"
                 f"Cola TTS: {state['speech_queue'].qsize()}\n"
                 f"Voz: {state['tts_voice']} · Velocidad: {state['tts_rate']}\n"
