@@ -143,6 +143,10 @@ def _remove_vocative(text: str, start: int, end: int) -> str:
     result = re.sub(r"\s+([,;:!?])", r"\1", result)
     result = re.sub(r"([,;:])(?:\s*[,;:])+", r"\1", result)
     result = re.sub(r"\s{2,}", " ", result)
+    # Punctuation-only remnants (e.g. "Stella?", "@Stella!") are a name call,
+    # not a question to send to the language model.
+    if not re.search(r"[\w]", result, flags=re.UNICODE):
+        return ""
     return result.strip(" ,;:—")
 
 
