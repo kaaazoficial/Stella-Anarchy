@@ -301,6 +301,192 @@ class StellaBot:
                 return target_uid, target_name[:80]
         return None
 
+    async def _playlist(self, room_id, uid, name, args, message):
+        action, _, rest = args.partition(" ")
+        action, rest = action.casefold().strip(), rest.strip()
+        if action in {"crear", "create"}:
+            ok = self.store.create_playlist(room_id, uid, rest)
+            await self._reply(room_id, "Playlist creada." if ok else "No se pudo crear. Nombre único, máximo 48 caracteres.", message)
+            return
+        if action in {"lista", "listar", "list"}:
+            rows = self.store.list_playlists(room_id, uid)
+            body = "\n".join(f"• {row['name']} · {row['tracks']} pistas" for row in rows) or "No tienes playlists en esta sala."
+            await self._reply(room_id, "🎶 TUS PLAYLISTS\n" + body, message)
+            return
+        if action in {"agregar", "añadir", "add"}:
+            playlist_name, separator, number_text = rest.partition("|")
+            try:
+                number = int(number_text.strip())
+            except ValueError:
+                number = 0
+            saved = self.voice.search_results.get(room_id) or {}
+            items = saved.get("items") or []
+            if not separator or saved.get("expires", 0) <= time.monotonic() or not 1 <= number <= len(items):
+                await self._reply(room_id, "Usa primero !dj buscar y después !playlist agregar <nombre> | <número>.", message)
+                return
+            result = self.store.add_playlist_track(room_id, uid, playlist_name.strip(), items[number - 1])
+            labels = {"ok": "Pista añadida.", "missing": "No existe esa playlist.", "full": "La playlist alcanzó 40 pistas.", "invalid": "El resultado no contiene metadatos válidos."}
+            await self._reply(room_id, labels.get(result, "No pude añadir la pista."), message)
+            return
+        if action in {"ver", "view"}:
+            tracks = self.store.playlist_tracks(room_id, uid, rest)
+            if not tracks:
+                await self._reply(room_id, "No existe esa playlist o está vacía.", message)
+                return
+            lines = [f"🎶 PLAYLIST · {rest}"]
+            lines.extend(f"{i}. {t['title']} — {t['creator']} · {t['license']}" for i, t in enumerate(tracks, 1))
+            await self._reply(room_id, "\n".join(lines), message)
+            return
+        if action in {"borrar", "eliminar", "delete"}:
+            ok = self.store.delete_playlist(room_id, uid, rest)
+            await self._reply(room_id, "Playlist eliminada." if ok else "No encontré esa playlist.", message)
+            return
+        if action in {"reproducir", "play"}:
+            tracks = self.store.playlist_tracks(room_id, uid, rest)
+            if not tracks:
+                await self._reply(room_id, "No existe esa playlist o está vacía.", message)
+                return
+            self.voice.search_results[room_id] = {"items": tracks, "expires": time.monotonic() + 600}
+            queued = 0
+            for index in range(1, len(tracks) + 1):
+                ok, _ = await self.voice.enqueue_track(room_id, index, enqueue=True)
+                if not ok:
+                    break
+                queued += 1
+            await self._reply(room_id, f"Playlist enviada a la cola: {queued} pista(s).", message)
+            return
+        await self._reply(room_id, "PLAYLISTS\n!playlist crear <nombre>\n!playlist lista\n!playlist agregar <nombre> | <número>\n!playlist ver|reproducir|borrar <nombre>", message)
+
+    async def _multimedia(self, room_id, uid, name, args, message):
+        kind, _, query = args.partition(" ")
+        if kind.casefold() not in {"imagen", "video", "audio"} or not query.strip():
+            await self._reply(room_id, "Uso: !multimedia imagen|video|audio <búsqueda>.", message)
+            return
+        await self._reply(room_id, await self.services.multimedia(kind, query), message)
+
+    async def _image_search(self, room_id, uid, name, args, message):
+        await self._reply(room_id, await self.services.multimedia("imagen", args), message)
+
+    async def _video_search(self, room_id, uid, name, args, message):
+        await self._reply(room_id, await self.services.multimedia("video", args), message)
+
+    async def _audio_search(self, room_id, uid, name, args, message):
+        await self._reply(room_id, await self.services.multimedia("audio", args), message)
+
+    async def _admin_panel(self, room_id, uid, name, args, message):
+        if not self._is_admin(uid):
+            await self._reply(room_id, "No tienes permisos para abrir el panel de administración.", message)
+            return
+        activity = self.store.activity_summary(room_id, days=1)
+        total = sum(int(row.get("total_messages", 0)) for row in activity)
+        antispam = self.store.get_setting(room_id, "antispam_enabled", "1") == "1"
+        await self._reply(room_id, f"✦ CENTRO DE ADMINISTRACIÓN · STELLA\nMensajes agregados recientes: {total}\nAdvertencias: {len(self.store.warnings(room_id))}\nEncuestas: {len(self.store.list_polls(room_id))}\nEventos: {len(self.store.list_events(room_id))}\nAntispam: {'activado' if antispam else 'desactivado'}\nUsa !actividad para el informe detallado.", message)
+
+    async def _sources(self, room_id, uid, name, args, message):
+        if not self._is_admin(uid):
+            await self._reply(room_id, "Solo un administrador puede consultar las fuentes.", message)
+            return
+        await self._reply(room_id, "FUENTES Y PROVEEDORES\n" + self.ai.status() + "\nInvestigación: DuckDuckGo, Wikipedia, Wikidata, GDELT, OpenAlex, Crossref, arXiv, Europe PMC, NASA, Internet Archive, MusicBrainz y Jamendo.\nMultimedia: Wikimedia Commons e Internet Archive.", message)
+
+    async def _metrics(self, room_id, uid, name, args, message):
+        if not self._is_admin(uid):
+            await self._reply(room_id, "Solo un administrador puede consultar las métricas.", message)
+            return
+        values = getattr(self, "metrics", {})
+        keys = ("webhook_events", "webhook_dispatch_completed", "webhook_dispatch_failures", "text_messages_received", "commands_received", "ai_requests")
+        await self._reply(room_id, "📊 MÉTRICAS DE STELLA\n" + "\n".join(f"{key}: {int(values.get(key, 0))}" for key in keys), message)
+
+    async def _autotest(self, room_id, uid, name, args, message):
+        if not self._is_admin(uid):
+            await self._reply(room_id, "Solo un administrador puede ejecutar el autotest.", message)
+            return
+        checks = [
+            ("calculadora", calculate("2 + 2") == "4"),
+            ("sugerencia de comandos", bool(suggest_command("aydu", {"ayuda", "ping"}))),
+            ("fecha", bool(datetime_text("America/Santiago"))),
+            ("perfil de usuario", self.store.get_profile(uid) is not None),
+        ]
+        passed = sum(1 for _, ok in checks if ok)
+        lines = [f"AUTOTEST STELLA · {passed}/{len(checks)} correctas"]
+        lines.extend(("✓ " if ok else "✗ ") + label for label, ok in checks)
+        await self._reply(room_id, "\n".join(lines), message)
+
+    async def _bot_profile(self, room_id, uid, name, args, message):
+        if not self._is_admin(uid):
+            await self._reply(room_id, "No tienes permisos para modificar el perfil de Stella.", message)
+            return
+        parts = args.split("|", 1)
+        display_name = parts[0].strip()
+        status = parts[1].strip() if len(parts) > 1 else None
+        if not 2 <= len(display_name) <= 32 or (status is not None and len(status) > 40):
+            await self._reply(room_id, "Uso: !perfilbot Nombre | Estado (estado opcional; usa - para borrarlo).", message)
+            return
+        result = await self.platform.request("PATCH", "/me", json_body={"name": display_name, "status": None if status == "-" else status, "commandPrefix": self.settings.command_prefix})
+        await self._reply(room_id, "Perfil de Stella actualizado." if result.get("ok") else f"No pude actualizar el perfil de Stella (HTTP {result.get('status')}).", message)
+
+    async def _music_volume(self, room_id, uid, name, args, message):
+        state = self.voice.rooms.get(room_id)
+        current = round(float(state.get("music_volume", 0.8)) * 100) if state else 80
+        if not args.strip():
+            await self._reply(room_id, f"Volumen musical actual: {current}%. Uso: !volumen <0-100>.", message)
+            return
+        try:
+            value = int(args.strip())
+        except ValueError:
+            await self._reply(room_id, "El volumen debe ser un número entre 0 y 100.", message)
+            return
+        await self._reply(room_id, await self.voice.set_music_volume(room_id, value), message)
+
+    async def _music_volume_up(self, room_id, uid, name, args, message):
+        state = self.voice.rooms.get(room_id)
+        current = round(float(state.get("music_volume", 0.8)) * 100) if state else 80
+        step = int(args.strip()) if args.strip().isdigit() else 10
+        await self._reply(room_id, await self.voice.set_music_volume(room_id, min(100, current + step)), message)
+
+    async def _music_volume_down(self, room_id, uid, name, args, message):
+        state = self.voice.rooms.get(room_id)
+        current = round(float(state.get("music_volume", 0.8)) * 100) if state else 80
+        step = int(args.strip()) if args.strip().isdigit() else 10
+        await self._reply(room_id, await self.voice.set_music_volume(room_id, max(0, current - step)), message)
+
+    async def _music_mute(self, room_id, uid, name, args, message):
+        await self._reply(room_id, await self.voice.set_music_volume(room_id, 0), message)
+
+    async def _tts_volume(self, room_id, uid, name, args, message):
+        state = self.voice.rooms.get(room_id)
+        if not state:
+            await self._reply(room_id, "No hay una llamada activa. Usa !join.", message)
+            return
+        if not args.strip():
+            await self._reply(room_id, f"Volumen de lectura: {round(float(state.get('tts_volume', 0.75))*100)}%.", message)
+            return
+        await self._reply(room_id, await self.voice.configure_tts(room_id, "volumen", args.strip()), message)
+
+    async def _tts_volume_up(self, room_id, uid, name, args, message):
+        state = self.voice.rooms.get(room_id)
+        if not state:
+            await self._reply(room_id, "No hay una llamada activa. Usa !join.", message)
+            return
+        current = round(float(state.get("tts_volume", 0.75)) * 100)
+        step = int(args.strip()) if args.strip().isdigit() else 10
+        await self._reply(room_id, await self.voice.configure_tts(room_id, "volumen", str(min(100, current + step))), message)
+
+    async def _tts_volume_down(self, room_id, uid, name, args, message):
+        state = self.voice.rooms.get(room_id)
+        if not state:
+            await self._reply(room_id, "No hay una llamada activa. Usa !join.", message)
+            return
+        current = round(float(state.get("tts_volume", 0.75)) * 100)
+        step = int(args.strip()) if args.strip().isdigit() else 10
+        await self._reply(room_id, await self.voice.configure_tts(room_id, "volumen", str(max(0, current - step))), message)
+
+    async def _tts_mute(self, room_id, uid, name, args, message):
+        state = self.voice.rooms.get(room_id)
+        if not state:
+            await self._reply(room_id, "No hay una llamada activa. Usa !join.", message)
+            return
+        await self._reply(room_id, await self.voice.configure_tts(room_id, "volumen", "0"), message)
+
     async def _spelling(self, room_id, uid, name, args, message):
         correction = detect_spanish_spelling_issues(args)
         if not correction:
