@@ -59,6 +59,6 @@ def test_send_message_stops_after_bounded_rate_limit_retries(monkeypatch):
         assert result is False
         assert len(calls) == 4
         assert len(sleeps) >= 3
-        assert all(delay >= 1 for delay in sleeps)
+        assert 2.0 in sleeps and 4.0 in sleeps and 8.0 in sleeps
 
     asyncio.run(scenario())
