@@ -1,4 +1,4 @@
-"""Privacy-safe Prometheus exposition for process-local Stella metrics."""
+"""Privacy-safe Prometheus exposition for process-local stella metrics."""
 from __future__ import annotations
 
 import math
@@ -204,19 +204,19 @@ def render_prometheus_metrics(
 
     Gauge(
         "stella_process_uptime_seconds",
-        "Seconds since this Stella process started.",
+        "Seconds since this stella process started.",
         registry=registry,
     ).set(_finite_number(uptime_seconds))
     if memory_bytes is not None:
         Gauge(
             "stella_process_memory_bytes",
-            "Resident memory used by the Stella process.",
+            "Resident memory used by the stella process.",
             registry=registry,
         ).set(_finite_number(memory_bytes))
     if cpu_percent is not None:
         Gauge(
             "stella_process_cpu_percent",
-            "CPU percentage reported for the Stella process.",
+            "CPU percentage reported for the stella process.",
             registry=registry,
         ).set(_finite_number(cpu_percent))
 
