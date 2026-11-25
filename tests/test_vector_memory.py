@@ -32,7 +32,7 @@ async def test_gemini_auth_failure_opens_circuit_and_stops_repeated_requests(mon
 
     await memory.index_message("room-1", "user-1", "Persona", "Este es un mensaje de prueba.")
     await memory.index_message("room-1", "user-1", "Persona", "Otro mensaje de prueba.")
-    results = await memory.search("room-1", "consulta semántica")
+    results = await memory.search("room-1", "consulta semántica", "user-1")
 
     assert fake_client.calls == 1
     assert results == []
@@ -102,3 +102,42 @@ async def test_qdrant_creates_payload_indexes_required_by_room_and_expiry_filter
     }
     assert memory.ready is True
     await memory.close()
+
+
+
+class ScopedSearchClient:
+    def __init__(self):
+        self.is_closed = False
+        self.payload = None
+
+    async def post(self, url, *, headers=None, json=None):
+        self.payload = json
+        request = httpx.Request("POST", url)
+        return httpx.Response(200, request=request, json={"result": []})
+
+    async def aclose(self):
+        self.is_closed = True
+
+
+@pytest.mark.asyncio
+async def test_vector_search_is_scoped_to_the_requesting_user(monkeypatch):
+    monkeypatch.setenv("QDRANT_URL", "https://qdrant.example")
+    monkeypatch.setenv("QDRANT_API_KEY", "qdrant-test")
+    monkeypatch.setenv("GEMINI_API_KEY", "gemini-test")
+
+    memory = VectorMemory()
+    memory.ready = True
+    memory._embed = lambda text, query=False: _fake_embedding()
+    fake_client = ScopedSearchClient()
+    memory.client = fake_client
+
+    await memory.search("room-1", "mi consulta", "user-42")
+
+    must = fake_client.payload["filter"]["must"]
+    assert {"key": "room_id", "match": {"value": "room-1"}} in must
+    assert {"key": "uid", "match": {"value": "user-42"}} in must
+    await memory.close()
+
+
+async def _fake_embedding():
+    return [0.0] * 768
