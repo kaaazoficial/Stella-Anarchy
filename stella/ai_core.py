@@ -24,7 +24,7 @@ AI_PUBLIC_COMMANDS = frozenset({
     # Ayuda, consulta e investigación
     "ayuda", "menu", "ping",
     "fecha", "zona", "miuid", "perfil", "puntos", "ranking", "actividad",
-    "ortografia", "analizartexto", "analizar",
+    "ortografia", "analizartexto", "analizatexto", "analizar",
     "investigar", "calcular", "traducir", "multimedia", "media", "imagen",
     "video", "audio",
     # Comunidad y perfiles propios
@@ -137,6 +137,7 @@ AI_COMMAND_CATALOG = {
     "investigar": "tema o pregunta: búsqueda pública con varias fuentes.",
     "calcular": "expresión: calculadora matemática segura, sin ejecutar código.",
     "analizartexto": "modo texto: resume, corrige, reescribe, extrae datos o detecta contradicciones.",
+    "analizatexto": "alias de analizartexto.",
     "analizar": "texto o enlace: inspección preliminar de enlaces y señales de riesgo.",
     "ortografia": "texto: sugerencias ortográficas conservadoras en español.",
     "ping": "sin argumentos: comprueba que Stella responde.",
