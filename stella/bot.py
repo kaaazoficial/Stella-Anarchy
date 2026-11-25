@@ -254,7 +254,7 @@ class StellaBot:
             "video": self._video_search, "audio": self._audio_search,
             "admin": self._admin_panel, "centro": self._admin_panel,
             "fuentes": self._sources, "metricas": self._metrics,
-            "autotest": self._autotest, "perfilbot": self._bot_profile,
+            "autotest": self._autotest, "perfilbot": self._bot_profile, "avatarbot": self._bot_avatar,
             "volumen": self._music_volume, "subirvolumen": self._music_volume_up,
             "bajarvolumen": self._music_volume_down, "silencio": self._music_mute,
             "volumenlectura": self._tts_volume, "subirvolumenlectura": self._tts_volume_up,
@@ -469,6 +469,24 @@ class StellaBot:
             return
         result = await self.platform.request("PATCH", "/me", json_body={"name": display_name, "status": None if status == "-" else status, "commandPrefix": self.settings.command_prefix})
         await self._reply(room_id, "Perfil de Stella actualizado." if result.get("ok") else f"No pude actualizar el perfil de Stella (HTTP {result.get('status')}).", message)
+
+    async def _bot_avatar(self, room_id, uid, name, args, message):
+        if not self._is_admin(uid):
+            await self._reply(room_id, "No tienes permisos para cambiar el avatar de Stella.", message)
+            return
+        if not args.strip():
+            await self._reply(room_id, "Uso: !avatarbot <URL HTTPS de imagen directa>. Formatos: PNG, JPG, WebP o GIF; máximo 512 KB. Hosts admitidos: Wikimedia Commons, Imgur, Unsplash y Pexels.", message)
+            return
+        try:
+            content, mime, details = await self.services.fetch_avatar_image(args.strip().strip("<>"))
+        except (ValueError, RuntimeError, httpx.HTTPError) as exc:
+            await self._reply(room_id, f"No pude validar el avatar: {str(exc)[:220]}", message)
+            return
+        result = await self.platform.upload_bytes("/me/icon", content, mime)
+        if result.get("ok"):
+            await self._reply(room_id, f"Avatar de Stella actualizado ({details['format']} · {details['width']}×{details['height']}).", message)
+        else:
+            await self._reply(room_id, f"Anarchy no aceptó el avatar (HTTP {result.get('status')}). No se aplicaron cambios.", message)
 
     async def _music_volume(self, room_id, uid, name, args, message):
         state = self.voice.rooms.get(room_id)
