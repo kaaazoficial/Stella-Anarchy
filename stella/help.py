@@ -39,9 +39,12 @@ def _sections(p: str):
         ]),
         ("4. MÚSICA, VOZ Y LECTURA", [
             f"▸ {p}join · {p}salirsala · {p}salas · {p}voz participantes|hablando|estado.",
-            f"▸ {p}dj buscar <tema> · resultados · reproducir|encolar <n> · cola · actual.",
+            f"▸ {p}dj buscar <tema> · resultados 1|2 · reproducir|encolar <n> · cola · actual.",
             f"▸ {p}dj pausa|reanudar|saltar|detener|volumen <0-100>|fuentes|ambiente <tema>.",
-            f"▸ {p}dj quitar <n>|mover <a> <b>|vaciar|repetir off|una|cola|favorito [n]|probar [ADMIN].",
+            f"▸ {p}dj quitar <n>|mover <a> <b>|vaciar|repetir off|una|cola.",
+            f"▸ {p}dj transicion <0-2000>|duck on|off|estado — Fundido y atenuación durante TTS.",
+            f"▸ {p}dj archivos|añadir <archivo> · {p}reproducir <archivo> — Audio local.",
+            f"▸ {p}dj favorito lista|guardar <n>|reproducir <n>|quitar <n>|probar [ADMIN].",
             f"▸ {p}playlist crear|lista|agregar|ver|reproducir|borrar.",
             f"▸ {p}volumen <0-100>|subirvolumen|bajarvolumen|silencio.",
             f"▸ {p}leer|noleer · {p}tts voces|probar|voz|velocidad|volumen|enlaces|menciones.",
@@ -55,6 +58,7 @@ def _sections(p: str):
         ("6. ADMINISTRACIÓN Y ESTADO", [
             f"▸ {p}estado · {p}fuentes · {p}metricas · {p}autotest · {p}centro.",
             f"▸ {p}admin resumen|actividad|antispam|avisos|historial.",
+            f"▸ Los controles del DJ favoritos y diagnóstico requieren [ADMIN].",
             f"▸ {p}antispam estado|on|off|limite N|ventana N|repeticiones N|enlaces N|menciones N.",
             f"▸ {p}advertir @usuario [motivo] · {p}advertencias [@usuario] · {p}quitaradvertencia ID.",
             f"▸ {p}respuestas estado|on|off · {p}respuesta añadir|lista|eliminar ID.",
