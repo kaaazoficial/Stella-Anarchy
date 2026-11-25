@@ -874,18 +874,24 @@ class StellaBot:
         await self._reply(room_id, await self.ai.translate(language, text), message)
 
     async def _ai(self, room_id, uid, name, args, message):
-        if args.casefold() in {"estado", "status"}:
+        action, _, query = args.partition(" ")
+        action = action.casefold().strip()
+        if action in {"estado", "status"}:
             await self._reply(room_id, self.ai.status(), message)
             return
-        if not args:
-            await self._reply(
-                room_id,
-                f"Uso: {self.settings.command_prefix}ia <consulta> o {self.settings.command_prefix}ia estado. "
-                "La petición se procesa sin guardarse como historial.",
-                message,
-            )
+        session_key = str(room_id) + ":" + str(uid)
+        if action in {"olvidar", "forget", "limpiar"}:
+            removed = self.ai.forget_session(session_key)
+            await self._reply(room_id, "Contexto temporal eliminado." if removed else "No había contexto temporal activo para esta sala.", message)
             return
-        answer = await self.ai.ask(args)
+        if action in {"ayuda", "help"}:
+            await self._reply(room_id, "🤖 ASISTENTE STELLA\\n!ia <consulta> o !asistente <consulta>\\n!ia preguntar <consulta> para formular una pregunta directa.\\n!ia estado consulta los proveedores.\\n!ia olvidar elimina el contexto temporal de esta sala.\\nEl contexto es volátil, dura como máximo cinco minutos y nunca se guarda en la base de datos.", message)
+            return
+        prompt = query.strip() if action in {"preguntar", "ask"} else args.strip()
+        if not prompt:
+            await self._reply(room_id, f"Uso: {self.settings.command_prefix}ia <consulta>, !ia estado o !ia olvidar.", message)
+            return
+        answer = await self.ai.ask(prompt, session_key=session_key)
         await self._reply(room_id, answer, message)
 
     async def _voice_command(self, room_id, uid, name, args, message):
