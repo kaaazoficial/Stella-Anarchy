@@ -190,6 +190,7 @@ class StellaBot:
         routes = {
             "ayuda": self._help_command, "help": self._help_command, "comandos": self._help_command,
             "ping": self._ping, "miuid": self._uid, "uid": self._uid,
+            "idbot": self._bot_id, "botid": self._bot_id, "identidadbot": self._bot_id,
             "azar": self._random, "frase": self._quote,
             "estado": self._status, "status": self._status,
             "advertir": self._warn, "warn": self._warn,
@@ -224,6 +225,24 @@ class StellaBot:
 
     async def _uid(self, room_id, uid, name, args, message):
         await self._reply(room_id, f"Tu UID de Anarchy es: {uid}", message)
+
+    async def _bot_id(self, room_id, uid, name, args, message):
+        if not self._is_admin(uid):
+            await self._reply(room_id, "Solo un administrador puede consultar la identidad técnica del bot.", message)
+            return
+        identity = await self.platform.get_bot_identity()
+        if not identity:
+            await self._reply(room_id, "No pude verificar la identidad de Stella con Anarchy. Revisa el token y los permisos de la API.", message)
+            return
+        bot_id = str(identity.get("botId") or identity.get("bot_id") or "").strip()
+        account_uid = str(identity.get("uid") or "").strip()
+        if not bot_id:
+            await self._reply(room_id, "Anarchy autenticó el token, pero no devolvió botId. No usaré el UID de cuenta como sustituto.", message)
+            return
+        response = f"ID de bot de Stella: {bot_id}"
+        if account_uid:
+            response += f"\nUID de cuenta asociado: {account_uid}"
+        await self._reply(room_id, response, message)
 
     async def _status(self, room_id, uid, name, args, message):
         if not self._is_admin(uid):
