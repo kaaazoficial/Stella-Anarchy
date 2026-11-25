@@ -157,6 +157,7 @@ class MusicVoice:
         self.rooms: dict[str, dict[str, Any]] = {}
         self.search_results: dict[str, dict[str, Any]] = {}
         self.connect_locks: dict[str, asyncio.Lock] = {}
+        self._leave_api_requested: set[str] = set()
         self._rtc = None
         self._av = None
         self._np = None
@@ -311,6 +312,7 @@ class MusicVoice:
                     if not result.get("ok"):
                         return False, f"Anarchy rechazó la entrada a la llamada (HTTP {result.get('status')})."
                     joined_api = True
+                    self._leave_api_requested.discard(thread_id)
                     grant = _payload_data(result)
                     room_url = str(grant.get("url") or "")
                     room_token = str(grant.get("token") or "")
@@ -327,6 +329,7 @@ class MusicVoice:
                         "audio_track": None,
                         "audio_publication_sid": None,
                         "capture_lock": asyncio.Lock(),
+                        "speech_done": asyncio.Event(),
                         "connected": False,
                         "connection_state": "connecting",
                         "connection_error": None,
@@ -353,6 +356,7 @@ class MusicVoice:
                         "created_at": time.monotonic(),
                     }
                     state["music_paused"].set()
+                    state["speech_done"].set()
                     self.rooms[thread_id] = state
 
                     def on_disconnected(*args):
@@ -476,13 +480,13 @@ class MusicVoice:
                 self.connect_locks.pop(thread_id, None)
 
     async def leave_room(self, room_id: str, *, request_leave: bool) -> None:
-        thread_id = str(room_id)
+        thread_id = str(room_id or "").strip()
+        if not thread_id:
+            return
         state = self.rooms.pop(thread_id, None)
         if state:
             state["connected"] = False
             state["connection_state"] = "disconnecting"
-            if request_leave:
-                state["_leave_requested"] = True
             current = asyncio.current_task()
             for key in ("music_task", "speech_task"):
                 task = state.get(key)
@@ -502,23 +506,30 @@ class MusicVoice:
                     log.exception("Could not disconnect Stella from LiveKit")
             await self._close_audio_sources(state)
 
-        if request_leave:
+        # Mark before awaiting the API call so concurrent disconnect callbacks
+        # cannot issue duplicate leave requests for the same room.
+        if request_leave and thread_id not in self._leave_api_requested:
+            self._leave_api_requested.add(thread_id)
             try:
                 result = await self.platform.request(
                     "POST", f"/live-rooms/{quote(thread_id, safe='')}/leave"
                 )
                 if not result.get("ok"):
+                    self._leave_api_requested.discard(thread_id)
                     log.warning(
                         "Anarchy voice leave returned HTTP %s for room %s.",
                         result.get("status"),
                         thread_id[:80],
                     )
             except Exception as exc:
+                self._leave_api_requested.discard(thread_id)
                 log.warning("Could not leave Anarchy voice room (%s).", type(exc).__name__)
 
         lock = self.connect_locks.get(thread_id)
         if lock is not None and not lock.locked():
             self.connect_locks.pop(thread_id, None)
+        if len(self._leave_api_requested) > 500:
+            self._leave_api_requested.clear()
 
     @staticmethod
     def _frame_samples(frame: Any, volume: float, np: Any):
@@ -577,7 +588,10 @@ class MusicVoice:
                 if skip_event is not None and skip_event.is_set():
                     return
                 if pause_event is not None:
-                    await pause_event.wait()
+                    if callable(pause_event):
+                        await pause_event()
+                    else:
+                        await pause_event.wait()
                 duck_active = bool(
                     duck_state
                     and duck_state.get("duck_enabled", True)
@@ -851,6 +865,19 @@ class MusicVoice:
         }
         return await self._queue_track(room_id, track, enqueue=enqueue)
 
+    @staticmethod
+    async def _wait_music_gate(state: dict[str, Any]) -> None:
+        """Keep music paused while TTS owns the shared LiveKit output track."""
+        paused = state.get("music_paused")
+        speech_done = state.get("speech_done")
+        while True:
+            if paused is not None:
+                await paused.wait()
+            if speech_done is not None:
+                await speech_done.wait()
+            if (paused is None or paused.is_set()) and (speech_done is None or speech_done.is_set()):
+                return
+
     async def _music_worker(self, room_id: str, state: dict[str, Any]) -> None:
         while self.rooms.get(room_id) is state and state.get("connected"):
             if not state["music_queue"]:
@@ -878,7 +905,7 @@ class MusicVoice:
                 await self._play_audio_bytes(
                     state["music_source"], data, state["music_volume"],
                     room_id=room_id, skip_event=state["music_skip"],
-                    pause_event=state["music_paused"],
+                    pause_event=lambda: self._wait_music_gate(state),
                     fade_ms=int(state.get("transition_ms", 500)),
                     duck_state=state,
                     capture_lock=state.get("capture_lock"),
@@ -1055,17 +1082,21 @@ class MusicVoice:
                     await communicator.save(path)
                     data = await asyncio.to_thread(lambda: open(path, "rb").read())
                     active = state.get("tts_active")
+                    speech_done = state.get("speech_done")
                     if active is not None:
                         active.set()
+                    if speech_done is not None:
+                        speech_done.clear()
                     try:
                         await self._play_audio_bytes(
                             state["speech_source"], data, state["tts_volume"], room_id=room_id,
-                            pause_event=state.get("music_paused"),
                             capture_lock=state.get("capture_lock"),
                         )
                     finally:
                         if active is not None:
                             active.clear()
+                        if speech_done is not None:
+                            speech_done.set()
                 finally:
                     try:
                         os.unlink(path)
