@@ -95,6 +95,7 @@ def _allowed_audio_url(url: str) -> bool:
         or host.endswith(".archive.org")
         or host == "jamendo.com"
         or host.endswith(".jamendo.com")
+        or host == "upload.wikimedia.org"
     )
     return (
         parsed.scheme == "https"
@@ -157,6 +158,8 @@ class MusicVoice:
         self.rooms: dict[str, dict[str, Any]] = {}
         self.search_results: dict[str, dict[str, Any]] = {}
         self.connect_locks: dict[str, asyncio.Lock] = {}
+        self.ready_events: dict[str, asyncio.Event] = {}
+        self.ready_failures: set[str] = set()
         self._leave_api_requested: set[str] = set()
         self._rtc = None
         self._av = None
@@ -216,6 +219,20 @@ class MusicVoice:
     @staticmethod
     def _room_id(room: dict[str, Any]) -> str:
         return str(room.get("threadId") or room.get("thread_id") or "").strip()
+
+    def notify_room_ready(self, room_id: str) -> None:
+        """Release a pending publisher when Anarchy emits room.ready."""
+        event = self.ready_events.get(str(room_id or "").strip())
+        if event is not None:
+            event.set()
+
+    def notify_room_ended(self, room_id: str) -> None:
+        """Fail a pending join immediately if the voice room closes."""
+        thread_id = str(room_id or "").strip()
+        event = self.ready_events.get(thread_id)
+        if event is not None:
+            self.ready_failures.add(thread_id)
+            event.set()
 
     @staticmethod
     def _room_is_connected(room: Any, state: dict[str, Any] | None = None) -> bool:
@@ -302,6 +319,9 @@ class MusicVoice:
                         f"Detalle técnico: {self._load_errors.get('livekit', 'error de carga')}."
                     )
 
+                ready_event = asyncio.Event()
+                self.ready_events[thread_id] = ready_event
+                self.ready_failures.discard(thread_id)
                 joined_api = False
                 stage = "create_room"
                 room = None
@@ -420,39 +440,63 @@ class MusicVoice:
                     if self.rooms.get(thread_id) is not state:
                         raise RuntimeError("LiveKit se desconectó durante la conexión.")
 
+                    # Anarchy emits room.ready only after the server-side voice room is prepared.
+                    # Publishing immediately after room.connect() can time out with PublishTrackError.
+                    stage = "wait_room_ready"
+                    await asyncio.wait_for(ready_event.wait(), timeout=20.0)
+                    if thread_id in self.ready_failures:
+                        raise RuntimeError("La llamada terminó antes de quedar lista para publicar audio.")
+                    if self.rooms.get(thread_id) is not state or not self._room_is_connected(room, state):
+                        raise RuntimeError("LiveKit se desconectó antes de que Anarchy marcara la sala como lista.")
+
                     state["connection_state"] = "connected"
                     state["connected"] = True
-                    stage = "create_audio_source"
-                    audio_source = self._rtc.AudioSource(
+                    stage = "create_audio_sources"
+                    music_source = self._rtc.AudioSource(
                         SAMPLE_RATE, CHANNELS, queue_size_ms=1000
                     )
-                    # One published microphone-source track carries both DJ and TTS audio.
-                    # Anarchy/LiveKit grants may reject multiple publications of the same source.
-                    state["audio_source"] = audio_source
-                    state["music_source"] = audio_source
-                    state["speech_source"] = audio_source
-                    audio_track = self._rtc.LocalAudioTrack.create_audio_track(
-                        "stella-audio", audio_source
+                    speech_source = self._rtc.AudioSource(
+                        SAMPLE_RATE, CHANNELS, queue_size_ms=100
                     )
-                    state["audio_track"] = audio_track
+                    state["audio_source"] = music_source
+                    state["music_source"] = music_source
+                    state["speech_source"] = speech_source
+                    music_track = self._rtc.LocalAudioTrack.create_audio_track(
+                        "stella-music", music_source
+                    )
+                    speech_track = self._rtc.LocalAudioTrack.create_audio_track(
+                        "stella-tts", speech_source
+                    )
+                    state["audio_track"] = music_track
+                    state["speech_audio_track"] = speech_track
 
-                    stage = "publish_audio"
-                    publication = await room.local_participant.publish_track(
-                        audio_track,
+                    stage = "publish_music"
+                    music_publication = await room.local_participant.publish_track(
+                        music_track,
                         self._rtc.TrackPublishOptions(
                             source=self._rtc.TrackSource.SOURCE_MICROPHONE
                         ),
                     )
-                    state["audio_publication_sid"] = getattr(publication, "sid", None)
+                    state["audio_publication_sid"] = getattr(music_publication, "sid", None)
+
+                    stage = "publish_speech"
+                    speech_publication = await room.local_participant.publish_track(
+                        speech_track,
+                        self._rtc.TrackPublishOptions(
+                            source=self._rtc.TrackSource.SOURCE_MICROPHONE
+                        ),
+                    )
+                    state["speech_publication_sid"] = getattr(speech_publication, "sid", None)
                     if self.rooms.get(thread_id) is not state or not self._room_is_connected(room, state):
-                        raise RuntimeError("La conexión LiveKit se perdió después de publicar el audio.")
+                        raise RuntimeError("La conexión LiveKit se perdió después de publicar los canales de audio.")
 
                     log.info(
-                        "LiveKit connected for room %s; one audio track published (sid=%s).",
+                        "LiveKit connected for room %s; music and TTS tracks published (music_sid=%s, speech_sid=%s).",
                         thread_id[:80],
                         str(state.get("audio_publication_sid") or "unavailable")[:80],
+                        str(state.get("speech_publication_sid") or "unavailable")[:80],
                     )
-                    return True, "Stella se unió a la llamada y publicó su canal de audio para música y lectura."
+                    return True, "Stella se unió a la llamada y publicó sus canales independientes de música y lectura."
                 except Exception as exc:
                     detail = str(exc or "").replace(room_token, "[redacted]")[:320]
                     log.warning(
@@ -476,6 +520,8 @@ class MusicVoice:
                             )
                     return False, f"No pude conectarme a LiveKit durante {stage} ({type(exc).__name__})."
         finally:
+            self.ready_events.pop(thread_id, None)
+            self.ready_failures.discard(thread_id)
             if self.rooms.get(thread_id) is None and not lock.locked():
                 self.connect_locks.pop(thread_id, None)
 
@@ -661,75 +707,309 @@ class MusicVoice:
         return data
 
     async def search_archive(self, query: str, limit: int = 5) -> list[dict[str, Any]]:
-        term = " ".join(re.findall(r"[\wáéíóúñü-]+", str(query or ""), flags=re.I)[:8])
-        if not term:
+        """Search Archive with token fallback; return only verified open-license audio."""
+        terms = re.findall(r"[\wáéíóúñü-]+", str(query or ""), flags=re.I)[:8]
+        if not terms:
             return []
-        lucene = f'mediatype:audio AND (title:"{term.replace(chr(34), "")}" OR subject:"{term.replace(chr(34), "")}")'
-        response = await self.http.get(
-            "https://archive.org/advancedsearch.php",
-            params={
-                "q": lucene,
-                "fl[]": ["identifier"],
-                "rows": max(10, min(30, limit * 4)),
-                "page": 1,
-                "output": "json",
-            },
-        )
-        response.raise_for_status()
-        docs = response.json().get("response", {}).get("docs", [])
+
+        groups: list[list[str]] = []
+        for group in (terms[:3], terms[3:6], terms[:1]):
+            if group and group not in groups:
+                groups.append(group)
+
         results: list[dict[str, Any]] = []
-        for doc in docs[:12]:
-            identifier = str(doc.get("identifier") or "")
+        seen_identifiers: set[str] = set()
+        semaphore = asyncio.Semaphore(3)
+
+        async def inspect_item(identifier: str) -> dict[str, Any] | None:
             if not re.fullmatch(r"[A-Za-z0-9._-]{1,120}", identifier):
-                continue
-            metadata_response = await self.http.get(f"https://archive.org/metadata/{quote(identifier, safe='')}")
-            if not metadata_response.is_success:
-                continue
-            payload = metadata_response.json()
-            metadata = payload.get("metadata") or {}
-            license_url = str(metadata.get("licenseurl") or metadata.get("license_url") or "")
-            license_label = _license_label(license_url)
-            if not license_label:
-                continue
-            candidates = []
-            for item in payload.get("files") or []:
-                if not isinstance(item, dict):
+                return None
+            async with semaphore:
+                try:
+                    metadata_response = await self.http.get(
+                        f"https://archive.org/metadata/{quote(identifier, safe='')}"
+                    )
+                    if not metadata_response.is_success:
+                        return None
+                    payload = metadata_response.json()
+                    if not isinstance(payload, dict):
+                        return None
+                    metadata = payload.get("metadata") or {}
+                    if not isinstance(metadata, dict):
+                        return None
+                    license_url = str(metadata.get("licenseurl") or metadata.get("license_url") or "")
+                    license_label = _license_label(license_url)
+                    if not license_label:
+                        return None
+
+                    candidates: list[tuple[int, str]] = []
+                    for item in payload.get("files") or []:
+                        if not isinstance(item, dict) or item.get("private") is True:
+                            continue
+                        filename = _safe_filename(str(item.get("name") or ""))
+                        if not filename:
+                            continue
+                        try:
+                            size = int(item.get("size") or 0)
+                        except (TypeError, ValueError, OverflowError):
+                            size = 0
+                        if size > MAX_TRACK_BYTES:
+                            continue
+                        candidates.append((size or MAX_TRACK_BYTES, filename))
+                    if not candidates:
+                        return None
+                    candidates.sort(key=lambda item: (item[0], item[1]))
+                    filename = candidates[0][1]
+
+                    server = str(payload.get("d1") or "").strip()
+                    directory = str(payload.get("dir") or "")
+                    host = (urlparse("https://" + server).hostname or "").casefold()
+                    safe_parts = [
+                        part for part in directory.strip("/").split("/")
+                        if part and part not in {".", ".."}
+                    ]
+                    if server and host.endswith(".archive.org") and safe_parts and directory.startswith("/"):
+                        base = "https://" + host + "/" + "/".join(quote(part, safe="") for part in safe_parts)
+                        audio_url = base + "/" + quote(filename, safe="")
+                    else:
+                        audio_url = (
+                            f"https://archive.org/download/{quote(identifier, safe='')}/"
+                            f"{quote(filename, safe='')}"
+                        )
+                    if not _allowed_audio_url(audio_url):
+                        return None
+                    return {
+                        "identifier": identifier,
+                        "title": _clean(metadata.get("title") or identifier),
+                        "creator": _clean(metadata.get("creator") or metadata.get("artist") or "Autor no indicado"),
+                        "license": license_label,
+                        "license_url": license_url,
+                        "item_url": f"https://archive.org/details/{quote(identifier, safe='')}",
+                        "url": audio_url,
+                        "source": "Internet Archive",
+                    }
+                except (httpx.HTTPError, ValueError, TypeError, KeyError, OverflowError):
+                    log.debug("Archive item validation failed for %s.", identifier, exc_info=True)
+                    return None
+
+        for group in groups:
+            clauses = [
+                f"{field}:{term}"
+                for term in group
+                for field in ("title", "subject", "description")
+            ]
+            lucene = "mediatype:audio AND (" + " OR ".join(clauses) + ")"
+            response = await self.http.get(
+                "https://archive.org/advancedsearch.php",
+                params={
+                    "q": lucene,
+                    "fl[]": ["identifier"],
+                    "rows": max(15, min(30, limit * 6)),
+                    "page": 1,
+                    "output": "json",
+                    "sort[]": "downloads desc",
+                },
+            )
+            response.raise_for_status()
+            payload = response.json()
+            docs = (payload.get("response") or {}).get("docs") or []
+            identifiers: list[str] = []
+            for doc in docs:
+                if not isinstance(doc, dict):
                     continue
-                filename = _safe_filename(str(item.get("name") or ""))
-                if not filename or item.get("private") is True:
+                identifier = str(doc.get("identifier") or "")
+                if identifier and identifier not in seen_identifiers:
+                    seen_identifiers.add(identifier)
+                    identifiers.append(identifier)
+            if not identifiers:
+                continue
+
+            checked = await asyncio.gather(
+                *(inspect_item(identifier) for identifier in identifiers[:max(12, limit * 4)]),
+                return_exceptions=True,
+            )
+            for track in checked:
+                if isinstance(track, dict):
+                    results.append(track)
+                    if len(results) >= limit:
+                        return results[:limit]
+        return results[:limit]
+
+    async def search_wikimedia(self, query: str, limit: int = 5) -> list[dict[str, Any]]:
+        """Search Wikimedia Commons and accept only audio with verified CC/PD metadata."""
+        terms = re.findall(r"[\wáéíóúñü-]+", str(query or ""), flags=re.I)[:5]
+        if not terms:
+            return []
+        groups = [terms[:3], terms[:1]]
+        results: list[dict[str, Any]] = []
+        seen_urls: set[str] = set()
+
+        for group in groups:
+            if not group:
+                continue
+            response = await self.http.get(
+                "https://commons.wikimedia.org/w/api.php",
+                params={
+                    "action": "query",
+                    "format": "json",
+                    "generator": "search",
+                    "gsrsearch": " ".join(group) + " filetype:audio",
+                    "gsrnamespace": 6,
+                    "gsrlimit": max(10, min(30, limit * 4)),
+                    "prop": "imageinfo",
+                    "iiprop": "url|size|mime|mediatype|extmetadata",
+                    "iiextmetadatafilter": "LicenseShortName|LicenseUrl|Artist|Credit|ObjectName",
+                },
+                headers={"Accept": "application/json", "User-Agent": "Stella-Anarchy/1.0 (licensed audio catalog)"},
+            )
+            response.raise_for_status()
+            pages = (response.json().get("query") or {}).get("pages") or {}
+            if not isinstance(pages, dict):
+                continue
+            for page in pages.values():
+                if not isinstance(page, dict):
                     continue
-                size = int(item.get("size") or 0) if str(item.get("size") or "").isdigit() else 0
+                title = str(page.get("title") or "")
+                if Path(title).suffix.casefold() not in AUDIO_EXTENSIONS:
+                    continue
+                info_list = page.get("imageinfo") or []
+                if not info_list or not isinstance(info_list[0], dict):
+                    continue
+                info = info_list[0]
+                mime = str(info.get("mime") or "").casefold()
+                media_type = str(info.get("mediatype") or "").upper()
+                if media_type not in {"", "AUDIO"} or (mime and not mime.startswith("audio/")):
+                    continue
+                try:
+                    size = int(info.get("size") or 0)
+                except (TypeError, ValueError, OverflowError):
+                    size = 0
                 if size > MAX_TRACK_BYTES:
                     continue
-                candidates.append((size or MAX_TRACK_BYTES, filename))
-            if not candidates:
+                metadata = info.get("extmetadata") or {}
+                if not isinstance(metadata, dict):
+                    continue
+
+                def meta_value(key: str) -> str:
+                    item = metadata.get(key) or {}
+                    return str(item.get("value") or "") if isinstance(item, dict) else str(item or "")
+
+                license_url = meta_value("LicenseUrl").strip()
+                license_label = _license_label(license_url)
+                short_license = meta_value("LicenseShortName").casefold()
+                if not license_label and ("public domain" in short_license or short_license == "pdm"):
+                    license_label = "Dominio público"
+                if not license_label and "cc0" in short_license:
+                    license_label = "CC0"
+                audio_url = str(info.get("url") or "").strip()
+                if not license_label or not _allowed_audio_url(audio_url) or audio_url in seen_urls:
+                    continue
+                item_url = str(info.get("descriptionurl") or "").strip()
+                if not item_url.startswith("https://commons.wikimedia.org/"):
+                    item_url = "https://commons.wikimedia.org/wiki/" + quote(title.replace(" ", "_"), safe=":/")
+                results.append({
+                    "identifier": str(page.get("pageid") or title),
+                    "title": _clean(meta_value("ObjectName") or title.removeprefix("File:")),
+                    "creator": _clean(meta_value("Artist") or meta_value("Credit") or "Autor no indicado"),
+                    "license": license_label,
+                    "license_url": license_url,
+                    "item_url": item_url,
+                    "url": audio_url,
+                    "source": "Wikimedia Commons",
+                })
+                seen_urls.add(audio_url)
+                if len(results) >= limit:
+                    return results[:limit]
+            if results:
+                break
+        return results[:limit]
+
+    async def search_openverse(self, query: str, limit: int = 5) -> list[dict[str, Any]]:
+        """Search Openverse's music catalog for CC0/PDM/CC-BY/CC-BY-SA audio."""
+        term = " ".join(re.findall(r"[\wáéíóúñü-]+", str(query or ""), flags=re.I)[:5])
+        if not term:
+            return []
+        response = await self.http.get(
+            "https://api.openverse.org/v1/audio/",
+            params={
+                "q": term,
+                "category": "music",
+                "license_type": "commercial",
+                "license": "cc0,pdm,by,by-sa",
+                "extension": "mp3,ogg,oga,flac,wav,m4a,aac,opus",
+                "length": "medium,long",
+                "page": 1,
+                "page_size": max(10, min(20, limit * 4)),
+                "filter_dead": "true",
+                "mature": "false",
+            },
+            headers={"Accept": "application/json", "User-Agent": "Stella-Anarchy/1.0 (licensed audio catalog)"},
+        )
+        response.raise_for_status()
+        payload = response.json()
+        records = payload.get("results") or []
+        labels = {
+            "cc0": "CC0 · Dominio público",
+            "pdm": "Public Domain Mark",
+            "by": "CC BY · Requiere atribución",
+            "by-sa": "CC BY-SA · Requiere atribución y compartir igual",
+        }
+        results: list[dict[str, Any]] = []
+        seen_urls: set[str] = set()
+        for item in records:
+            if not isinstance(item, dict):
                 continue
-            candidates.sort(key=lambda x: (x[0], x[1]))
-            filename = candidates[0][1]
-            server = str(payload.get("d1") or "")
-            directory = str(payload.get("dir") or "")
-            host = (urlparse("https://" + server).hostname or "").casefold()
-            safe_parts = [p for p in directory.strip("/").split("/") if p and p not in {".", ".."}]
-            if server and host.endswith(".archive.org") and safe_parts and directory.startswith("/"):
-                base = "https://" + host + "/" + "/".join(quote(p, safe="") for p in safe_parts)
-                audio_url = base + "/" + quote(filename, safe="")
-            else:
-                audio_url = f"https://archive.org/download/{quote(identifier, safe='')}/{quote(filename, safe='')}"
-            if not _allowed_audio_url(audio_url):
+            license_code = str(item.get("license") or "").casefold()
+            license_label = labels.get(license_code)
+            license_url = str(item.get("license_url") or "").strip()
+            if not license_label or not license_url.startswith("https://creativecommons.org/"):
                 continue
+            if _license_label(license_url) is None and license_code not in {"pdm"}:
+                continue
+            audio_url = str(item.get("url") or "").strip()
+            if not _allowed_audio_url(audio_url) or audio_url in seen_urls:
+                continue
+            try:
+                extension = Path(urlparse(audio_url).path).suffix.casefold()
+                duration_ms = int(item.get("duration") or 0)
+                size = int(item.get("filesize") or 0)
+            except (TypeError, ValueError, OverflowError):
+                continue
+            if extension not in AUDIO_EXTENSIONS or duration_ms < 30000 or size > MAX_TRACK_BYTES:
+                continue
+            try:
+                landing = urlparse(str(item.get("foreign_landing_url") or "").strip())
+                landing_port = landing.port
+            except (TypeError, ValueError):
+                continue
+            if (
+                landing.scheme != "https"
+                or not landing.hostname
+                or landing.username
+                or landing.password
+                or landing_port not in (None, 443)
+            ):
+                continue
+            title = _clean(item.get("title") or "Pista de Openverse")
+            creator = _clean(item.get("creator") or "Autor no indicado")
+            credit = _clean(item.get("attribution") or "")
+            if not credit:
+                credit = f"{title} — {creator} · {labels[license_code]} · {landing.geturl()}"
             results.append({
-                "identifier": identifier,
-                "title": _clean(metadata.get("title") or identifier),
-                "creator": _clean(metadata.get("creator") or metadata.get("artist") or "Autor no indicado"),
-                "license": license_label,
+                "identifier": str(item.get("id") or audio_url),
+                "title": title,
+                "creator": creator,
+                "license": labels[license_code],
                 "license_url": license_url,
-                "item_url": f"https://archive.org/details/{quote(identifier, safe='')}",
+                "item_url": landing.geturl(),
                 "url": audio_url,
-                "source": "Internet Archive",
+                "credit_line": credit,
+                "source": "Openverse",
             })
+            seen_urls.add(audio_url)
             if len(results) >= limit:
                 break
-        return results
+        return results[:limit]
 
     async def search_jamendo(self, query: str, limit: int = 4) -> list[dict[str, Any]]:
         client_id = os.getenv("JAMENDO_CLIENT_ID", "").strip()
@@ -775,40 +1055,61 @@ class MusicVoice:
         lookup = text
         if os.getenv("MUSIC_AI_SEARCH", "1").strip().casefold() not in {"0", "false", "off"}:
             try:
-                from stella.ai import StellaAI
-                # The main bot may inject its shared AI instance; avoid a new provider client here.
                 ai = getattr(self, "ai", None)
                 if ai:
                     lookup = await ai.optimize_music_query(text) or text
             except Exception:
                 log.info("Music query optimization skipped.")
+
+        providers = [
+            ("Internet Archive", self.search_archive, lookup, 5),
+            ("Wikimedia Commons", self.search_wikimedia, lookup, 5),
+            ("Openverse", self.search_openverse, lookup, 5),
+        ]
+        if os.getenv("JAMENDO_CLIENT_ID", "").strip():
+            providers.append(("Jamendo", self.search_jamendo, lookup, 4))
+
+        outcomes = await asyncio.gather(
+            *(searcher(term, limit) for _, searcher, term, limit in providers),
+            return_exceptions=True,
+        )
         results: list[dict[str, Any]] = []
         errors = 0
-        try:
-            results.extend(await self.search_archive(lookup, limit=5))
-        except (httpx.HTTPError, ValueError, RuntimeError) as exc:
-            errors += 1
-            log.info("Internet Archive search unavailable (%s)", type(exc).__name__)
-        try:
-            results.extend(await self.search_jamendo(lookup, limit=4))
-        except (httpx.HTTPError, ValueError, RuntimeError) as exc:
-            errors += 1
-            log.info("Jamendo search unavailable (%s)", type(exc).__name__)
-        # Preserve each catalog's exact result; do not silently replace a user choice.
-        unique = []
-        seen = set()
+        for (source_name, _, _, _), outcome in zip(providers, outcomes):
+            if isinstance(outcome, BaseException):
+                errors += 1
+                log.warning("Music catalog %s failed (%s).", source_name, type(outcome).__name__)
+                continue
+            if isinstance(outcome, list):
+                results.extend(item for item in outcome if isinstance(item, dict))
+
+        unique: list[dict[str, Any]] = []
+        seen_urls: set[str] = set()
         for item in results:
-            key = str(item.get("identifier") or item.get("url") or "")
-            if key and key not in seen:
-                seen.add(key)
+            url = str(item.get("url") or "").strip()
+            if url and url not in seen_urls:
+                seen_urls.add(url)
                 unique.append(item)
         unique = unique[:8]
         if not unique:
-            return False, "No encontré pistas con licencia abierta que pudiera validar. Prueba otro término." if errors < 2 else "Los catálogos de música no están disponibles en este momento."
+            if errors == len(providers):
+                return False, "Los catálogos de música no están disponibles en este momento. Intenta nuevamente más tarde."
+            return False, "No encontré pistas con licencia abierta que pudiera validar. Prueba con el nombre de un artista, canción o un género más concreto."
+
         self.search_results[room_id] = {"items": unique, "expires": time.monotonic() + 600}
-        lines = [f"🎧 RESULTADOS PARA: {text}", "Selecciona una pista con !dj reproducir <número> o añádela con !dj encolar <número>."]
+        lines = [
+            f"🎧 RESULTADOS PARA: {text}",
+            "Selecciona una pista con !dj reproducir <número> o añádela con !dj encolar <número>.",
+        ]
         for index, item in enumerate(unique, 1):
-            lines.append(f"{index}. {item['title']} — {item['creator']}\n{item['source']} · {item['license']}")
+            item_url = str(item.get("item_url") or "").strip()
+            credit = str(item.get("credit_line") or "").strip()
+            lines.append(
+                f"{index}. {item.get('title', 'Pista sin título')} — {item.get('creator', 'Autor no indicado')}\n"
+                f"{item.get('source', 'Catálogo público')} · {item.get('license', 'Licencia abierta')}"
+                + (f"\n{item_url}" if item_url else "")
+                + (f"\nCrédito: {credit}" if credit and credit not in item_url else "")
+            )
         return True, "\n".join(lines)
 
     async def _start_player(self, room_id: str, state: dict[str, Any]) -> None:
