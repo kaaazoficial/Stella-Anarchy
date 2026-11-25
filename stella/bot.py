@@ -62,6 +62,7 @@ _SILENCE_REQUESTS = frozenset({
 })
 _RESUME_REQUESTS = frozenset({
     "ya puedes hablar",
+    "ya puedes volver a hablar",
     "puedes hablar de nuevo",
     "puedes volver a hablar",
     "vuelve a hablar",
