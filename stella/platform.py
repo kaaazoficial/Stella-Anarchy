@@ -11,6 +11,7 @@ from urllib.parse import quote
 import httpx
 
 from stella.text import normalize_message_text
+from stella.audit import audit_event
 
 log = logging.getLogger("stella.platform")
 
@@ -228,6 +229,13 @@ class AnarchyClient:
                 )
                 if result.get("ok"):
                     message_id = self._extract_message_id(result.get("data"))
+                    audit_event(
+                        "chat.message.out",
+                        room_id=room_id,
+                        message_id=message_id,
+                        reply_id=reply_id,
+                        content=body.get("content", ""),
+                    )
                     if message_id:
                         self._remember_sent_message(room_id, message_id)
                     if return_message_id:
