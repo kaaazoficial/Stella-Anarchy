@@ -92,10 +92,14 @@ class StellaBot:
             return
         if kind == "plan":
             for step in result.get("steps", [])[:3]:
-                if not isinstance(step, dict):
+                if isinstance(step, str):
+                    invocation = step.strip()
+                elif isinstance(step, dict):
+                    invocation = " ".join(part for part in (str(step.get("command") or ""), str(step.get("args") or "")) if part)
+                else:
                     continue
-                invocation = " ".join(part for part in (str(step.get("command") or ""), str(step.get("args") or "")) if part)
-                await self._command(room_id, uid, name, invocation, message)
+                if invocation:
+                    await self._command(room_id, uid, name, invocation, message)
             return
         answer = str(result.get("answer") or "").strip()
         if answer:
