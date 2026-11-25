@@ -148,7 +148,7 @@ def should_execute_deterministic_fallback(
         return False
     raw = re.sub(r"\s+", " ", str(request_text or "")).strip()
     addressed = re.match(
-        r"^(?:oye[, ]+)?@?(?:katheryne|stella)(?:[, :]+|$)\s*(.*)$",
+        r"^(?:oye[, ]+)?@?stella(?:[, :]+|$)\s*(.*)$",
         raw,
         flags=re.IGNORECASE,
     )
@@ -190,7 +190,7 @@ def interpret_natural_request(value: str) -> str | None:
         return None
     # Procesar lenguaje natural únicamente cuando el usuario invoque a Stella.
     addressed = re.match(
-        r"^(?:oye[, ]+)?@?(?:katheryne|stella)(?:[, :]+|$)\s*(.*)$",
+        r"^(?:oye[, ]+)?@?stella(?:[, :]+|$)\s*(.*)$",
         raw,
         flags=re.IGNORECASE,
     )
