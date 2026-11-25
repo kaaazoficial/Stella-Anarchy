@@ -17,6 +17,7 @@ from stella.platform import AnarchyClient
 from stella.services import StellaServices
 from stella.music_voice import MusicVoice
 from stella.storage import Store
+from stella.extra_commands import calculate, datetime_text, CalculationError
 
 log = logging.getLogger("stella.bot")
 
@@ -43,7 +44,7 @@ class StellaBot:
         # Only hashes and timestamps are held here. Message text is not retained.
         self._recent: dict[tuple[str, str], deque[tuple[float, str]]] = defaultdict(deque)
         self._warned_until: dict[tuple[str, str], float] = {}
-        self._auto_reply_cooldown: dict[tuple[str, int], float] = {}
+        self._auto_reply_cooldown: dict[tuple[str, int], float] = {}\n        # Game sessions exist only in RAM and expire automatically.\n        self._game_sessions: dict[str, dict[str, Any]] = {}
 
     @staticmethod
     def _author(message: dict[str, Any]) -> tuple[str, str]:
@@ -188,7 +189,7 @@ class StellaBot:
         command = parts[0].casefold()
         args = parts[1].strip() if len(parts) > 1 else ""
         routes = {
-            "ayuda": self._help_command, "help": self._help_command, "comandos": self._help_command,
+            "ayuda": self._help_command, "help": self._help_command, "comandos": self._help_command, "menu": self._help_command,
             "ping": self._ping, "miuid": self._uid, "uid": self._uid,
             "idbot": self._bot_id, "botid": self._bot_id, "identidadbot": self._bot_id,
             "azar": self._random, "frase": self._quote,
@@ -198,24 +199,250 @@ class StellaBot:
             "quitaradvertencia": self._unwarn, "unwarn": self._unwarn,
             "antispam": self._antispam,
             "encuesta": self._poll, "poll": self._poll,
-            "evento": self._event, "event": self._event,
+            "evento": self._event, "eventos": self._event, "event": self._event,
             "actividad": self._activity,
             "respuesta": self._auto_reply, "respuestas": self._auto_reply,
             "traducir": self._translate, "translate": self._translate,
-            "ia": self._ai,
+            "ia": self._ai, "asistente": self._ai,
             "investigar": self._research, "investigate": self._research,
             "analizar": self._inspect,
+            "analizartexto": self._analyze_text,
+            "calcular": self._calculate,
+            "fecha": self._date_time, "zona": self._date_time,
+            "perfil": self._profile,
+            "interaccion": self._interaction_help,
+            "roast": self._roast, "ship": self._ship,
+            "trivia": self._trivia, "responder": self._trivia_answer,
+            "adivina": self._guess, "intento": self._guess_attempt,
+            "verdad": self._truth, "8ball": self._eight_ball,
+            "elige": self._choose, "chiste": self._joke, "reto": self._challenge,
             "join": self._voice_command, "salirsala": self._voice_command,
             "leer": self._voice_command, "noleer": self._voice_command,
             "voz": self._voice_command, "tts": self._voice_command,
             "dj": self._voice_command, "reproducir": self._voice_command,
         }
+        social_actions = {
+            "abrazo", "abrazar", "beso", "besar", "patada", "golpe", "cachetada",
+            "acariciar", "mimar", "morder", "consolar", "felicitar", "saludar",
+            "proteger", "bailar", "cosquillas", "chocar", "highfive", "ayudar",
+            "regalar", "acompañar", "asustar", "curar", "cargar", "empujar",
+            "regañar", "admirar", "apoyar", "dormir", "ignorar", "mirar", "invitar",
+        }
+        if command in social_actions:
+            message["_stella_social_action"] = command
+            await self._social_action(room_id, uid, name, args, message)
+            return
         handler = routes.get(command)
         if handler is None:
             await self._reply(room_id, f"No reconozco ese comando. Usa {self.settings.command_prefix}ayuda.", message)
             return
         message["_stella_command"] = command
         await handler(room_id, uid, name, args, message)
+
+    async def _calculate(self, room_id, uid, name, args, message):
+        try:
+            result = calculate(args)
+        except CalculationError as exc:
+            await self._reply(room_id, f"Uso: !calcular <operación>\\n{exc}", message)
+            return
+        await self._reply(room_id, f"🧮 {args[:160]} = {result}", message)
+
+    async def _date_time(self, room_id, uid, name, args, message):
+        zone = args.strip() if str(message.get("_stella_command") or "") == "zona" else "America/Santiago"
+        try:
+            result = datetime_text(zone)
+        except ValueError as exc:
+            await self._reply(room_id, str(exc), message)
+            return
+        await self._reply(room_id, result, message)
+
+    async def _analyze_text(self, room_id, uid, name, args, message):
+        mode, separator, content = args.partition(" ")
+        mode = mode.casefold().strip()
+        allowed = {"resumir", "corregir", "reescribir", "extraer", "contradicciones"}
+        if not separator or mode not in allowed or not content.strip():
+            await self._reply(room_id, "Uso: !analizartexto resumir|corregir|reescribir|extraer|contradicciones <texto>", message)
+            return
+        instructions = {
+            "resumir": "Resume el texto conservando sus ideas esenciales y sin añadir datos.",
+            "corregir": "Corrige ortografía, gramática y concordancia. Conserva el significado y el estilo.",
+            "reescribir": "Reescribe el texto con mayor claridad y naturalidad, sin cambiar la información.",
+            "extraer": "Extrae los datos, nombres, fechas y puntos importantes que aparezcan explícitamente.",
+            "contradicciones": "Identifica contradicciones internas. Distingue contradicciones reales de datos que simplemente no se relacionan.",
+        }[mode]
+        answer = await self.ai.ask(content[:5500], system=instructions)
+        await self._reply(room_id, answer, message)
+
+    async def _profile(self, room_id, uid, name, args, message):
+        author = message.get("author") or {}
+        nickname = str(author.get("nickname") or author.get("displayName") or name)[:80]
+        await self._reply(
+            room_id,
+            f"👤 PERFIL DE {nickname}\\nUID: {uid}\\nEsta vista muestra únicamente los datos disponibles en el evento actual.",
+            message,
+        )
+
+    async def _interaction_help(self, room_id, uid, name, args, message):
+        await self._reply(
+            room_id,
+            "INTERACCIONES SOCIALES\\n"
+            "Afecto: !abrazo, !beso, !acariciar, !mimar\\n"
+            "Físicas: !patada, !golpe, !cachetada, !morder, !empujar\\n"
+            "Apoyo: !consolar, !felicitar, !saludar, !proteger, !ayudar, !apoyar\\n"
+            "Sociales: !bailar, !cosquillas, !chocar, !acompañar\\n"
+            "Otras: !asustar, !curar, !cargar, !regañar, !admirar, !dormir, !ignorar, !mirar, !invitar, !regalar\\n"
+            "Uso: !abrazo @usuario",
+            message,
+        )
+
+    async def _social_action(self, room_id, uid, name, args, message):
+        target = args.strip()
+        if not target:
+            await self._reply(room_id, f"Uso: !{message.get('_stella_social_action')} @usuario", message)
+            return
+        action = str(message.get("_stella_social_action") or "").casefold()
+        labels = {
+            "abrazo": "le da un abrazo a", "abrazar": "le da un abrazo a",
+            "beso": "le da un beso a", "besar": "le da un beso a",
+            "patada": "le lanza una patada a", "golpe": "intenta golpear a",
+            "cachetada": "le da una cachetada a", "acariciar": "acaricia a",
+            "mimar": "mima a", "morder": "intenta morder a", "consolar": "consuela a",
+            "felicitar": "felicita a", "saludar": "saluda a", "proteger": "se pone delante de",
+            "bailar": "invita a bailar a", "cosquillas": "le hace cosquillas a",
+            "chocar": "choca los cinco con", "highfive": "choca los cinco con",
+            "ayudar": "ayuda a", "regalar": "le entrega un detalle a", "acompañar": "acompaña a",
+            "asustar": "intenta asustar a", "curar": "atiende a", "cargar": "carga a",
+            "empujar": "empuja a", "regañar": "regaña a", "admirar": "admira a",
+            "apoyar": "muestra su apoyo a", "dormir": "se queda dormido junto a",
+            "ignorar": "decide ignorar a", "mirar": "se queda mirando a", "invitar": "invita a",
+        }
+        await self._reply(room_id, f"✨ {name} {labels.get(action, 'interactúa con')} {target}.", message)
+
+    async def _roast(self, room_id, uid, name, args, message):
+        target = args.strip()
+        if not target:
+            await self._reply(room_id, "Uso: !roast @usuario", message)
+            return
+        lines = [
+            "tienes tanta suerte que hasta el azar te deja en visto.",
+            "tu sentido de orientación necesita un mapa para encontrar el botón de salir.",
+            "eres capaz de perder una discusión contra el autocorrector.",
+            "tu Wi-Fi tiene más estabilidad que tus planes.",
+        ]
+        await self._reply(room_id, f"🔥 {target}, {random.choice(lines)}", message)
+
+    async def _ship(self, room_id, uid, name, args, message):
+        names = [part.strip() for part in re.split(r"\\s*(?:\\+|,|\\by\\b)\\s*", args, flags=re.I) if part.strip()]
+        if len(names) != 2:
+            await self._reply(room_id, "Uso: !ship <persona 1> + <persona 2>", message)
+            return
+        import hashlib
+        digest = hashlib.sha256(("|".join(sorted(names, key=str.casefold))).casefold().encode("utf-8")).digest()
+        score = int.from_bytes(digest[:2], "big") % 101
+        await self._reply(room_id, f"💞 Compatibilidad de {names[0]} + {names[1]}: {score}%. Solo es un resultado recreativo.", message)
+
+    async def _choose(self, room_id, uid, name, args, message):
+        options = [item.strip() for item in args.split("|") if item.strip()]
+        if len(options) < 2:
+            options = [item.strip() for item in args.split(",") if item.strip()]
+        if len(options) < 2:
+            await self._reply(room_id, "Uso: !elige opción 1 | opción 2 | opción 3", message)
+            return
+        await self._reply(room_id, f"🎯 Elijo: {random.choice(options[:20])}", message)
+
+    async def _truth(self, room_id, uid, name, args, message):
+        prompts = [
+            "¿Qué pequeño detalle puede mejorar tu día?",
+            "¿Qué habilidad te gustaría aprender y por qué?",
+            "¿Qué canción nunca te cansas de escuchar?",
+            "¿Qué decisión te enseñó algo importante?",
+            "¿Qué lugar te gustaría conocer?",
+        ]
+        await self._reply(room_id, "💬 " + random.choice(prompts), message)
+
+    async def _eight_ball(self, room_id, uid, name, args, message):
+        if not args.strip():
+            await self._reply(room_id, "Uso: !8ball <pregunta>", message)
+            return
+        answers = ["Sí, parece probable.", "No lo veo claro.", "Las señales apuntan a que sí.", "Mejor espera un poco.", "No cuentes con ello.", "Todo indica que puede funcionar."]
+        await self._reply(room_id, "🎱 " + random.choice(answers), message)
+
+    async def _joke(self, room_id, uid, name, args, message):
+        jokes = [
+            "—¿Qué hace una abeja en el gimnasio? —¡Zum-ba!",
+            "—¿Cuál es el colmo de un electricista? —No encontrar su corriente de trabajo.",
+            "—¿Qué le dijo un bit al otro? —Nos vemos en el bus.",
+            "—¿Por qué el libro de matemáticas estaba triste? —Porque tenía demasiados problemas.",
+        ]
+        await self._reply(room_id, random.choice(jokes), message)
+
+    async def _challenge(self, room_id, uid, name, args, message):
+        challenges = [
+            "Escribe una historia usando solo cinco palabras.",
+            "Recomienda una canción que represente tu semana.",
+            "Describe tu personaje favorito sin decir su nombre.",
+            "Menciona tres cosas que te gustaría aprender.",
+        ]
+        await self._reply(room_id, "🎯 Reto: " + random.choice(challenges), message)
+
+    async def _trivia(self, room_id, uid, name, args, message):
+        now = time.monotonic()
+        questions = [
+            ("¿Cuántos lados tiene un hexágono?", ["5", "6", "7", "8"], 1),
+            ("¿Qué planeta es conocido como el planeta rojo?", ["Venus", "Marte", "Júpiter", "Mercurio"], 1),
+            ("¿Cuánto es 9 × 7?", ["56", "62", "63", "72"], 2),
+            ("¿Cuál es el océano más grande?", ["Atlántico", "Índico", "Ártico", "Pacífico"], 3),
+        ]
+        question = random.choice(questions)
+        self._game_sessions[room_id] = {"kind": "trivia", "expires": now + 900, "answer": question[2]}
+        options = "\\n".join(f"{i+1}. {value}" for i, value in enumerate(question[1]))
+        await self._reply(room_id, f"🧠 TRIVIA\\n{question[0]}\\n{options}\\nResponde con !responder <1-4>. Tienes 15 minutos.", message)
+
+    async def _trivia_answer(self, room_id, uid, name, args, message):
+        game = self._game_sessions.get(room_id)
+        if not game or game.get("kind") != "trivia" or game.get("expires", 0) < time.monotonic():
+            self._game_sessions.pop(room_id, None)
+            await self._reply(room_id, "No hay una trivia activa. Inicia una con !trivia.", message)
+            return
+        try:
+            answer = int(args.strip()) - 1
+        except ValueError:
+            await self._reply(room_id, "Responde con un número del 1 al 4.", message)
+            return
+        if answer == game["answer"]:
+            await self._reply(room_id, f"✅ ¡Correcto, {name}!", message)
+            self._game_sessions.pop(room_id, None)
+        else:
+            await self._reply(room_id, "❌ Esa no es la respuesta. Puedes intentarlo otra vez.", message)
+
+    async def _guess(self, room_id, uid, name, args, message):
+        self._game_sessions[room_id] = {"kind": "guess", "expires": time.monotonic() + 900, "answer": random.randint(1, 20), "attempts": 0}
+        await self._reply(room_id, "🔢 He pensado un número del 1 al 20. Tienes seis intentos: !intento <número>.", message)
+
+    async def _guess_attempt(self, room_id, uid, name, args, message):
+        game = self._game_sessions.get(room_id)
+        if not game or game.get("kind") != "guess" or game.get("expires", 0) < time.monotonic():
+            self._game_sessions.pop(room_id, None)
+            await self._reply(room_id, "No hay una adivinanza activa. Inicia una con !adivina.", message)
+            return
+        try:
+            value = int(args.strip())
+        except ValueError:
+            await self._reply(room_id, "Indica un número entero del 1 al 20.", message)
+            return
+        if not 1 <= value <= 20:
+            await self._reply(room_id, "El número debe estar entre 1 y 20.", message)
+            return
+        game["attempts"] += 1
+        if value == game["answer"]:
+            await self._reply(room_id, f"🎉 ¡Correcto, {name}! Encontraste el número en {game['attempts']} intentos.", message)
+            self._game_sessions.pop(room_id, None)
+        elif game["attempts"] >= 6:
+            await self._reply(room_id, f"Se acabaron los intentos. El número era {game['answer']}.", message)
+            self._game_sessions.pop(room_id, None)
+        else:
+            hint = "mayor" if value < game["answer"] else "menor"
+            await self._reply(room_id, f"Prueba otra vez: el número es {hint}. Intentos: {game['attempts']}/6.", message)
 
     async def _help_command(self, room_id, uid, name, args, message):
         await self._reply(room_id, self._help(), message)
@@ -556,22 +783,39 @@ class StellaBot:
 
     def _help(self) -> str:
         p = self.settings.command_prefix
-        return (
-            "✦ STELLA · COMANDOS\n"
-            "GENERAL\n"
-            f"{p}ayuda · {p}ping · {p}miuid · {p}azar <mín> <máx> · {p}azar dado/moneda · {p}frase\n"
-            "COMUNIDAD\n"
-            f"{p}encuesta crear Pregunta | opción 1 | opción 2\n"
-            f"{p}encuesta votar <ID> <número> · {p}encuesta resultados <ID> · {p}encuesta cerrar <ID> · {p}encuesta lista\n"
-            f"{p}evento crear <fecha ISO con zona> | título | lugar | descripción\n"
-            f"{p}evento lista · {p}evento apuntarse <ID> · {p}evento cerrar <ID>\n"
-            "HERRAMIENTAS\n"
-            f"{p}ia <consulta> · {p}traducir <idioma> | <texto> · {p}investigar <tema> · {p}analizar <enlaces>\n"
-            "MODERACIÓN Y ADMINISTRACIÓN\n"
-            f"{p}advertir <UID> | <motivo> · {p}advertencias [UID] · {p}quitaradvertencia <ID>\n"
-            f"{p}antispam activar|desactivar · {p}actividad · {p}respuesta añadir|quitar|lista\n"
-            "VOZ Y MÚSICA\n"
-            f"{p}join · {p}salirsala · {p}leer · {p}noleer · {p}voz · {p}tts voces/voz/velocidad/volumen\n"
-            f"{p}dj buscar <tema> · {p}dj reproducir <número> · {p}dj encolar <número> · {p}dj cola\n"
-            f"{p}dj pausa/reanudar/saltar/detener · {p}dj volumen <0-100> · {p}ia estado"
-        )
+        sections = {
+            "GENERAL E IA": [
+                f"{p}ayuda [categoría] · {p}menu · {p}ping · {p}miuid · {p}perfil",
+                f"{p}asistente <consulta> · {p}ia <consulta> · {p}ia estado",
+                f"{p}investigar <tema> · {p}analizar <enlace> · {p}analizartexto <modo> <texto>",
+                f"{p}calcular <operación> · {p}traducir <idioma> | <texto> · {p}fecha · {p}zona <Area/Ciudad>",
+            ],
+            "SOCIAL Y COMUNIDAD": [
+                f"{p}interaccion · {p}abrazo · {p}beso · {p}acariciar · {p}consolar · {p}felicitar · {p}saludar",
+                f"{p}patada · {p}golpe · {p}cachetada · {p}morder · {p}empujar · {p}proteger · {p}ayudar · {p}apoyar",
+                f"{p}bailar · {p}cosquillas · {p}chocar · {p}acompañar · {p}asustar · {p}curar · {p}cargar · {p}regañar",
+                f"{p}admirar · {p}dormir · {p}ignorar · {p}mirar · {p}invitar · {p}regalar · {p}roast @usuario · {p}ship A + B",
+                f"{p}encuesta crear|votar|resultados|cerrar|lista · {p}evento crear|lista|apuntarse|cerrar",
+            ],
+            "JUEGOS": [
+                f"{p}trivia · {p}responder <1-4> · {p}adivina · {p}intento <número>",
+                f"{p}azar <mín> <máx> · {p}azar dado|moneda · {p}verdad · {p}8ball <pregunta> · {p}elige A | B",
+                f"{p}chiste · {p}frase · {p}reto",
+            ],
+            "MODERACIÓN Y ADMINISTRACIÓN": [
+                f"{p}advertir <UID> | <motivo> · {p}advertencias [UID] · {p}quitaradvertencia <ID>",
+                f"{p}antispam activar|desactivar · {p}actividad · {p}respuesta añadir|quitar|lista · {p}estado",
+            ],
+            "MÚSICA Y VOZ": [
+                f"{p}join · {p}salirsala · {p}voz · {p}leer · {p}noleer · {p}tts voces|voz|velocidad|volumen",
+                f"{p}dj buscar · reproducir · encolar · cola · pausa · reanudar · saltar · detener · volumen",
+            ],
+        }
+        lines = ["✦ STELLA · COMANDOS", f"Prefijo: {p}", "Usa !ayuda <categoría> para consultar un bloque."]
+        topic = args = None
+        for title, entries in sections.items():
+            if topic is not None and title.casefold() != topic:
+                continue
+            lines.append(f"\n{title}")
+            lines.extend(entries)
+        return "\\n".join(lines)
