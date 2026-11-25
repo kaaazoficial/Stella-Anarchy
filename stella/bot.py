@@ -5,6 +5,7 @@ import logging
 import random
 import re
 import time
+import httpx
 from collections import defaultdict, deque
 from datetime import datetime, timezone
 from typing import Any
