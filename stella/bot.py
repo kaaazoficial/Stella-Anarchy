@@ -243,7 +243,7 @@ class StellaBot:
         try:
             result = calculate(args)
         except CalculationError as exc:
-            await self._reply(room_id, f"Uso: !calcular <operación>\\n{exc}", message)
+            await self._reply(room_id, f"Uso: !calcular <operación>\n{exc}", message)
             return
         await self._reply(room_id, f"🧮 {args[:160]} = {result}", message)
 
@@ -278,19 +278,19 @@ class StellaBot:
         nickname = str(author.get("nickname") or author.get("displayName") or name)[:80]
         await self._reply(
             room_id,
-            f"👤 PERFIL DE {nickname}\\nUID: {uid}\\nEsta vista muestra únicamente los datos disponibles en el evento actual.",
+            f"👤 PERFIL DE {nickname}\nUID: {uid}\nEsta vista muestra únicamente los datos disponibles en el evento actual.",
             message,
         )
 
     async def _interaction_help(self, room_id, uid, name, args, message):
         await self._reply(
             room_id,
-            "INTERACCIONES SOCIALES\\n"
-            "Afecto: !abrazo, !beso, !acariciar, !mimar\\n"
-            "Físicas: !patada, !golpe, !cachetada, !morder, !empujar\\n"
-            "Apoyo: !consolar, !felicitar, !saludar, !proteger, !ayudar, !apoyar\\n"
-            "Sociales: !bailar, !cosquillas, !chocar, !acompañar\\n"
-            "Otras: !asustar, !curar, !cargar, !regañar, !admirar, !dormir, !ignorar, !mirar, !invitar, !regalar\\n"
+            "INTERACCIONES SOCIALES\n"
+            "Afecto: !abrazo, !beso, !acariciar, !mimar\n"
+            "Físicas: !patada, !golpe, !cachetada, !morder, !empujar\n"
+            "Apoyo: !consolar, !felicitar, !saludar, !proteger, !ayudar, !apoyar\n"
+            "Sociales: !bailar, !cosquillas, !chocar, !acompañar\n"
+            "Otras: !asustar, !curar, !cargar, !regañar, !admirar, !dormir, !ignorar, !mirar, !invitar, !regalar\n"
             "Uso: !abrazo @usuario",
             message,
         )
@@ -395,8 +395,8 @@ class StellaBot:
         ]
         question = random.choice(questions)
         self._game_sessions[room_id] = {"kind": "trivia", "expires": now + 900, "answer": question[2]}
-        options = "\\n".join(f"{i+1}. {value}" for i, value in enumerate(question[1]))
-        await self._reply(room_id, f"🧠 TRIVIA\\n{question[0]}\\n{options}\\nResponde con !responder <1-4>. Tienes 15 minutos.", message)
+        options = "\n".join(f"{i+1}. {value}" for i, value in enumerate(question[1]))
+        await self._reply(room_id, f"🧠 TRIVIA\n{question[0]}\n{options}\nResponde con !responder <1-4>. Tienes 15 minutos.", message)
 
     async def _trivia_answer(self, room_id, uid, name, args, message):
         game = self._game_sessions.get(room_id)
