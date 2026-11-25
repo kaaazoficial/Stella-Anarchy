@@ -854,7 +854,7 @@ class MusicVoice:
                 self.search_results.pop(room_id, None)
                 return "Los resultados caducaron. Usa !dj buscar <tema>."
             items = saved.get("items") or []
-            return "\\n".join([ "🎧 RESULTADOS DE BÚSQUEDA" ] + [f"{i}. {item.get('title')} — {item.get('creator')} · {item.get('source')}" for i, item in enumerate(items, 1)])
+            return "\n".join([ "🎧 RESULTADOS DE BÚSQUEDA" ] + [f"{i}. {item.get('title')} — {item.get('creator')} · {item.get('source')}" for i, item in enumerate(items, 1)])
         if action in {"ambiente", "mood"}:
             from stella.astra import resolve_music_mood
             ok, message = await self.search_music(room_id, resolve_music_mood(rest))
