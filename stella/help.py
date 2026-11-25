@@ -63,8 +63,10 @@ def _sections(p: str):
             f"▸ {p}advertir @usuario [motivo] · {p}advertencias [@usuario] · {p}quitaradvertencia ID.",
             f"▸ {p}respuestas estado|on|off · {p}respuesta añadir|lista|eliminar ID.",
             f"▸ {p}perfilbot <nombre> | <estado> · {p}avatarbot <URL HTTPS>.",
+            f"▸ {p}silenciarchat · {p}hablarchat · {p}despertar — Silencio global reversible [OWNER].",
+            f"▸ También puedes decir «No le hables a nadie» y luego «Ya puedes hablar».",
             f"▸ {p}eliminarmensajes — Solo mensajes propios identificados [ADMIN].",
-            "Los controles [ADMIN] requieren UID autorizado en ADMIN_UIDS o SINNER_UID.",
+            "Los controles [ADMIN] requieren UID autorizado en ADMIN_UIDS o SINNER_UID; [OWNER] requiere el UID exacto de SINNER_UID.",
         ]),
     ]
 
