@@ -30,7 +30,7 @@ Stella is an independent Python bot for Anarchy Apps. It has its own codebase, c
 - High-confidence command typo suggestions; suggestions are never executed automatically.
 - Reversible global chat silence, controlled only by the exact owner UID in `SINNER_UID`: say "No le hables a nadie" or use `!silenciarchat`; restore with "Ya puedes hablar", `!hablarchat` or `!despertar`. While silenced, Stella ignores messages, commands and voice reading; pending TTS is cancelled. The wake-up path remains available to the owner.
 - Exact UID-based administrator permissions. Admin aliases include `!admin`, `!centro`, `!nexus`, `!paneladmin`, `!sistema`, `!diagnostico`, `!rendimiento`, `!laboratorio`, `!fuentes`, `!saludfuentes`, `!metricas` and `!autotest`. Admins can update Stella's name/status with `!perfilbot` and set its avatar with `!avatarbot`; avatar uploads are restricted to direct HTTPS images from Wikimedia Commons, Imgur, Unsplash or Pexels, validated for real image format, dimensions and a 512 KB cap.
-- `/metrics` exposes aggregate Prometheus counters and can be protected with `PROMETHEUS_METRICS_TOKEN`; `/health` includes a SQLite integrity check.
+- `/metrics` exposes aggregate Prometheus counters and can be protected with `PROMETHEUS_METRICS_TOKEN`; `/health` reports privacy-safe component readiness and uptime, while `/ready` checks the required Anarchy credentials and SQLite before traffic is accepted.
 
 ## Privacy, data and retention
 
