@@ -64,13 +64,7 @@ def cleanup_database_retention(
             "DELETE FROM gifts WHERE sender_uid IN (SELECT uid FROM users WHERE last_seen < ?) "
             "OR target_uid IN (SELECT uid FROM users WHERE last_seen < ?) OR created_at < ?",
             (user_cutoff, user_cutoff, gift_cutoff),
-        ),
-        (
-            "wish_state",
-            "DELETE FROM wish_state WHERE uid IN (SELECT uid FROM users WHERE last_seen < ?)",
-            (user_cutoff,),
-        ),
-        (
+        ),        (
             "reward_claims",
             "DELETE FROM reward_claims WHERE uid IN (SELECT uid FROM users WHERE last_seen < ?)",
             (user_cutoff,),
