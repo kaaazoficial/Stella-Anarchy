@@ -129,3 +129,62 @@ def test_health_returns_service_unavailable_when_database_is_unhealthy(monkeypat
     assert result["checks"]["database"] == "database disk image is malformed"
     assert "private-token" not in response.body.decode()
     assert "private-secret" not in response.body.decode()
+
+
+
+def test_root_head_endpoint_returns_success():
+    response = asyncio.run(main.root_head())
+    assert response.status_code == 200
+    assert response.body == b""
+
+
+def test_health_head_endpoint_reflects_health_status(monkeypatch):
+    monkeypatch.setattr(
+        main,
+        "verify_sqlite_database",
+        lambda path: {"ok": True, "integrity": "ok"},
+    )
+    monkeypatch.setattr(
+        main,
+        "settings",
+        SimpleNamespace(
+            database_path="unused",
+            version="test",
+            bot_token="configured",
+            webhook_secret="configured",
+        ),
+    )
+    monkeypatch.setattr(
+        main,
+        "bot",
+        SimpleNamespace(vector_memory=None),
+    )
+    response = asyncio.run(main.health_head())
+    assert response.status_code == 200
+    assert response.body == b""
+
+
+def test_health_head_returns_503_when_database_is_unhealthy(monkeypatch):
+    monkeypatch.setattr(
+        main,
+        "verify_sqlite_database",
+        lambda path: {"ok": False, "integrity": "failed"},
+    )
+    monkeypatch.setattr(
+        main,
+        "settings",
+        SimpleNamespace(
+            database_path="unused",
+            version="test",
+            bot_token="configured",
+            webhook_secret="configured",
+        ),
+    )
+    monkeypatch.setattr(
+        main,
+        "bot",
+        SimpleNamespace(vector_memory=None),
+    )
+    response = asyncio.run(main.health_head())
+    assert response.status_code == 503
+    assert response.body == b""
