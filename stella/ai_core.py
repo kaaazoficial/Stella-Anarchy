@@ -307,6 +307,7 @@ def resolve_community_faq(question: str) -> str | None:
     """Resolve short, domain-independent conversational replies."""
     text = normalize_topic_text(question)
     text = re.sub(r"^(?:stella)\s+", "", text).strip()
+    text = re.sub(r"^[¿¡\\s]+|[?!.¡¿\\s]+$", "", text).strip()
     if text in {"hola", "buenas", "buenos dias", "buenas tardes", "buenas noches"}:
         return "¡Hola! Soy Stella. ¿En qué puedo ayudarte?"
     if text in {"gracias", "muchas gracias", "te lo agradezco"}:
