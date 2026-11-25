@@ -7,19 +7,6 @@ from typing import Any
 
 
 
-ef _is_genshin_command_request(command: str, raw: str, args: list[str]) -> bool:
-    """Prevent Genshin tools from capturing unrelated topics."""
-    if not args:
-        return True
-    if is_genshin_related_request(raw):
-        return True
-    if command == "lista" and _normalize(" ".join(args)) in {
-        "personaje", "personajes", "enemigo", "enemigos"
-    }:
-        return True
-    return False
-
-
 def _normalize(value: str) -> str:
     text = unicodedata.normalize("NFKD", str(value or "").casefold())
     text = "".join(ch for ch in text if not unicodedata.combining(ch))
@@ -218,7 +205,7 @@ def interpret_natural_request(value: str) -> str | None:
     # Resolve domain, entity type and requested information before generic
     # "qué es/quién es" routes. Strip "" as a scope qualifier;
     # it is not part of the entity's name.
-    game_intent = resolve_genshin_entity_intent(text)
+    game_intent = resolve__entity_intent(text)
     if game_intent:
         game_command, game_subject = game_intent
         return f"{game_command} {game_subject}"
@@ -273,10 +260,10 @@ def interpret_natural_request(value: str) -> str | None:
         (r"^(?:cual es la )?rotacion (?:de |para )?(.+)$", "rotacion"),
         (r"^(?:que materiales necesita|materiales para|materiales de) (.+)$", "materiales"),
         (r"^(?:que cobertura tiene|cobertura de|apartados de la guia de) (.+)$", "cobertura"),
-        (r"^(?:busca en genshin|busqueda de genshin|busca genshin) (.+)$", "buscargenshin"),
+        (r"^(?:busca en |busqueda de |busca ) (.+)$", "buscar"),
         (r"^(?:haz un roast a|roast a|insulta amistosamente a) (.+)$", "roast"),
         (r"^(?:crea|haz) (?:una )?encuesta (?:sobre )?(.+)$", "encuesta"),
-        (r"^(?:consulta|abre|busca en)?\s*(?:la )?enciclopedia(?: de genshin)? (?:sobre |de |del )?(.+)$", "enciclopedia"),
+        (r"^(?:consulta|abre|busca en)?\s*(?:la )?enciclopedia(?: de )? (?:sobre |de |del )?(.+)$", "enciclopedia"),
         (r"^(?:quien es|que es|que sabes de) (.+)$", "enciclopedia"),
         (r"^(?:reproduce|pon|busca musica de|busca la cancion) (.+)$", "dj buscar"),
         (r"^(?:recomiendame|ponme) musica (?:para|de) (.+)$", "dj ambiente"),
@@ -293,17 +280,17 @@ def interpret_natural_request(value: str) -> str | None:
             if command == "enciclopedia" and re.match(
                 r"^(?:quien es|que es|que sabes de)\b", text
             ):
-                # A trailing "en Genshin" describes the setting, not necessarily
+                # A trailing "en " describes the setting, not necessarily
                 # an encyclopedia entity. Require the subject itself to be a
                 # recognizable game entity/topic, otherwise let the AI answer.
                 subject_for_domain = re.sub(
-                    r"\s*(?:,|\b(?:en|de))\s*genshin(?: impact)?$",
+                    r"\s*(?:,|\b(?:en|de))\s*(?: impact)?$",
                     "",
                     _normalize(subject),
                 ).strip()
-                if not is_genshin_related_request(subject_for_domain):
+                if not is__related_request(subject_for_domain):
                     return f"asistente {raw[:300]}"
-            if command in frozenset() and not is_genshin_related_request(text):
+            if command in frozenset() and not is__related_request(text):
                 # Never route a generic app/platform/person question to .
                 continue
             return f"multimedia {command} {subject}" if command in {"imagen", "video", "audio"} else f"{command} {subject}"
