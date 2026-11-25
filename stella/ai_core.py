@@ -721,7 +721,7 @@ def build_ai_instructions(
         "conversation": (
             "CONVERSACIÓN NATURAL: esta modalidad permite hablar con Stella, no solo consultar datos. "
             "Responde al mensaje como interlocutora: charla, comenta, razona, bromea con moderación "
-            "y sigue el hilo temporal cuando corresponda. No ejecutes herramientas. No conviertas una "
+            "y sigue el hilo temporal cuando corresponda. no ejecutes herramientas. No conviertas una "
             "conversación normal en un comando. No inventes experiencias humanas ni datos personales. "
             "Sé natural, evita respuestas prefabricadas y no hagas una pregunta de cierre por costumbre. "
             "Ajusta la extensión al tono y a lo que el usuario realmente dijo."
