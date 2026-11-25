@@ -47,6 +47,7 @@ async def test_groq_is_used_when_gemini_fails(monkeypatch):
 def test_music_sources_are_restricted_to_supported_https_hosts():
     assert _allowed_audio_url("https://archive.org/download/item/audio.mp3")
     assert _allowed_audio_url("https://ia800000.us.archive.org/file.mp3")
+    assert _allowed_audio_url("https://upload.wikimedia.org/wikipedia/commons/a/audio.ogg")
     assert _allowed_audio_url("https://www.jamendo.com/track/123")
     assert not _allowed_audio_url("http://archive.org/download/item/audio.mp3")
     assert not _allowed_audio_url("https://youtube.com/watch?v=abc")
@@ -188,6 +189,7 @@ async def test_ensure_room_publishes_one_shared_audio_track_and_registers_events
             self.publications = []
         async def publish_track(self, track, options):
             assert self.room.connected
+            assert self.room.ready_received
             self.publications.append((track, options))
             return FakePublication()
 
@@ -196,6 +198,7 @@ async def test_ensure_room_publishes_one_shared_audio_track_and_registers_events
             self.callbacks = {}
             self.connected = False
             self.disconnect_calls = 0
+            self.ready_received = False
             self.local_participant = FakeParticipant(self)
         def on(self, event, callback):
             self.callbacks[event] = callback
@@ -206,6 +209,10 @@ async def test_ensure_room_publishes_one_shared_audio_track_and_registers_events
             assert options.auto_subscribe is False
             assert options.connect_timeout == 20.0
             self.connected = True
+            asyncio.get_running_loop().call_later(0.01, self.announce_ready)
+        def announce_ready(self):
+            self.ready_received = True
+            voice.notify_room_ready("thread-1")
         def isconnected(self):
             return self.connected
         async def disconnect(self):
@@ -229,10 +236,12 @@ async def test_ensure_room_publishes_one_shared_audio_track_and_registers_events
 
     assert ok
     state = voice.rooms["thread-1"]
-    assert state["music_source"] is state["speech_source"] is state["audio_source"]
-    assert len(room.local_participant.publications) == 1
+    assert state["music_source"] is state["audio_source"]
+    assert state["speech_source"] is not state["music_source"]
+    assert len(room.local_participant.publications) == 2
     assert state["audio_publication_sid"] == "publication-1"
-    assert "canal de audio" in message
+    assert state["speech_publication_sid"] == "publication-1"
+    assert "canales independientes" in message
 
     await voice.leave_room("thread-1", request_leave=True)
     assert room.disconnect_calls == 1
@@ -321,6 +330,7 @@ async def test_failed_audio_publication_disconnects_and_releases_source():
             self.callbacks[event] = callback
         async def connect(self, url, token, options=None):
             self.connected = True
+            asyncio.get_running_loop().call_later(0.01, voice.notify_room_ready, "thread-1")
         def isconnected(self):
             return self.connected
         async def disconnect(self):
@@ -343,10 +353,10 @@ async def test_failed_audio_publication_disconnects_and_releases_source():
     ok, message = await voice.ensure_room("thread-1")
 
     assert not ok
-    assert "publish_audio" in message
+    assert "publish_music" in message
     assert room.disconnect_calls == 1
-    assert len(FakeSource.instances) == 1
-    assert FakeSource.instances[0].closed
+    assert len(FakeSource.instances) == 2
+    assert all(source.closed for source in FakeSource.instances)
     assert platform.calls.count(("POST", "/live-rooms/thread-1/leave")) == 1
     assert not voice.rooms
     await voice.http.aclose()
@@ -367,6 +377,137 @@ async def test_music_waits_while_tts_owns_shared_audio_track():
 
     state["speech_done"].set()
     await asyncio.wait_for(task, timeout=0.2)
+
+
+
+@pytest.mark.asyncio
+async def test_room_ready_event_is_routed_to_livekit_waiter():
+    from stella.bot import StellaBot
+
+    received = []
+
+    class FakeVoice:
+        def notify_room_ready(self, room_id):
+            received.append(room_id)
+
+    bot = object.__new__(StellaBot)
+    bot.voice = FakeVoice()
+    await bot.handle_event({"type": "room.ready", "threadId": "thread-ready"})
+
+    assert received == ["thread-ready"]
+
+
+@pytest.mark.asyncio
+async def test_archive_search_uses_fallback_terms_and_checks_license():
+    class FakeResponse:
+        def __init__(self, payload):
+            self.payload = payload
+        @property
+        def is_success(self):
+            return True
+        def raise_for_status(self):
+            return None
+        def json(self):
+            return self.payload
+
+    class FakeHTTP:
+        def __init__(self):
+            self.search_queries = []
+        async def get(self, url, params=None, **kwargs):
+            if "advancedsearch.php" in url:
+                self.search_queries.append(params["q"])
+                return FakeResponse({"response": {"docs": [{"identifier": "open-reggaeton"}]}})
+            return FakeResponse({
+                "metadata": {
+                    "title": "Reggaeton instrumental",
+                    "creator": "Independent artist",
+                    "licenseurl": "https://creativecommons.org/licenses/by/4.0/",
+                },
+                "files": [{"name": "reggaeton.mp3", "size": "2048"}],
+                "d1": "ia800000.us.archive.org",
+                "dir": "/1/items/open-reggaeton",
+            })
+
+    voice = object.__new__(MusicVoice)
+    voice.http = FakeHTTP()
+    tracks = await voice.search_archive(
+        "Reggaeton Latin urban high tempo bass drums synthesizers", limit=3
+    )
+
+    assert tracks and tracks[0]["license"] == "Creative Commons BY"
+    assert "title:Reggaeton" in voice.http.search_queries[0]
+    assert 'title:"Reggaeton Latin urban high tempo bass drums synthesizers"' not in voice.http.search_queries[0]
+    assert tracks[0]["url"].startswith("https://ia800000.us.archive.org/")
+
+
+@pytest.mark.asyncio
+async def test_wikimedia_search_accepts_only_audio_with_open_license():
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+        def json(self):
+            return {"query": {"pages": {"10": {
+                "pageid": 10,
+                "title": "File:Open instrumental.ogg",
+                "imageinfo": [{
+                    "url": "https://upload.wikimedia.org/wikipedia/commons/a/audio.ogg",
+                    "descriptionurl": "https://commons.wikimedia.org/wiki/File:Open_instrumental.ogg",
+                    "mime": "audio/ogg",
+                    "mediatype": "AUDIO",
+                    "size": 4096,
+                    "extmetadata": {
+                        "LicenseUrl": {"value": "https://creativecommons.org/licenses/by/4.0/"},
+                        "LicenseShortName": {"value": "CC BY 4.0"},
+                        "Artist": {"value": "Independent artist"},
+                        "ObjectName": {"value": "Open instrumental"},
+                    },
+                }],
+            }}}}
+
+    class FakeHTTP:
+        async def get(self, url, **kwargs):
+            assert url == "https://commons.wikimedia.org/w/api.php"
+            return FakeResponse()
+
+    voice = object.__new__(MusicVoice)
+    voice.http = FakeHTTP()
+    tracks = await voice.search_wikimedia("instrumental study")
+
+    assert len(tracks) == 1
+    assert tracks[0]["source"] == "Wikimedia Commons"
+    assert tracks[0]["license"] == "Creative Commons BY"
+
+
+@pytest.mark.asyncio
+async def test_dj_search_uses_available_catalogs_without_api_keys(monkeypatch):
+    monkeypatch.setenv("MUSIC_AI_SEARCH", "0")
+    monkeypatch.delenv("JAMENDO_CLIENT_ID", raising=False)
+    voice = object.__new__(MusicVoice)
+    voice.search_results = {}
+    calls = []
+
+    async def archive(query, limit):
+        calls.append(("archive", query, limit))
+        return [{"url": "https://archive.org/a.mp3", "identifier": "a", "title": "A", "creator": "Artist", "license": "CC0", "source": "Archive"}]
+
+    async def commons(query, limit):
+        calls.append(("commons", query, limit))
+        return [{"url": "https://upload.wikimedia.org/audio.ogg", "identifier": "b", "title": "B", "creator": "Artist", "license": "CC BY", "source": "Commons"}]
+
+    async def openverse(query, limit):
+        calls.append(("openverse", query, limit))
+        return []
+
+    voice.search_archive = archive
+    voice.search_wikimedia = commons
+    voice.search_openverse = openverse
+
+    ok, message = await voice.search_music("thread-1", "instrumental study")
+
+    assert ok
+    assert {item[0] for item in calls} == {"archive", "commons", "openverse"}
+    assert "Archive" in message and "Commons" in message
+    assert len(voice.search_results["thread-1"]["items"]) == 2
 
 
 @pytest.mark.asyncio

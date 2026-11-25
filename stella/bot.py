@@ -231,7 +231,11 @@ class StellaBot:
         room_id = str(event.get("threadId") or event.get("thread_id") or "").strip()
         if not room_id:
             return
+        if event_type == "room.ready":
+            self.voice.notify_room_ready(room_id)
+            return
         if event_type in {"room.end", "room.kicked", "thread.removed"}:
+            self.voice.notify_room_ended(room_id)
             self._forget_room(room_id)
             clear_voice_room(room_id)
             await self.voice.leave_room(room_id, request_leave=False)
