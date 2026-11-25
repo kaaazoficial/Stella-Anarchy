@@ -12,7 +12,7 @@ from typing import Any
 
 import httpx
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import Response
+from fastapi.responses import JSONResponse, Response
 
 from stella.bot import StellaBot
 from stella.boot import IMPORT_STARTED_AT
@@ -176,8 +176,50 @@ async def root() -> dict[str, str]:
 
 @app.get("/health")
 async def health() -> dict[str, Any]:
+    """Liveness and privacy-safe component diagnostics for Render and operators."""
     database = verify_sqlite_database(settings.database_path)
-    return {"ok": bool(database.get("ok")), "bot": "Stella", "version": settings.version, "database": database["integrity"]}
+    database_ok = bool(database.get("ok"))
+    vector_memory = getattr(bot, "vector_memory", None)
+    vector_status = (
+        str(getattr(vector_memory, "status", "no inicializada"))
+        if vector_memory is not None else "no inicializada"
+    )
+    ai_configured = bool(
+        os.getenv("GEMINI_API_KEY", "").strip()
+        or os.getenv("GROQ_API_KEY", "").strip()
+    )
+    return {
+        "ok": database_ok,
+        "status": "healthy" if database_ok else "unhealthy",
+        "bot": "Stella",
+        "version": settings.version,
+        "uptime_seconds": max(0, int(time.monotonic() - PROCESS_STARTED_AT)),
+        "checks": {
+            "database": str(database.get("integrity", "unknown")),
+            "anarchy_token_configured": bool(settings.bot_token),
+            "webhook_secret_configured": bool(settings.webhook_secret),
+            "ai_provider_configured": ai_configured,
+            "vector_memory": vector_status,
+        },
+    }
+
+
+@app.get("/ready")
+async def readiness():
+    """Readiness check: required Anarchy credentials and SQLite must be available."""
+    database = verify_sqlite_database(settings.database_path)
+    missing: list[str] = []
+    if not settings.bot_token:
+        missing.append("ANARCHY_BOT_TOKEN")
+    if not settings.webhook_secret:
+        missing.append("ANARCHY_WEBHOOK_SECRET")
+    if not database.get("ok"):
+        missing.append("database")
+    ready = not missing
+    return JSONResponse(
+        status_code=200 if ready else 503,
+        content={"ready": ready, "missing": missing},
+    )
 
 
 @app.get("/metrics")
