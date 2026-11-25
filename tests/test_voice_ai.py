@@ -14,7 +14,7 @@ from stella.music_voice import (
 )
 
 
-def test_stella_models_match_the_configured_katheryne_defaults(monkeypatch):
+def test_stella_models_use_configured_defaults(monkeypatch):
     monkeypatch.delenv("GEMINI_MODEL", raising=False)
     monkeypatch.delenv("GROQ_MODEL", raising=False)
     monkeypatch.setenv("GEMINI_API_KEY", "gemini-test")
