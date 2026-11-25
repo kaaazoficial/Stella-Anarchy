@@ -27,6 +27,7 @@ Stella is an independent Python bot for Anarchy Apps. It has its own codebase, c
 - Music is not downloaded from YouTube or arbitrary URLs. Tracks must come from the supported catalogues and pass source/license validation. DJ controls include repeat, queue editing, ambience search, favorites, and source diagnostics.
 - Profiles and social economy: `!perfil`, `!bio`, `!miestado`, `!puntos`, `!ranking` (`!top`), `!diario` (`!daily`), `!trabajar`, `!pagar` (`!transferir`), `!regalo`, `!muro`, `!afinidad` (`!amistad`, `!reputacion`) and `!duelo`.
 - High-confidence command typo suggestions; suggestions are never executed automatically.
+- Reversible global chat silence, controlled only by the exact owner UID in `SINNER_UID`: say "No le hables a nadie" or use `!silenciarchat`; restore with "Ya puedes hablar", `!hablarchat` or `!despertar`. While silenced, Stella ignores messages, commands and voice reading; pending TTS is cancelled. The wake-up path remains available to the owner.
 - Exact UID-based administrator permissions. Admin aliases include `!admin`, `!centro`, `!nexus`, `!paneladmin`, `!sistema`, `!diagnostico`, `!rendimiento`, `!laboratorio`, `!fuentes`, `!saludfuentes`, `!metricas` and `!autotest`. Admins can update Stella's name/status with `!perfilbot` and set its avatar with `!avatarbot`; avatar uploads are restricted to direct HTTPS images from Wikimedia Commons, Imgur, Unsplash or Pexels, validated for real image format, dimensions and a 512 KB cap.
 - `/metrics` exposes aggregate Prometheus counters and can be protected with `PROMETHEUS_METRICS_TOKEN`; `/health` includes a SQLite integrity check.
 
@@ -59,6 +60,7 @@ Set these variables in the hosting provider. Never commit real credentials.
 | `ANARCHY_BOT_TOKEN` | Yes | Anarchy bot API token |
 | `ANARCHY_WEBHOOK_SECRET` | Yes | HMAC webhook signing secret |
 | `ADMIN_UIDS` | No | Administrator UIDs separated by comma, semicolon or newline |
+| `SINNER_UID` | No | Exact owner UID; exclusive access to global chat silence controls |
 | `COMMAND_PREFIX` | No | Command prefix; defaults to `!` |
 | `ANARCHY_API_BASE` | No | Anarchy API base URL |
 | `DATA_DIR` | No | SQLite directory; defaults to `./data` |

@@ -766,6 +766,30 @@ class MusicVoice:
         state["music_volume"] = target / 100.0
         return f"Volumen musical ajustado a {target}%."
 
+    async def stop_all_speech(self) -> None:
+        """Stop queued/current TTS in every connected room without disabling its settings."""
+        current = asyncio.current_task()
+        for room_id, state in list(self.rooms.items()):
+            queue = state.get("speech_queue")
+            if queue is not None:
+                while not queue.empty():
+                    try:
+                        queue.get_nowait()
+                        queue.task_done()
+                    except asyncio.QueueEmpty:
+                        break
+            task = state.get("speech_task")
+            if task is not None and task is not current and not task.done():
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+                except Exception:
+                    log.exception("Could not stop a speech worker during global silence")
+            if state.get("speech_task") is task:
+                state["speech_task"] = None
+
     async def enable_reading(self, room_id: str, enabled: bool) -> tuple[bool, str]:
         if enabled:
             ok, message = await self.ensure_room(room_id)

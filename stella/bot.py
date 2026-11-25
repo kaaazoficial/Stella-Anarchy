@@ -5,6 +5,7 @@ import logging
 import random
 import re
 import time
+import unicodedata
 import httpx
 from collections import defaultdict, deque
 from datetime import datetime, timezone
@@ -35,6 +36,46 @@ log = logging.getLogger("stella.bot")
 MAX_TRACKED_USERS = 5000
 ANTISPAM_WINDOW_SECONDS = 8
 ANTISPAM_WARNING_COOLDOWN = 60
+_GLOBAL_SETTINGS_ROOM_ID = "__stella_global__"
+_GLOBAL_CHAT_SILENCE_KEY = "chat_silence"
+
+_SILENCE_REQUESTS = frozenset({
+    "no le hables a nadie",
+    "no les hables a nadie",
+    "no hables con nadie",
+    "no respondas a nadie",
+    "no le respondas a nadie",
+    "no contestes a nadie",
+    "no le contestes a nadie",
+    "no interactues con nadie",
+    "no respondas mensajes",
+    "no digas nada",
+    "quedate callada",
+    "quedate en silencio",
+    "mantente en silencio",
+    "guarda silencio",
+    "entra en modo silencio",
+    "entra en silencio",
+    "modo silencio",
+    "silencio global",
+    "callate",
+})
+_RESUME_REQUESTS = frozenset({
+    "ya puedes hablar",
+    "ya puedes volver a hablar",
+    "puedes hablar de nuevo",
+    "puedes volver a hablar",
+    "vuelve a hablar",
+    "habla de nuevo",
+    "habla otra vez",
+    "ya puedes responder",
+    "puedes volver a responder",
+    "vuelve a responder",
+    "sal del silencio",
+    "quita el silencio",
+    "reactiva tus respuestas",
+    "deja el modo silencio",
+})
 
 
 class StellaBot:
@@ -107,6 +148,77 @@ class StellaBot:
         privileged.update(_uid_set(self.settings.sinner_uid))
         return bool(uid) and uid in privileged
 
+    def _is_owner(self, uid: str) -> bool:
+        """Only SINNER_UID can change Stella's global speaking state."""
+        return bool(uid) and uid in _uid_set(getattr(self.settings, "sinner_uid", ""))
+
+    def _global_chat_silenced(self) -> bool:
+        return self.store.get_setting(
+            _GLOBAL_SETTINGS_ROOM_ID, _GLOBAL_CHAT_SILENCE_KEY, "0"
+        ) == "1"
+
+    @staticmethod
+    def _normalize_chat_control_phrase(value: str) -> str:
+        normalized = unicodedata.normalize("NFKD", str(value or "").casefold())
+        normalized = "".join(
+            character for character in normalized
+            if not unicodedata.combining(character)
+        )
+        normalized = re.sub(r"[^a-z0-9]+", " ", normalized).strip()
+        normalized = re.sub(r"^(?:oye )?stella ", "", normalized).strip()
+        normalized = re.sub(r" stella$", "", normalized).strip()
+        if normalized.startswith("por favor "):
+            normalized = normalized.removeprefix("por favor ").strip()
+        for suffix in (" por favor", " por ahora"):
+            if normalized.endswith(suffix):
+                normalized = normalized[:-len(suffix)].strip()
+        return normalized
+
+    @classmethod
+    def _is_silence_request(cls, value: str) -> bool:
+        return cls._normalize_chat_control_phrase(value) in _SILENCE_REQUESTS
+
+    @classmethod
+    def _is_resume_request(cls, value: str) -> bool:
+        return cls._normalize_chat_control_phrase(value) in _RESUME_REQUESTS
+
+    async def _silence_chat(self, room_id, uid, name, args, message):
+        if not self._is_owner(uid):
+            await self._reply(
+                room_id,
+                "Este control global está reservado al propietario de Stella.",
+                message,
+            )
+            return
+        self.store.set_setting(
+            _GLOBAL_SETTINGS_ROOM_ID, _GLOBAL_CHAT_SILENCE_KEY, "1"
+        )
+        stop_speech = getattr(self.voice, "stop_all_speech", None)
+        if callable(stop_speech):
+            await stop_speech()
+        await self._reply(
+            room_id,
+            "Modo de silencio global activado. No responderé en ningún chat hasta que uses !hablarchat.",
+            message,
+        )
+
+    async def _resume_chat(self, room_id, uid, name, args, message):
+        if not self._is_owner(uid):
+            await self._reply(
+                room_id,
+                "Solo el propietario de Stella puede reactivar sus respuestas.",
+                message,
+            )
+            return
+        self.store.set_setting(
+            _GLOBAL_SETTINGS_ROOM_ID, _GLOBAL_CHAT_SILENCE_KEY, "0"
+        )
+        await self._reply(
+            room_id,
+            "Modo de silencio global desactivado. Ya puedo volver a responder.",
+            message,
+        )
+
     async def _reply(self, room_id: str, text: str, message: dict[str, Any]) -> None:
         reply_id = message.get("messageId") or message.get("id")
         await self.platform.send_message(
@@ -157,13 +269,39 @@ class StellaBot:
             content,
             flags=re.IGNORECASE,
         )
+        request_text = (
+            prefixed_named_call.group(1).strip()
+            if prefixed_named_call
+            else direct_call if direct_call is not None
+            else content
+        )
+        prefix = next((item for item in prefixes if item and request_text.startswith(item)), None)
+        owner_control_request = self._is_owner(uid) and (
+            self._is_silence_request(request_text)
+            or self._is_resume_request(request_text)
+        )
         addressed = (
             direct_call is not None
             or mentioned
             or replied
             or prefixed_command is not None
             or prefixed_named_call is not None
+            or owner_control_request
         )
+
+        # Global silence suppresses chat replies, automatic replies and voice reading.
+        # Only the configured owner can use the explicit wake-up command while muted.
+        if self._global_chat_silenced():
+            if addressed and self._is_owner(uid):
+                restore_command = ""
+                if prefix:
+                    restore_raw = request_text[len(prefix):].strip()
+                    restore_command = restore_raw.split(maxsplit=1)[0].casefold() if restore_raw else ""
+                if restore_command in {"hablarchat", "despertar"} or (
+                    not prefix and self._is_resume_request(request_text)
+                ):
+                    await self._resume_chat(room_id, uid, name, "", message)
+            return
 
         self.store.touch_user(uid, name)
         self.store.record_activity(room_id, uid)
@@ -180,15 +318,18 @@ class StellaBot:
             await self.voice.enqueue_speech(room_id, f"{name}: {content}")
             return
 
-        request_text = (
-            prefixed_named_call.group(1).strip()
-            if prefixed_named_call
-            else direct_call if direct_call is not None
-            else content
-        )
-        prefix = next((item for item in prefixes if item and request_text.startswith(item)), None)
         if prefix:
             await self._command(room_id, uid, name, request_text[len(prefix):].strip(), message)
+            return
+        if self._is_silence_request(request_text):
+            if self._is_owner(uid):
+                await self._silence_chat(room_id, uid, name, "", message)
+            else:
+                await self._reply(
+                    room_id,
+                    "Solo el propietario de Stella puede activar el silencio global.",
+                    message,
+                )
             return
         if not request_text.strip():
             await self._reply(room_id, "¡Aquí estoy! ¿En qué puedo ayudarte?", message)
@@ -431,6 +572,8 @@ class StellaBot:
             "sistema": self._status, "diagnostico": self._status,
             "rendimiento": self._metrics, "nexus": self._admin_panel, "paneladmin": self._admin_panel,
             "perfilbot": self._bot_profile, "avatarbot": self._bot_avatar,
+            "silenciarchat": self._silence_chat,
+            "hablarchat": self._resume_chat, "despertar": self._resume_chat,
             "volumen": self._music_volume, "subirvolumen": self._music_volume_up,
             "bajarvolumen": self._music_volume_down, "silencio": self._music_mute,
             "volumenlectura": self._tts_volume, "subirvolumenlectura": self._tts_volume_up,
@@ -673,6 +816,12 @@ class StellaBot:
                 command_suggestion is not None
                 and command_suggestion[0] == "ayuda"
                 and command_suggestion[1] >= 86,
+            ),
+            (
+                "silencio global",
+                self._is_silence_request("No le hables a nadie")
+                and self._is_silence_request("Stella, no le hables a nadie")
+                and self._is_resume_request("Ya puedes volver a hablar"),
             ),
             ("fecha", bool(datetime_text("America/Santiago"))),
             ("perfil de usuario", self.store.get_profile(uid) is not None),

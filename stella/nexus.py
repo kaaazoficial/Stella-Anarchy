@@ -26,7 +26,7 @@ NATURAL_COMMAND_NAMES = frozenset({
     "traducir", "ia", "asistente",
     "investigar", "analizar", "analizartexto", "calcular", "fecha",
     "zona", "join", "salirsala", "voz", "tts", "leer", "noleer",
-    "dj", "reproducir",
+    "dj", "reproducir", "silenciarchat", "hablarchat", "despertar",
 })
 NATURAL_EXTRA_COMMAND_NAMES = frozenset({
     "abrazo", "abrazar", "beso", "besar", "patada", "golpe", "cachetada",
