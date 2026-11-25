@@ -438,7 +438,6 @@ async def test_archive_search_uses_fallback_terms_and_checks_license():
     assert "title:Reggaeton" in voice.http.search_queries[0]
     assert 'title:"Reggaeton Latin urban high tempo bass drums synthesizers"' not in voice.http.search_queries[0]
     assert tracks[0]["url"].startswith("https://ia800000.us.archive.org/")
-    await voice.http.aclose()
 
 
 @pytest.mark.asyncio
