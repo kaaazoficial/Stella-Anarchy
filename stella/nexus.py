@@ -10,7 +10,7 @@ from typing import Any
 def _normalize(value: str) -> str:
     text = unicodedata.normalize("NFKD", str(value or "").casefold())
     text = "".join(ch for ch in text if not unicodedata.combining(ch))
-    return re.sub(r"\\s+", " ", text).strip(" ¿?¡!.,;: ")
+    return re.sub(r"\s+", " ", text).strip(" ¿?¡!.,;: ")
 
 
 COMMAND_ALIASES: dict[str, tuple[str, list[str]]] = {}
@@ -53,7 +53,7 @@ def parse_command_invocation(content: str, used_prefix: str) -> tuple[str, list[
 
 
 def interpret_direct_command(value: str) -> str | None:
-    raw = re.sub(r"\\s+", " ", str(value or "")).strip()
+    raw = re.sub(r"\s+", " ", str(value or "")).strip()
     if not raw:
         return None
     if raw.startswith(("!", "-")):
@@ -71,10 +71,10 @@ def interpret_direct_command(value: str) -> str | None:
 
 
 def interpret_natural_request(value: str) -> str | None:
-    raw = re.sub(r"\\s+", " ", str(value or "")).strip()
+    raw = re.sub(r"\s+", " ", str(value or "")).strip()
     if not raw or len(raw) > 500 or raw.startswith(("!", "-")):
         return None
-    match = re.match(r"^(?:oye[, ]+)?@?stella(?:[, :]+|$)\\s*(.*)$", raw, flags=re.I)
+    match = re.match(r"^(?:oye[, ]+)?@?stella(?:[, :]+|$)\s*(.*)$", raw, flags=re.I)
     if not match:
         return None
     text = match.group(1).strip()
@@ -172,10 +172,10 @@ def toggle_community_participant(event: dict, user_id: str, nickname: str, join:
 
 def format_source_health(source_health: dict, limit: int = 12) -> str:
     if not isinstance(source_health, dict) or not source_health:
-        return "FUENTES EXTERNAS\\nTodavía no hay mediciones de fuentes en este proceso."
+        return "FUENTES EXTERNAS\nTodavía no hay mediciones de fuentes en este proceso."
     lines = ["FUENTES EXTERNAS · SALUD DEL PROCESO"]
     ranked = sorted(source_health.items(), key=lambda item: (int((item[1] or {}).get("failures", 0)), int((item[1] or {}).get("requests", 0))), reverse=True)
     for host, raw in ranked[:max(1, min(20, int(limit)))]:
         item = raw if isinstance(raw, dict) else {}
         lines.append(f"• {str(host)[:80]} · HTTP {item.get('last_status') or '—'} · {float(item.get('last_latency_ms', 0) or 0):.0f} ms")
-    return "\\n".join(lines)
+    return "\n".join(lines)
