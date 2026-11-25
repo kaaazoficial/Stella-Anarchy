@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from collections import defaultdict, deque
@@ -18,6 +19,12 @@ class AnarchyClient:
         self.api_base = api_base.rstrip("/")
         self.token = token
         self._client = httpx.AsyncClient(timeout=httpx.Timeout(15.0))
+        # Anarchy limits message creation per bot. Serialize sends and keep
+        # enough distance between requests so multi-page replies are delivered.
+        self._message_send_lock = asyncio.Lock()
+        self._last_message_send_at = 0.0
+        self._message_min_interval = 1.0
+        self._message_max_attempts = 4
         # IDs only; message text and conversation content are never retained.
         self._sent_message_ids: dict[str, deque[tuple[float, str]]] = defaultdict(deque)
         self._sent_message_ttl = 7 * 24 * 60 * 60
@@ -167,19 +174,63 @@ class AnarchyClient:
             self._sent_message_ids.pop(room_id, None)
         return {"attempted": len(active), "deleted": deleted, "failed": failed}
 
+    @staticmethod
+    def _retry_after_seconds(value: Any, fallback: float) -> float:
+        try:
+            delay = float(str(value).strip())
+        except (TypeError, ValueError):
+            delay = fallback
+        # Avoid tight retry loops and unreasonable waits from malformed headers.
+        return min(30.0, max(0.5, delay))
+
     async def send_message(
         self, thread_id: str, content: str, *, reply_id: str | None = None
     ) -> bool:
+        """Send one message with per-client pacing and bounded HTTP 429 retries."""
         room_id = str(thread_id)
         body: dict[str, Any] = {"content": content[:1900]}
         if reply_id:
             body["replyMessageId"] = reply_id
-        result = await self.request(
-            "POST", f"/threads/{quote(room_id, safe='')}/messages",
-            json_body=body,
-        )
-        if result.get("ok"):
-            message_id = self._extract_message_id(result.get("data"))
-            if message_id:
-                self._remember_sent_message(room_id, message_id)
-        return bool(result.get("ok"))
+
+        async with self._message_send_lock:
+            for attempt in range(self._message_max_attempts):
+                elapsed = time.monotonic() - self._last_message_send_at
+                wait_for_slot = self._message_min_interval - elapsed
+                if wait_for_slot > 0:
+                    await asyncio.sleep(wait_for_slot)
+
+                self._last_message_send_at = time.monotonic()
+                result = await self.request(
+                    "POST", f"/threads/{quote(room_id, safe='')}/messages",
+                    json_body=body,
+                )
+                if result.get("ok"):
+                    message_id = self._extract_message_id(result.get("data"))
+                    if message_id:
+                        self._remember_sent_message(room_id, message_id)
+                    return True
+
+                if int(result.get("status") or 0) != 429:
+                    return False
+
+                if attempt + 1 >= self._message_max_attempts:
+                    log.error(
+                        "Anarchy rejected a message after %s attempts (HTTP 429).",
+                        self._message_max_attempts,
+                    )
+                    return False
+
+                fallback = 2.0 * (2 ** attempt)
+                retry_delay = self._retry_after_seconds(
+                    result.get("retry_after"), fallback
+                )
+                log.warning(
+                    "Anarchy message rate limit reached; retrying in %.2f seconds "
+                    "(attempt %s/%s).",
+                    retry_delay,
+                    attempt + 1,
+                    self._message_max_attempts,
+                )
+                await asyncio.sleep(retry_delay)
+
+        return False
