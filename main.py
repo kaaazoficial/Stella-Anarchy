@@ -174,6 +174,19 @@ async def root() -> dict[str, str]:
     return {"name": "Stella", "status": "online", "docs": "/docs"}
 
 
+@app.head("/")
+async def root_head() -> Response:
+    """Allow HTTP monitors configured to use HEAD instead of GET."""
+    return Response(status_code=200)
+
+
+@app.head("/health")
+async def health_head() -> Response:
+    """HEAD-compatible liveness endpoint for HTTP monitoring services."""
+    response = await health()
+    return Response(status_code=response.status_code)
+
+
 @app.get("/health")
 async def health() -> JSONResponse:
     """Liveness and privacy-safe component diagnostics for Render and operators."""
