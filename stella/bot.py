@@ -44,7 +44,9 @@ class StellaBot:
         # Only hashes and timestamps are held here. Message text is not retained.
         self._recent: dict[tuple[str, str], deque[tuple[float, str]]] = defaultdict(deque)
         self._warned_until: dict[tuple[str, str], float] = {}
-        self._auto_reply_cooldown: dict[tuple[str, int], float] = {}\n        # Game sessions exist only in RAM and expire automatically.\n        self._game_sessions: dict[str, dict[str, Any]] = {}
+        self._auto_reply_cooldown: dict[tuple[str, int], float] = {}
+        # Game sessions exist only in RAM and expire automatically.
+        self._game_sessions: dict[str, dict[str, Any]] = {}
 
     @staticmethod
     def _author(message: dict[str, Any]) -> tuple[str, str]:
