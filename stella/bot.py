@@ -20,6 +20,7 @@ from stella.storage import Store
 from stella.extra_commands import calculate, datetime_text, CalculationError
 from stella.help import build_commands_help_text, filter_commands_help_text
 from stella.identity import extract_stella_call, detect_affectionate_expression
+from stella.nexus import interpret_natural_request
 
 log = logging.getLogger("stella.bot")
 
@@ -455,6 +456,9 @@ class StellaBot:
             "apoyar": "muestra su apoyo a", "dormir": "se queda dormido junto a",
             "ignorar": "decide ignorar a", "mirar": "se queda mirando a", "invitar": "invita a",
         }
+        mentioned = self._mentioned_user(message)
+        if mentioned and mentioned[0] != uid:
+            self.store.add_affinity(uid, mentioned[0], 1)
         await self._reply(room_id, f"✨ {name} {labels.get(action, 'interactúa con')} {target}.", message)
 
     async def _roast(self, room_id, uid, name, args, message):
