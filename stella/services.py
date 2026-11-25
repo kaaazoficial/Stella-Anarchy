@@ -149,3 +149,64 @@ class StellaServices:
         except (httpx.HTTPError, ValueError, RuntimeError, ImportError):
             log.exception("Research request failed")
             return []
+    async def multimedia(self, kind: str, query: str, limit: int = 5) -> str:
+        search_text = " ".join(str(query or "").split())[:120]
+        media_kind = str(kind or "").casefold().strip()
+        if not search_text:
+            return "Escribe qué contenido quieres buscar."
+        if media_kind == "imagen":
+            async with httpx.AsyncClient(timeout=self.timeout, headers={"User-Agent": "StellaCommunityBot/1.0"}) as client:
+                response = await client.get(
+                    "https://commons.wikimedia.org/w/api.php",
+                    params={
+                        "action": "query", "generator": "search", "gsrsearch": search_text,
+                        "gsrnamespace": 6, "gsrlimit": max(1, min(5, int(limit))),
+                        "prop": "imageinfo", "iiprop": "url|extmetadata",
+                        "iiextmetadatafilter": "LicenseShortName|Artist",
+                        "format": "json", "formatversion": 2,
+                    },
+                )
+                response.raise_for_status()
+                pages = ((response.json().get("query") or {}).get("pages") or [])
+            if not pages:
+                return f"No encontré imágenes para «{search_text}» en Wikimedia Commons."
+            lines = [f"IMÁGENES · WIKIMEDIA COMMONS · {search_text}"]
+            for index, page in enumerate(pages[:max(1, min(5, int(limit)))], 1):
+                info = (page.get("imageinfo") or [{}])[0]
+                metadata = info.get("extmetadata") or {}
+                license_name = re.sub(r"<[^>]+>", "", str((metadata.get("LicenseShortName") or {}).get("value") or "Licencia no indicada"))
+                artist = re.sub(r"<[^>]+>", "", str((metadata.get("Artist") or {}).get("value") or ""))
+                lines.append(f"{index}. {page.get('title') or 'Archivo'}\\n{info.get('descriptionurl') or info.get('url') or ''}\\nLicencia: {html.unescape(license_name)[:90]}" + (f" · Autor: {html.unescape(artist)[:90]}" if artist else ""))
+            lines.append("Comprueba la licencia y la atribución en cada ficha antes de reutilizar una imagen.")
+            return "\\n\\n".join(lines)
+        archive_type = {"video": "movies", "audio": "audio"}.get(media_kind)
+        if not archive_type:
+            return "Tipos disponibles: imagen, video o audio."
+        terms = re.findall(r"[\\wÀ-ÿ]+", search_text, flags=re.UNICODE)[:6]
+        if not terms:
+            return "No encontré términos válidos para esa búsqueda."
+        archive_query = f"mediatype:{archive_type} AND " + " AND ".join(terms)
+        async with httpx.AsyncClient(timeout=self.timeout, headers={"User-Agent": "StellaCommunityBot/1.0"}) as client:
+            response = await client.get(
+                "https://archive.org/advancedsearch.php",
+                params={"q": archive_query, "fl[]": ["identifier", "title", "creator", "year"], "rows": max(1, min(5, int(limit))), "page": 1, "output": "json"},
+            )
+            response.raise_for_status()
+            docs = ((response.json().get("response") or {}).get("docs") or [])
+        if not docs:
+            return f"No encontré resultados de {media_kind} para «{search_text}» en Internet Archive."
+        lines = [f"{media_kind.upper()} · INTERNET ARCHIVE · {search_text}"]
+        for index, item in enumerate(docs[:max(1, min(5, int(limit)))], 1):
+            identifier = str(item.get("identifier") or "").strip()
+            if not re.fullmatch(r"[A-Za-z0-9._-]{1,120}", identifier):
+                continue
+            title = html.unescape(str(item.get("title") or identifier))[:150]
+            creator = html.unescape(str(item.get("creator") or ""))[:80]
+            year = str(item.get("year") or "")[:12]
+            details = " · ".join(value for value in (creator, year) if value)
+            lines.append(f"{index}. {title}" + (f"\\n{details}" if details else "") + f"\\nhttps://archive.org/details/{quote_plus(identifier)}")
+        if media_kind == "audio":
+            lines.append("Son páginas de origen, no una autorización de uso. Revisa derechos y licencia; para reproducir audio usa !dj buscar.")
+        return "\\n\\n".join(lines)
+
+
