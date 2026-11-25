@@ -390,8 +390,8 @@ STELLA_PERSONA_GUIDANCE = STELLA_IDENTITY_GUIDANCE
 
 BASE_INSTRUCTIONS = """CONVERSACIÓN Y CALIDAD: responde con naturalidad, cercanía y precisión. Evita relleno, repeticiones y exageraciones. Atiende primero y exclusivamente la petición actual. No cambies de tema. No introduzcas personajes, aplicaciones, juegos, servicios ni datos que el usuario no haya mencionado y que no sean necesarios para responder. No inventes relaciones entre la consulta y temas anteriores. No fuerces conexiones con conversaciones anteriores. Si el usuario cambia de tema, sigue el nuevo tema y descarta el contexto que ya no corresponda.
 RELEVANCIA: cada párrafo debe aportar algo a la consulta actual. No respondas con frases genéricas que no resuelvan la petición. No inventes la intención del usuario ni completes datos ausentes con suposiciones. No afirmes haber visto mensajes, archivos, imágenes, enlaces o resultados que no se te hayan proporcionado. Si la petición es ambigua, falta información esencial o no puedes identificar con seguridad el tema, haz una sola pregunta breve para aclararlo. Si no sabes algo, dilo con claridad y separa hechos, estimaciones y opiniones.
-CONTEXTO: conserva turnos anteriores únicamente cuando el mensaje actual dependa claramente de ellos (por ejemplo, referencias como «eso», «la anterior» o «¿y cómo funciona?»). Si el usuario introduce otro tema, ignora el contexto anterior. Nunca presentes una inferencia como si el usuario la hubiera dicho. No uses recuerdos de otra persona ni atribuyas a quien escribe información de otro usuario.
-ESTILO: adapta la longitud a la complejidad. Para saludos y charla casual, responde de forma breve y natural. Para consultas técnicas o complejas, organiza la explicación y cubre los puntos solicitados sin desviarte. Evita enumeraciones innecesarias y preguntas repetidas.
+CONTEXTO: conserva turnos anteriores cuando el mensaje dependa de ellos, incluidas respuestas naturales a una pregunta concreta que acabas de hacer. El usuario no tiene que repetir el tema ni mencionar tu nombre en cada turno. Si introduce otro tema de forma explícita, descarta el contexto anterior. Usa solo el contexto temporal de esta misma sala y persona; nunca mezcles usuarios ni atribuyas a quien escribe información ajena. Nunca presentes una inferencia como si el usuario la hubiera dicho.
+ESTILO: la IA también está para conversar, no solo para ejecutar comandos o resolver preguntas. Puedes mantener una charla casual, reaccionar al mensaje, compartir una opinión razonada, seguir el humor y hacer preguntas pertinentes. No conviertas cada respuesta en una lista ni termines siempre con una pregunta. Adapta la longitud a la complejidad; para saludos y charla casual, sé breve y natural. Para consultas técnicas o complejas, organiza la explicación y cubre lo solicitado sin desviarte.
 ORTOGRAFÍA: interpreta la intención aunque haya errores. Corrige solo cuando el usuario lo pida o cuando una corrección breve sea claramente útil; no corrijas jerga ni nombres propios.
 PRIVACIDAD: no afirmes guardar memoria permanente. El contexto conversacional es temporal y limitado al proceso."""
 
@@ -719,8 +719,12 @@ def build_ai_instructions(
             "Distingue hallazgos, discrepancias y datos no confirmados; no inventes citas."
         ),
         "conversation": (
-            "CONVERSACIÓN: responde directamente y con naturalidad; no ejecutes herramientas. "
-            "Ajusta la extensión a la pregunta, explica lo necesario y evita respuestas genéricas."
+            "CONVERSACIÓN NATURAL: esta modalidad permite hablar con Stella, no solo consultar datos. "
+            "Responde al mensaje como interlocutora: charla, comenta, razona, bromea con moderación "
+            "y sigue el hilo temporal cuando corresponda. no ejecutes herramientas. No conviertas una "
+            "conversación normal en un comando. No inventes experiencias humanas ni datos personales. "
+            "Sé natural, evita respuestas prefabricadas y no hagas una pregunta de cierre por costumbre. "
+            "Ajusta la extensión al tono y a lo que el usuario realmente dijo."
         ),
     }.get(intent, "Responde directamente; no inventes acciones.")
     tool_text = (
@@ -860,11 +864,13 @@ class StellaAICore:
 
     def __init__(
         self,
-        memory_ttl: int = 300,
-        memory_turns: int = 2,
+        memory_ttl: int = 600,
+        memory_turns: int = 5,
     ):
-        self.memory_ttl = max(60, min(300, int(memory_ttl)))
-        self.memory_turns = max(1, min(2, int(memory_turns)))
+        # Conversation context stays in RAM and expires quickly; it is never
+        # written to SQLite, files, or the vector store by this component.
+        self.memory_ttl = max(60, min(900, int(memory_ttl)))
+        self.memory_turns = max(1, min(6, int(memory_turns)))
         self._memory: dict[str, dict[str, Any]] = {}
         self._semaphore: asyncio.Semaphore | None = None
         self._provider_locks: dict[str, asyncio.Lock] = {}
@@ -1444,24 +1450,45 @@ class StellaAICore:
     def is_contextual_followup(
         value: str, history: list[dict[str, str]]
     ) -> bool:
-        """Keep old turns only when the current question clearly refers to them."""
+        """Keep context for clear references and natural replies to Stella's last question."""
         if not history:
             return False
         text = normalize_topic_text(value)
-        if len(text) > 110:
+        if not text:
             return False
-        markers = (
-            "y por que", "y como", "y entonces", "y eso", "y ese", "y esa",
-            "y el", "y ella", "y ellos", "que dijiste", "lo anterior",
-            "esa respuesta", "a que te refieres", "como asi", "por que eso",
-            "y despues", "y luego", "que significa eso",
+
+        # Explicit topic changes always start a clean context, even during an
+        # otherwise active chat session.
+        topic_change_markers = (
+            "otra cosa", "otro tema", "cambiando de tema", "tema distinto",
+            "algo diferente", "nada que ver", "ahora quiero hablar de",
+            "ahora necesito saber sobre", "por cierto",
         )
-        if any(text.startswith(marker) for marker in markers):
+        if any(marker in text for marker in topic_change_markers):
+            return False
+
+        if is_contextual_followup_request(value):
             return True
-        return bool(re.search(
-            r"\b(?:eso|ese|esa|ello|ellos|ellas|aquello|ahi|alli|lo anterior)\b",
-            text,
-        ))
+
+        # A person may answer Stella's question in an ordinary sentence without
+        # repeating the subject or using a pronoun. Keep that turn connected.
+        if len(text) > 420:
+            return False
+        last_assistant = next(
+            (turn for turn in reversed(history) if turn.get("role") == "assistant"),
+            None,
+        )
+        if not last_assistant:
+            return False
+        previous_answer = normalize_topic_text(str(last_assistant.get("content") or ""))
+        generic_invitation = re.search(
+            r"(?:en que puedo ayudarte|que necesitas|como puedo ayudarte|"
+            r"en que te ayudo|que mas necesitas|algo mas en que pueda ayudarte)[?.!]*$",
+            previous_answer,
+        )
+        if generic_invitation:
+            return False
+        return previous_answer.rstrip().endswith("?")
 
     def _history(self, key: str) -> list[dict[str, str]]:
         now = time.time()
