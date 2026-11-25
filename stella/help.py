@@ -123,8 +123,7 @@ def _command_help_sections(prefix: str):
             (False, f"• {prefix}antispam estado|on|off|límite N|ventana N|repeticiones N|enlaces N|menciones N [ADMIN]."),
             (False, f"• {prefix}advertir @usuario [motivo] | {prefix}advertencias [@usuario] | {prefix}quitaradvertencia ID [ADMIN]."),
             (False, f"• {prefix}respuestas estado|on|off | {prefix}respuesta añadir|lista|eliminar ID [ADMIN]."),
-            (False, f"• {prefix}perfilbot ... | {prefix}avatarbot ... — Edita identidad e icono [ADMIN]."),
-            (False, f"• {prefix}eliminarmensajes — Elimina mensajes propios identificados en esta ejecución [ADMIN]."),
+            (False, f"• {prefix}perfilbot Nombre | Estado — Edita la identidad del bot [ADMIN]."),
             (False, "Nota: Los comandos ADMIN requieren un UID autorizado en ADMIN_UIDS (el nickname no concede permisos)."),
         ]),
     ]
