@@ -123,6 +123,7 @@ def _command_help_sections(prefix: str):
             (False, f"• {prefix}advertir @usuario [motivo] | {prefix}advertencias [@usuario] | {prefix}quitaradvertencia ID [ADMIN]."),
             (False, f"• {prefix}respuesta añadir|quitar|lista — Gestiona respuestas automáticas [ADMIN]."),
             (False, f"• {prefix}perfilbot Nombre | Estado — Edita la identidad del bot [ADMIN]."),
+            (False, f"• {prefix}avatarbot <URL> — Cambia el avatar con una imagen validada [ADMIN]."),
             (False, "Nota: Los comandos ADMIN requieren un UID autorizado en ADMIN_UIDS (el nickname no concede permisos)."),
         ]),
     ]
