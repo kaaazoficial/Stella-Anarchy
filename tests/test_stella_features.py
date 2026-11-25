@@ -136,8 +136,8 @@ def test_advanced_ai_core_is_stella_only_and_bounded():
     from stella.ai_core import AI_COMMAND_CATALOG, AI_PUBLIC_COMMANDS, StellaAICore
 
     core = StellaAICore()
-    assert core.memory_ttl <= 300
-    assert core.memory_turns <= 2
+    assert core.memory_ttl == 600
+    assert core.memory_turns == 5
     assert "ayuda" in AI_PUBLIC_COMMANDS
     assert "investigar" in AI_COMMAND_CATALOG
     assert "" not in AI_PUBLIC_COMMANDS
