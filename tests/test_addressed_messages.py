@@ -217,8 +217,7 @@ def test_owner_can_enable_global_silence_without_mentioning_stella():
 
     assert b.shared_state.values["chat_silence"] == "1"
     assert b.voice.speech_stopped is True
-    assert len(b.platform.sent) == 1
-    assert "silencio global activado" in b.platform.sent[0][1]
+    assert b.platform.sent == []
 
 
 def test_owner_can_enable_global_silence_with_direct_natural_call():
@@ -226,7 +225,7 @@ def test_owner_can_enable_global_silence_with_direct_natural_call():
     asyncio.run(b.handle_event(_message("Stella, no le hables a nadie", "owner")))
 
     assert b.shared_state.values["chat_silence"] == "1"
-    assert len(b.platform.sent) == 1
+    assert b.platform.sent == []
 
 
 def test_non_owner_cannot_enable_global_silence():
@@ -234,8 +233,7 @@ def test_non_owner_cannot_enable_global_silence():
     asyncio.run(b.handle_event(_message("Stella, no le hables a nadie", "moderator")))
 
     assert b.store.get_setting("__stella_global__", "chat_silence", "0") == "0"
-    assert len(b.platform.sent) == 1
-    assert "Solo el propietario de Stella puede activar" in b.platform.sent[0][1]
+    assert b.platform.sent == []
 
 
 def test_global_silence_blocks_commands_chat_replies_and_voice():
@@ -260,8 +258,7 @@ def test_owner_can_restore_chat_with_natural_phrase_while_silenced():
     asyncio.run(b.handle_event(_message("Ya puedes volver a hablar", "owner")))
 
     assert b.shared_state.values["chat_silence"] == "0"
-    assert len(b.platform.sent) == 1
-    assert "silencio global desactivado" in b.platform.sent[0][1]
+    assert b.platform.sent == []
 
 
 def test_owner_can_restore_chat_with_reversible_command_while_silenced():
@@ -271,7 +268,7 @@ def test_owner_can_restore_chat_with_reversible_command_while_silenced():
     asyncio.run(b.handle_event(_message("!hablarchat", "owner")))
 
     assert b.shared_state.values["chat_silence"] == "0"
-    assert len(b.platform.sent) == 1
+    assert b.platform.sent == []
 
 
 def test_owner_can_toggle_silence_with_commands():
