@@ -1070,6 +1070,20 @@ class StellaBot:
             "regalar", "acompanar", "asustar", "curar", "cargar", "empujar",
             "reganar", "admirar", "apoyar", "dormir", "ignorar", "mirar", "invitar",
         }
+        # When a command normally targets another person, a reply supplies that
+        # person implicitly. Resolve the quoted message through Anarchy only when
+        # the command lacks explicit arguments.
+        target_commands = social_actions | {
+            "roast", "afinidad", "amistad", "reputacion", "duelo",
+        }
+        if command in target_commands and not args:
+            reply_target = await self._resolve_reply_target(room_id, message, uid)
+            if reply_target:
+                message["_stella_reply_target"] = reply_target
+                implicit_target = "@" + reply_target["name"]
+                if command in social_actions or command == "roast":
+                    args = implicit_target
+
         if command in social_actions:
             message["_stella_social_action"] = command
             await self._social_action(room_id, uid, name, args, message)
@@ -1146,6 +1160,50 @@ class StellaBot:
         )
         await self._reply(room_id, answer, message)
 
+    async def _resolve_reply_target(
+        self, room_id: str, message: dict[str, Any], sender_uid: str
+    ) -> dict[str, str] | None:
+        """Resolve the author of the message being replied to, using Anarchy's read endpoint if needed."""
+        excluded = {str(sender_uid or "").strip()} | self._stella_identity_ids()
+
+        def normalize_author(value: Any) -> dict[str, str] | None:
+            target = self._mention_target_from_object(value)
+            if not target or target["uid"] in excluded:
+                return None
+            return target
+
+        # Some event/webhook payload variants include the quoted message already.
+        for quoted in self._reply_reference_objects(message):
+            author = quoted.get("author") or quoted.get("sender") or quoted.get("user")
+            target = normalize_author(author or quoted)
+            if target:
+                return target
+
+        reply_id = ""
+        for key in (
+            "replyMessageId", "reply_message_id", "replyToMessageId",
+            "reply_to_message_id", "referencedMessageId", "referenced_message_id",
+        ):
+            value = message.get(key)
+            if isinstance(value, (str, int)) and str(value).strip():
+                reply_id = str(value).strip()
+                break
+        if not reply_id:
+            return None
+
+        reader = getattr(self.platform, "get_message", None)
+        if not callable(reader):
+            return None
+        try:
+            quoted = await reader(room_id, reply_id)
+        except Exception as exc:
+            log.warning("Could not resolve replied-to command target (%s).", type(exc).__name__)
+            return None
+        if not isinstance(quoted, dict):
+            return None
+        author = quoted.get("author") or quoted.get("sender") or quoted.get("user")
+        return normalize_author(author or quoted)
+
     def _mentioned_user(self, message: dict[str, Any]) -> tuple[str, str] | None:
         mentions = message.get("mentions") or []
         for item in mentions:
@@ -1153,6 +1211,12 @@ class StellaBot:
                 continue
             target_uid = str(item.get("uid") or item.get("userId") or item.get("id") or "").strip()
             target_name = str(item.get("nickname") or item.get("displayName") or item.get("name") or target_uid).strip()
+            if target_uid:
+                return target_uid, target_name[:80]
+        reply_target = message.get("_stella_reply_target")
+        if isinstance(reply_target, dict):
+            target_uid = str(reply_target.get("uid") or "").strip()
+            target_name = str(reply_target.get("name") or target_uid).strip()
             if target_uid:
                 return target_uid, target_name[:80]
         return None
@@ -1565,7 +1629,11 @@ class StellaBot:
     async def _social_action(self, room_id, uid, name, args, message):
         target = args.strip()
         if not target:
-            await self._reply(room_id, f"Uso: !{message.get('_stella_social_action')} @usuario", message)
+            reply_target = message.get("_stella_reply_target")
+            if isinstance(reply_target, dict) and reply_target.get("name"):
+                target = "@" + str(reply_target["name"])
+        if not target:
+            await self._reply(room_id, f"Uso: !{message.get('_stella_social_action')} @usuario (o responde al mensaje de esa persona)", message)
             return
         action = str(message.get("_stella_social_action") or "").casefold()
         labels = {

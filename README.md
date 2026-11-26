@@ -130,3 +130,5 @@ pytest -q
 ```
 
 GitHub Actions runs the same test suite on pushes and pull requests.
+
+- Commands work when sent as a reply to any member's message; commands that need a target (social actions, roast, affinity and duel) automatically use the replied-to author when no explicit target is supplied. An explicit target always takes precedence.

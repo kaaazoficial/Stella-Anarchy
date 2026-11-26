@@ -97,6 +97,26 @@ class AnarchyClient:
             log.warning("Anarchy binary upload failed: %s", type(exc).__name__)
             return {"ok": False, "status": 502, "data": {}}
 
+    async def get_message(self, thread_id: str, message_id: str) -> dict[str, Any] | None:
+        """Read one message that Anarchy says this bot is allowed to see."""
+        room_id = str(thread_id or "").strip()
+        target_id = str(message_id or "").strip()
+        if not room_id or not target_id or not target_id.isdigit():
+            return None
+        result = await self.request(
+            "GET",
+            f"/threads/{quote(room_id, safe='')}/messages/{quote(target_id, safe='')}",
+        )
+        if not result.get("ok"):
+            return None
+        data = result.get("data")
+        if not isinstance(data, dict):
+            return None
+        message = data.get("message")
+        if isinstance(message, dict):
+            return message
+        return data if isinstance(data.get("author"), dict) else None
+
     async def get_bot_identity(self) -> dict[str, Any] | None:
         """Return the authenticated bot identity from Anarchy GET /me."""
         result = await self.request("GET", "/me")

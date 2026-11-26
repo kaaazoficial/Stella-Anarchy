@@ -8,12 +8,17 @@ class Platform:
     def __init__(self):
         self.identity = {"uid":"stella-account","botId":"stella-bot"}
         self.sent = []
+        self.read_messages = {}
+        self.read_requests = []
         self.ids = {"stella-msg"}
     def has_sent_message(self, room, message_id):
         return message_id in self.ids
     async def send_message(self, room, content, reply_id=None):
         self.sent.append((room, content, reply_id))
         return True
+    async def get_message(self, room, message_id):
+        self.read_requests.append((room, message_id))
+        return self.read_messages.get(str(message_id))
 
 class Store:
     def __init__(self):
@@ -27,6 +32,7 @@ class Store:
         self.settings[(str(room_id), str(key))] = str(value)
     def auto_reply_rules(self,*a): return []
     def get_profile(self,*a): return {"uid":a[0] if a else "u"}
+    def add_affinity(self,*a): return 1
 
 class Voice:
     def __init__(self):
@@ -593,3 +599,116 @@ def test_mention_command_uses_structured_mentions_and_deduplicates_targets():
     }))
     assert len(b.platform.sent) == 1
     assert b.platform.sent[0][1].endswith("@Target")
+
+
+
+def test_social_command_reply_automatically_targets_quoted_author():
+    b = bot()
+    b.platform.read_messages["90210"] = {
+        "messageId": "90210",
+        "content": "hola",
+        "author": {"uid": "target-uid", "nickname": "Persona X"},
+    }
+
+    asyncio.run(b.handle_event({
+        "type": "message",
+        "threadId": "r",
+        "trigger": None,
+        "message": {
+            "content": "!besar",
+            "replyMessageId": "90210",
+            "author": {"uid": "sender-uid", "nickname": "Persona"},
+        },
+    }))
+
+    assert b.platform.read_requests == [("r", "90210")]
+    assert len(b.platform.sent) == 1
+    response = b.platform.sent[0][1]
+    assert "le da un beso a @Persona X" in response
+    assert "Uso:" not in response
+
+
+def test_social_command_reply_uses_embedded_quoted_author_without_extra_api_call():
+    b = bot()
+    asyncio.run(b.handle_event({
+        "type": "message",
+        "threadId": "r",
+        "trigger": None,
+        "message": {
+            "content": "!besar",
+            "replyMessage": {
+                "messageId": "90211",
+                "content": "hola",
+                "author": {"uid": "target-uid", "nickname": "Persona Y"},
+            },
+            "author": {"uid": "sender-uid", "nickname": "Persona"},
+        },
+    }))
+
+    assert b.platform.read_requests == []
+    assert len(b.platform.sent) == 1
+    assert "le da un beso a @Persona Y" in b.platform.sent[0][1]
+    assert "Uso:" not in b.platform.sent[0][1]
+
+
+def test_explicit_social_command_target_overrides_replied_author():
+    b = bot()
+    b.platform.read_messages["90212"] = {
+        "messageId": "90212",
+        "author": {"uid": "reply-uid", "nickname": "Persona del reply"},
+    }
+    asyncio.run(b.handle_event({
+        "type": "message",
+        "threadId": "r",
+        "message": {
+            "content": "!besar @OtraPersona",
+            "replyMessageId": "90212",
+            "author": {"uid": "sender-uid", "nickname": "Persona"},
+        },
+    }))
+    assert len(b.platform.sent) == 1
+    assert "le da un beso a @OtraPersona" in b.platform.sent[0][1]
+
+
+def test_affinity_and_duel_can_use_the_replied_to_author():
+    b = bot()
+    b.platform.read_messages["90213"] = {
+        "messageId": "90213",
+        "author": {"uid": "target-uid", "nickname": "Persona X"},
+    }
+    b.store.get_affinity = lambda *args: 7
+    asyncio.run(b.handle_event({
+        "type": "message",
+        "threadId": "r",
+        "message": {
+            "content": "!afinidad",
+            "replyMessageId": "90213",
+            "author": {"uid": "sender-uid", "nickname": "Persona"},
+        },
+    }))
+    assert "Afinidad con Persona X" in b.platform.sent[-1][1]
+    assert b.platform.read_requests == [("r", "90213")]
+
+
+
+def test_prefixed_command_executes_when_replying_to_another_member():
+    b = bot()
+    calls = []
+
+    async def capture(*args):
+        calls.append(args)
+
+    b._command = capture
+    asyncio.run(b.handle_event({
+        "type": "message",
+        "threadId": "r",
+        "trigger": None,
+        "message": {
+            "content": "!ping",
+            "replyMessageId": "90220",
+            "author": {"uid": "sender-uid", "nickname": "Persona"},
+        },
+    }))
+    assert len(calls) == 1
+    assert calls[0][3] == "ping"
+    assert b.platform.sent == []
