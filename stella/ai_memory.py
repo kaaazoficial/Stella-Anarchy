@@ -96,7 +96,7 @@ class QdrantConversationMemory:
             return "no configurada: faltan QDRANT_URL o QDRANT_API_KEY"
         return (
             f"Qdrant disponible; retención de {self.retention_days} días por usuario y sala; "
-            f"hasta {self.max_facts} recuerdos confirmados"
+            f"hasta {self.max_facts} recuerdos duraderos"
         )
 
     def _headers(self) -> dict[str, str]:
@@ -493,7 +493,7 @@ class QdrantConversationMemory:
             return False
 
     async def clear(self, room_id: str, uid: str) -> bool:
-        """Erase conversation history and saved facts while keeping explicit opt-in."""
+        """Erase recent conversation turns while preserving durable facts and opt-in."""
         if not self.enabled or not room_id or not uid:
             return False
         try:
