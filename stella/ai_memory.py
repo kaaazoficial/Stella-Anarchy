@@ -112,7 +112,7 @@ class QdrantConversationMemory:
                 r"\1=[REDACTED]",
                 content,
             )
-            content = re.sub(r"(?i)\bBearer\s+[^\s,;]+, "Bearer [REDACTED]", content)
+            content = re.sub(r"(?i)\bBearer\s+[^\s,;]+", "Bearer [REDACTED]", content)
             maximum = 1400 if role == "user" else 1200
             cleaned.append({"role": role, "content": content[:maximum]})
         return cleaned[-safe_limit:]
