@@ -21,47 +21,47 @@ _ALLOWED_FACT_TOPICS = frozenset({
 })
 _MEMORY_SECRET_RE = re.compile(
     r"(?i)(?:api[_ -]?key|access[_ -]?token|token|password|contraseñ|clave|secret|"
-    r"bearer|https?://|www\\.|[\\w.+-]+@[\\w.-]+\\.[a-z]{2,}|\\b\\d{7,}\\b)"
+    r"bearer|https?://|www\.|[\w.+-]+@[\w.-]+\.[a-z]{2,}|\b\d{7,}\b)"
 )
 _MEMORY_SENSITIVE_RE = re.compile(
-    r"(?i)\\b(?:mi diagn[oó]stico|mi enfermedad|mi trastorno|mi tratamiento|"
+    r"(?i)\b(?:mi diagn[oó]stico|mi enfermedad|mi trastorno|mi tratamiento|"
     r"me diagnosticaron|tengo (?:depresi[oó]n|ansiedad|bipolaridad|"
     r"diabetes|epilepsia|vih|c[aá]ncer|una enfermedad)|tomo (?:medicaci[oó]n|"
     r"antidepresivos|ansiol[ií]ticos)|mi historial m[eé]dico|mi salud mental|"
     r"mi orientaci[oó]n sexual|mi vida sexual|mi religi[oó]n|soy (?:cat[oó]lic[oa]|"
     r"evang[eé]lic[oa]|musulm[aá]n|jud[ií]o|ate[oa])|mi partido pol[ií]tico|"
     r"voto por|mi domicilio|mi direcci[oó]n|mi n[uú]mero de tel[eé]fono|"
-    r"mi correo electr[oó]nico)\\b"
+    r"mi correo electr[oó]nico)\b"
 )
 _EXPLICIT_REMEMBER_RE = re.compile(
     r"^(?:stella[, ]*)?(?:recuerda(?:me)?|no olvides|ten en cuenta|ten presente|"
-    r"guarda en tu memoria|acu[eé]rdate de)\\s+(?:que\\s+)?(?P<fact>.+)$",
+    r"guarda en tu memoria|acu[eé]rdate de)\s+(?:que\s+)?(?P<fact>.+)$",
     re.IGNORECASE,
 )
 _STABLE_FACT_PATTERNS = (
     ("proyecto", re.compile(
-        r"\\b(?:mi proyecto|estoy (?:creando|desarrollando|construyendo|trabajando en))\\s+"
-        r"(?:se llama\\s+|es\\s+|consiste en\\s+)?(?P<fact>[^.!?\\n]{5,300})",
+        r"\b(?:mi proyecto|estoy (?:creando|desarrollando|construyendo|trabajando en))\s+"
+        r"(?:se llama\s+|es\s+|consiste en\s+)?(?P<fact>[^.!?\n]{5,300})",
         re.IGNORECASE,
     )),
     ("objetivo", re.compile(
-        r"\\b(?:mi objetivo|mi meta|mi prop[oó]sito)\\s+(?:es|consiste en)\\s+"
-        r"(?P<fact>[^.!?\\n]{5,300})",
+        r"\b(?:mi objetivo|mi meta|mi prop[oó]sito)\s+(?:es|consiste en)\s+"
+        r"(?P<fact>[^.!?\n]{5,300})",
         re.IGNORECASE,
     )),
     ("preferencia", re.compile(
-        r"\\b(?:prefiero|me gusta|me encanta|no me gusta|no soporto)\\s+"
-        r"(?P<fact>[^.!?\\n]{5,240})",
+        r"\b(?:prefiero|me gusta|me encanta|no me gusta|no soporto)\s+"
+        r"(?P<fact>[^.!?\n]{5,240})",
         re.IGNORECASE,
     )),
     ("estudio", re.compile(
-        r"\\b(?:estudio|estoy estudiando|mi carrera es|me estoy formando en)\\s+"
-        r"(?P<fact>[^.!?\\n]{3,240})",
+        r"\b(?:estudio|estoy estudiando|mi carrera es|me estoy formando en)\s+"
+        r"(?P<fact>[^.!?\n]{3,240})",
         re.IGNORECASE,
     )),
     ("trabajo", re.compile(
-        r"\\b(?:trabajo en|trabajo como|mi trabajo es|me dedico a)\\s+"
-        r"(?P<fact>[^.!?\\n]{3,240})",
+        r"\b(?:trabajo en|trabajo como|mi trabajo es|me dedico a)\s+"
+        r"(?P<fact>[^.!?\n]{3,240})",
         re.IGNORECASE,
     )),
 )
@@ -118,7 +118,7 @@ class QdrantConversationMemory:
 
     @staticmethod
     def _identity(room_id: str, uid: str) -> tuple[str, str]:
-        raw = f"{str(room_id)}\\0{str(uid)}"
+        raw = f"{str(room_id)}\0{str(uid)}"
         digest = hashlib.sha256(raw.encode("utf-8", "replace")).hexdigest()
         point_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"stella-ai-memory:{digest}"))
         return digest, point_id
@@ -177,17 +177,17 @@ class QdrantConversationMemory:
     @staticmethod
     def _redact_secrets(content: str) -> str:
         text = re.sub(
-            r"(?i)\\b(api[_ -]?key|access[_ -]?token|token|password|contraseña|clave|secret)\\s*[:=]\\s*([^\\s,;]+)",
-            r"\\1=[REDACTED]",
+            r"(?i)\b(api[_ -]?key|access[_ -]?token|token|password|contraseña|clave|secret)\s*[:=]\s*([^\s,;]+)",
+            r"\1=[REDACTED]",
             content,
         )
-        text = re.sub(r"(?i)\\bBearer\\s+[^\\s,;]+", "Bearer [REDACTED]", text)
+        text = re.sub(r"(?i)\bBearer\s+[^\s,;]+", "Bearer [REDACTED]", text)
         text = re.sub(
-            r"(?i)\\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,}\\b",
+            r"(?i)\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b",
             "[EMAIL OMITIDO]",
             text,
         )
-        text = re.sub(r"(?<!\\w)\\+?\\d[\\d ()-]{7,}\\d(?!\\w)", "[TELÉFONO OMITIDO]", text)
+        text = re.sub(r"(?<!\w)\+?\d[\d ()-]{7,}\d(?!\w)", "[TELÉFONO OMITIDO]", text)
         return text
 
     @classmethod
@@ -240,7 +240,7 @@ class QdrantConversationMemory:
         # Keep the newest version of a repeated fact, preserving its stable ID.
         deduplicated: dict[str, dict[str, Any]] = {}
         for item in cleaned:
-            key = re.sub(r"\\W+", " ", item["content"].casefold()).strip()
+            key = re.sub(r"\W+", " ", item["content"].casefold()).strip()
             previous = deduplicated.get(key)
             if previous is None or item["updated_at"] >= previous["updated_at"]:
                 deduplicated[key] = item
@@ -406,9 +406,9 @@ class QdrantConversationMemory:
                 return None
             facts = self._clean_facts(self._parse_list(payload.get("facts")), self.max_facts)
             new_fact = cleaned[0]
-            normalized = re.sub(r"\\W+", " ", new_fact["content"].casefold()).strip()
+            normalized = re.sub(r"\W+", " ", new_fact["content"].casefold()).strip()
             for index, existing in enumerate(facts):
-                existing_normalized = re.sub(r"\\W+", " ", existing["content"].casefold()).strip()
+                existing_normalized = re.sub(r"\W+", " ", existing["content"].casefold()).strip()
                 if existing["topic"] == new_fact["topic"] and existing_normalized == normalized:
                     new_fact["id"] = existing["id"]
                     facts[index] = new_fact
