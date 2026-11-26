@@ -1,4 +1,4 @@
-"""Opt-in, durable AI conversation and fact memory backed by Qdrant."""
+"""Automatic, durable AI conversation and fact memory backed by Qdrant."""
 from __future__ import annotations
 
 import asyncio
@@ -68,7 +68,7 @@ _STABLE_FACT_PATTERNS = (
 
 
 class QdrantConversationMemory:
-    """Stores recent turns and durable, user-confirmed facts per room/member."""
+    """Stores recent turns and durable, privacy-filtered facts per room/member."""
 
     def __init__(self, *, client: httpx.AsyncClient | None = None) -> None:
         self.url = os.getenv("QDRANT_URL", "").strip().rstrip("/")
@@ -155,7 +155,6 @@ class QdrantConversationMemory:
         now = time.monotonic()
         if now - self._last_cleanup < self.cleanup_interval_seconds:
             return
-        self._last_cleanup = now
         try:
             client = await self._http()
             response = await client.post(
@@ -171,8 +170,15 @@ class QdrantConversationMemory:
                 },
             )
             response.raise_for_status()
+            self._last_cleanup = now
         except Exception as exc:
             log.warning("Expired AI memory cleanup failed (%s).", type(exc).__name__)
+
+    async def cleanup(self) -> None:
+        """Public maintenance hook used by the service's periodic cleanup worker."""
+        if self.enabled:
+            await self.ensure_collection()
+            await self._cleanup_expired_if_due()
 
     @staticmethod
     def _redact_secrets(content: str) -> str:
@@ -373,8 +379,9 @@ class QdrantConversationMemory:
             await self.ensure_collection()
             await self._cleanup_expired_if_due()
             payload = await self._read_payload(room_id, uid)
-            if not payload or payload.get("enabled") is not True:
+            if payload is not None and payload.get("enabled") is False:
                 return False
+            payload = payload or {}
             payload["turns"] = json.dumps(
                 self._clean_turns(turns, self.max_turns),
                 ensure_ascii=False,
@@ -402,8 +409,9 @@ class QdrantConversationMemory:
             await self.ensure_collection()
             await self._cleanup_expired_if_due()
             payload = await self._read_payload(room_id, uid)
-            if not payload or payload.get("enabled") is not True:
+            if payload is not None and payload.get("enabled") is False:
                 return None
+            payload = payload or {}
             facts = self._clean_facts(self._parse_list(payload.get("facts")), self.max_facts)
             new_fact = cleaned[0]
             normalized = re.sub(r"\W+", " ", new_fact["content"].casefold()).strip()
@@ -466,7 +474,9 @@ class QdrantConversationMemory:
             await self.ensure_collection()
             await self._cleanup_expired_if_due()
             payload = await self._read_payload(room_id, uid)
-            return bool(payload and payload.get("enabled") is True)
+            # No record means automatic memory is on for a new member.
+            # Only an explicit, durable opt-out tombstone disables it.
+            return payload is None or payload.get("enabled") is not False
         except Exception as exc:
             log.warning("Persistent AI memory preference read failed (%s).", type(exc).__name__)
             return False
