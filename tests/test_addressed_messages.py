@@ -11,8 +11,8 @@ class Platform:
         self.ids = {"stella-msg"}
     def has_sent_message(self, room, message_id):
         return message_id in self.ids
-    async def send_message(self, room, content, reply_id=None):
-        self.sent.append((room, content, reply_id))
+    async def send_message(self, room, content, reply_id=None, mentions=None):
+        self.sent.append((room, content, reply_id, mentions))
         return True
 
 class Store:
@@ -502,3 +502,96 @@ def test_reply_formatter_converts_visible_escaped_newlines_to_real_lines():
 
     assert r"\n" not in formatted
     assert len(formatted.splitlines()) == 2
+
+
+
+def test_reply_to_another_member_does_not_block_a_command():
+    b = bot()
+    calls = []
+
+    async def capture(*args):
+        calls.append(args)
+
+    b._command = capture
+    asyncio.run(b.handle_event({
+        "type": "message",
+        "threadId": "r",
+        "message": {
+            "content": "!ping",
+            "replyMessageId": "other-user-message",
+            "replyMessage": {
+                "messageId": "other-user-message",
+                "author": {"uid": "other-user", "nickname": "Otra persona"},
+                "content": "mensaje anterior",
+            },
+            "author": {"uid": "u", "nickname": "Persona"},
+        },
+    }))
+    assert len(calls) == 1
+    assert calls[0][3] == "ping"
+
+
+def test_reply_command_after_leading_user_mention_is_executed():
+    b = bot()
+    calls = []
+
+    async def capture(*args):
+        calls.append(args)
+
+    b._command = capture
+    asyncio.run(b.handle_event({
+        "type": "message",
+        "threadId": "r",
+        "message": {
+            "content": "@OtraPersona !ping",
+            "replyMessage": {
+                "messageId": "other-user-message",
+                "author": {"uid": "other-user", "nickname": "OtraPersona"},
+                "content": "mensaje anterior",
+            },
+            "author": {"uid": "u", "nickname": "Persona"},
+        },
+    }))
+    assert len(calls) == 1
+    assert calls[0][3] == "ping"
+
+
+def test_mention_command_targets_replied_to_author():
+    b = bot()
+    asyncio.run(b.handle_event({
+        "type": "message",
+        "threadId": "r",
+        "message": {
+            "content": "!mencionar ven a ver esto",
+            "replyMessage": {
+                "messageId": "target-message",
+                "author": {"uid": "target-uid", "nickname": "OtraPersona"},
+                "content": "¿alguien vio esto?",
+            },
+            "author": {"uid": "sender-uid", "nickname": "Persona"},
+        },
+    }))
+    assert len(b.platform.sent) == 1
+    sent = b.platform.sent[0]
+    assert "@OtraPersona ven a ver esto" in sent[1]
+    assert sent[3] == [{"uid": "target-uid", "name": "OtraPersona"}]
+
+
+def test_mention_command_uses_structured_mentions_and_deduplicates_targets():
+    b = bot()
+    asyncio.run(b.handle_event({
+        "type": "message",
+        "threadId": "r",
+        "message": {
+            "content": "!mention",
+            "mentions": [
+                {"uid": "target-uid", "nickname": "Target"},
+                {"uid": "target-uid", "nickname": "Target"},
+                {"uid": "sender-uid", "nickname": "Sender"},
+            ],
+            "author": {"uid": "sender-uid", "nickname": "Sender"},
+        },
+    }))
+    assert len(b.platform.sent) == 1
+    assert b.platform.sent[0][1] == "@Target"
+    assert b.platform.sent[0][3] == [{"uid": "target-uid", "name": "Target"}]
