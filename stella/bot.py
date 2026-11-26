@@ -1702,7 +1702,7 @@ class StellaBot:
             "ayudar": "ayuda a", "regalar": "le entrega un detalle a", "acompanar": "acompaña a",
             "asustar": "intenta asustar a", "curar": "atiende a", "cargar": "carga a",
             "empujar": "empuja a", "reganar": "regaña a", "admirar": "admira a",
-            "apoyar": "muestra su apoyo a", "dormir": "se queda dormido junto a",
+            "apoyar": "muestra su apoyo a", "dormir": "se queda junto a y acompaña a",
             "ignorar": "decide ignorar a", "mirar": "se queda mirando a", "invitar": "invita a",
         }
         mentioned = self._mentioned_user(message)

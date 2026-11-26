@@ -768,3 +768,23 @@ def test_global_silence_blocks_voice_button_interactions():
 
     assert b.voice.interactions == []
     assert b.voice.speech_stopped is True
+
+
+
+def test_sleep_social_action_does_not_assume_the_sender_gender():
+    b = bot()
+
+    asyncio.run(
+        b._social_action(
+            "room-a",
+            "owner",
+            "Alex",
+            "@Persona",
+            {"_stella_social_action": "dormir"},
+        )
+    )
+
+    assert b.platform.sent
+    assert "Alex se queda junto a y acompaña a @Persona." in b.platform.sent[0][1]
+    assert "dormido" not in b.platform.sent[0][1]
+    assert "dormida" not in b.platform.sent[0][1]
