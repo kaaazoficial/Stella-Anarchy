@@ -108,7 +108,7 @@ class QdrantConversationMemory:
                 continue
             # Never preserve obvious credentials or secrets in long-term context.
             content = re.sub(
-                r"(?i)\b(api[_ -]?key|access[_ -]?token|password|contraseña|clave|secret)\s*[:=]\s*([^\s,;]+)",
+                r"(?i)\b(api[_ -]?key|access[_ -]?token|token|password|contraseña|clave|secret)\s*[:=]\s*([^\s,;]+)",
                 r"\1=[REDACTED]",
                 content,
             )
@@ -203,10 +203,36 @@ class QdrantConversationMemory:
             return False
 
     async def set_enabled(self, room_id: str, uid: str, enabled: bool) -> bool:
-        if not enabled:
-            return await self.forget(room_id, uid)
         if not self.enabled or not room_id or not uid:
             return False
+        if not enabled:
+            # Keep a durable opt-out tombstone so stale local settings cannot
+            # re-enable memory after a restart. Conversation text is erased.
+            try:
+                await self.ensure_collection()
+                digest, point_id = self._identity(room_id, uid)
+                client = await self._http()
+                now = int(time.time())
+                response = await client.put(
+                    f"{self._collection_url()}/points?wait=true",
+                    headers=self._headers(),
+                    json={"points": [{
+                        "id": point_id,
+                        "vector": [0.0],
+                        "payload": {
+                            "identity": digest,
+                            "enabled": False,
+                            "turns": "[]",
+                            "updated_at": now,
+                            "expires_at": now + self.retention_days * 86400,
+                        },
+                    }]},
+                )
+                response.raise_for_status()
+                return True
+            except Exception as exc:
+                log.warning("Persistent AI memory opt-out failed (%s).", type(exc).__name__)
+                return False
         # Persist consent in Qdrant itself, not ephemeral local settings.
         # Preserve existing turns if a record is already present.
         try:
