@@ -440,7 +440,7 @@ def test_playful_insults_are_routed_to_ai_for_a_comeback(content):
     }))
 
     assert len(calls) == 1
-    assert "contraataque ingenioso" in calls[0][3]
+    assert calls[0][3] == content.removeprefix("Stella, ").strip()
     assert b.platform.sent == []
 
 
@@ -464,7 +464,7 @@ def test_teasing_is_routed_to_ai_for_playful_banter(content):
     }))
 
     assert len(calls) == 1
-    assert "Mensaje recibido:" in calls[0][3]
+    assert calls[0][3] == content.removeprefix("Stella, ").strip()
 
 
 @pytest.mark.parametrize("content", [
