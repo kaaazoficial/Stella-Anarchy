@@ -627,7 +627,10 @@ class StellaBot:
         if not callable(reader):
             return prompt
         try:
-            events = await reader(str(room_id), limit=28)
+            events = await asyncio.wait_for(
+                reader(str(room_id), limit=28),
+                timeout=1.5,
+            )
         except Exception as exc:
             log.warning("Room history context unavailable (%s).", type(exc).__name__)
             return prompt
