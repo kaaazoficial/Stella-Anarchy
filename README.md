@@ -36,7 +36,7 @@ Stella is an independent Python bot for Anarchy Apps. It has its own codebase, c
 
 ## Privacy, data and retention
 
-Stella can optionally index ordinary room messages in Qdrant when configured. Indexed text expires after 30 days by default, cleanup runs every six hours, and retrieval is restricted to the current room. Users can opt out with `!memoria desactivar`, re-enable with `!memoria activar`, or delete their indexed messages with `!memoria olvidar`. AI conversation context remains ephemeral. AI continuity is optional and volatile: at most two recent exchanges per room/user, a five-minute TTL, a maximum of 100 active sessions and an explicit `!ia olvidar` command. This context is held only in process memory and disappears on restart. Prompts sent to Gemini or Groq are processed by the selected provider; that provider's own retention policy still applies.
+Stella can optionally index ordinary room messages in Qdrant when configured. Indexed text expires after 30 days by default, cleanup runs every six hours, and retrieval is restricted to the current room and the requesting user. Users can enable or disable this with `!memoria activar` / `!memoria desactivar`, search their own indexed content with `!memoria buscar <consulta>`, or delete it with `!memoria olvidar`. AI conversation continuity has a separate explicit opt-in: `!memoria conversacion activar`. When enabled, Stella stores at most ten recent user/assistant turns in a dedicated Qdrant collection, scoped to the room and user, with a 30-day default expiry. Expired records are physically cleaned from Qdrant on a six-hour interval while Stella is receiving activity. It is not mixed with other members' memories. Disable it with `!memoria conversacion desactivar`; this erases conversation turns and keeps a minimal technical opt-out marker so a local setting cannot reactivate memory after a restart. `!memoria olvidar` removes all available memories and the opt-in marker; `!ia olvidar` clears the saved conversation turns while keeping the opt-in active. If Qdrant is unavailable, Stella continues without durable continuity and does not claim that a save succeeded. Prompts sent to Gemini or Groq are processed by the selected provider; that provider's own retention policy still applies. Users can inspect their memory status with `!memoria` and `!memoria conversacion`.
 
 SQLite stores only data required by existing community features:
 - Account operations: UID, nickname, points and last-seen timestamp. Accounts and their associated points/reward state are deleted after 90 days of inactivity.
@@ -50,7 +50,7 @@ SQLite stores only data required by existing community features:
 - Events and attendee identifiers: 30 days after the event date.
 - Room settings and automatic-reply rules: retained as community configuration until deleted or the database is removed.
 
-Anti-spam fingerprints, command sessions, AI context, voice participants, TTS/music queues, webhook de-duplication and cooldowns remain in bounded or expiring process memory. No conversation text is included in activity metrics. SQLite cleanup runs at startup and at least hourly while the process receives events.
+Anti-spam fingerprints, command sessions, voice participants, TTS/music queues, webhook de-duplication and cooldowns remain in bounded or expiring process memory. When enabled, AI conversation turns are the exception and are restored from Qdrant after a restart. No conversation text is included in activity metrics. SQLite cleanup runs at startup and at least hourly while the process receives events.
 
 The Anarchy API's bot messaging capabilities do not mean the bot can delete or mute another member's messages. A warning is an internal moderation record, not a platform-enforced punishment. Link inspection is heuristic and does not certify that a destination is safe.
 
@@ -72,6 +72,9 @@ Set these variables in the hosting provider. Never commit real credentials.
 | `QDRANT_URL` | No | Qdrant Cloud endpoint |
 | `QDRANT_API_KEY` | No | Qdrant API key; keep secret |
 | `QDRANT_COLLECTION` | No | Defaults to `stella_messages` |
+| `QDRANT_AI_MEMORY_COLLECTION` | No | Defaults to `stella_ai_memory`; separate durable conversation history |
+| `AI_MEMORY_RETENTION_DAYS` | No | Durable conversation-memory expiry; defaults to 30 days |
+| `AI_MEMORY_CLEANUP_INTERVAL_SECONDS` | No | Cleanup interval for expired conversation memories; defaults to 21600 (six hours) |
 | `GEMINI_EMBEDDING_MODEL` | No | Defaults to `gemini-embedding-2` |
 | `GEMINI_EMBEDDING_DIMENSIONS` | No | Defaults to `768` |
 | `MEMORY_RETENTION_DAYS` | No | Defaults to `30` |
@@ -86,7 +89,7 @@ Set these variables in the hosting provider. Never commit real credentials.
 | `TTS_VOICE` | No | Defaults to Chilean Spanish Catalina |
 | `PROMETHEUS_METRICS_TOKEN` | No | Optional Bearer token protecting `/metrics` |
 
-AI uses Gemini first and automatically tries Groq if Gemini fails. Both provider keys are optional, but at least one is required for `!ia` and `!traducir`. The AI provider response is not saved in Stella's SQLite database and Stella does not maintain conversation history. The external providers' own processing and retention policies still apply. Web search uses DuckDuckGo's HTML search endpoint and may be unavailable if the provider blocks the request.
+AI uses Gemini first and automatically tries Groq if Gemini fails. Both provider keys are optional, but at least one is required for `!ia` and `!traducir`. Persistent conversation memory, when explicitly enabled by a member, is stored in the separate `stella_ai_memory` Qdrant collection and expires after the configured retention period. It is not stored in SQLite. The external providers' own processing and retention policies still apply. Web search uses DuckDuckGo's HTML search endpoint and may be unavailable if the provider blocks the request.
 
 Voice commands require an active Anarchy call and working LiveKit credentials from the Anarchy voice API. TTS additionally requires Edge TTS, PyAV and NumPy. Music playback uses only validated tracks from open-license catalogues (Internet Archive, Wikimedia Commons, Openverse, ccMixter, Audius and optionally Jamendo via `JAMENDO_CLIENT_ID`). YouTube is not used as a LiveKit audio source because its API policies prohibit downloading or relaying copies of audiovisual content without written permission. Voice rooms, TTS queues, music queues, search selections and downloaded audio are temporary and are removed on room exit or process shutdown.
 

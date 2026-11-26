@@ -10,7 +10,7 @@ from urllib.parse import quote
 import httpx
 
 from stella.config import get_gemini_api_key
-from stella.persona import GENDER_NEUTRAL_GUIDANCE
+from stella.persona import GENDER_NEUTRAL_GUIDANCE, STELLA_CHARACTER_GUIDANCE
 
 log = logging.getLogger("stella.ai")
 
@@ -25,13 +25,15 @@ STELLA_SYSTEM = (
     "No afirmes haber ejecutado acciones que no se hayan realizado. "
     "Distingue hechos de estimaciones y reconoce cuando no sepas algo. "
     "No inventes funciones, fuentes, resultados ni recuerdos. "
-    "No afirmes tener memoria personal permanente. "
+    "No prometas recordar todo ni conservar información ilimitadamente; utiliza solo recuerdos autorizados que estén disponibles. "
     + GENDER_NEUTRAL_GUIDANCE
+    + "\n\n"
+    + STELLA_CHARACTER_GUIDANCE
 )
 
 
 class StellaAI:
-    """Gemini-first AI with Groq fallback; prompts and answers are never persisted."""
+    """Gemini-first provider client; durable conversation context is managed separately."""
 
     def __init__(self) -> None:
         self.gemini_key = get_gemini_api_key()
@@ -82,7 +84,8 @@ class StellaAI:
         return (
             f"IA principal: {primary}. Gemini: {gemini_state} "
             f"({self.gemini_model}). Groq: {groq_state} ({self.groq_model}). "
-            "Las peticiones no se guardan como historial en Stella."
+            "La memoria persistente de conversación es opcional y se gestiona aparte en Qdrant; "
+            "solo se guarda cuando cada persona la activa explícitamente para esa sala."
         )
 
     @staticmethod

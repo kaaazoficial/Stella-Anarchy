@@ -27,7 +27,7 @@ _GREETING_RE = re.compile(
     flags=re.IGNORECASE,
 )
 _CALL_PREFIX_RE = re.compile(
-    r"^[¡!¿?]*\s*(?:oye|ey|hey|escucha|disculpa|perdona)\s*[,!:;]?\s+",
+    r"^[¡!¿?]*\s*(?:oye|ey|hey|hola|escucha|disculpa|perdona)\s*[,!:;]?\s+",
     flags=re.IGNORECASE,
 )
 _NAME_TOKEN_RE = re.compile(
@@ -36,7 +36,7 @@ _NAME_TOKEN_RE = re.compile(
 )
 _DIRECT_REQUEST_RE = re.compile(
     r"\b(?:que|qué|como|cómo|quien|quién|cuando|cuándo|donde|dónde|"
-    r"puedes|podrias|podrías|quieres|ayudarme|ayudame|ayúdame|ayudas|"
+    r"puedes|podrias|podrías|quieres|ayuda|help|ayudarme|ayudame|ayúdame|ayudas|"
     r"dime|explica|explicame|explícame|revisa|mira|escucha|consulta|"
     r"busca|recomiendame|recomiéndame|cuentame|cuéntame|"
     r"haz|resuelve|enseña|ensename|enséñame|"
@@ -44,7 +44,7 @@ _DIRECT_REQUEST_RE = re.compile(
     flags=re.IGNORECASE,
 )
 _DIRECT_CALL_START_RE = re.compile(
-    r"^[\s,;:!?¡¿]*(?:puedes|podrias|podrías|quieres|ayudarme|ayudame|ayúdame|"
+    r"^[\s,;:!?¡¿]*(?:puedes|podrias|podrías|quieres|ayuda|help|ayudarme|ayudame|ayúdame|"
     r"ayudas|dime|explica|explicame|explícame|revisa|mira|escucha|consulta|"
     r"busca|recomiendame|recomiéndame|cuentame|cuéntame|haz|resuelve|"
     r"enseña|ensename|enséñame|me ayudas)\b"
@@ -83,8 +83,15 @@ def _is_stella_name(value: str) -> bool:
     return _name_similarity(candidate, "stella") >= 82
 
 
+_NAME_OBJECT_PREPOSITION_RE = re.compile(
+    r"\b(?:a|de|con|para|por|sobre|hacia|desde|entre|seg[uú]n|"
+    r"vi|viendo|conoc[ií]|habl[eé]|escuch[eé]|encontr[eé])\s*$",
+    flags=re.IGNORECASE,
+)
+
+
 def _is_direct_vocative(text: str, match: re.Match) -> bool:
-    """Avoid reacting to casual third-person mentions while allowing any sentence position."""
+    """Recognize Stella as a call at any sentence position, not as a third-person subject."""
     if match.start() == 0:
         return True
     if text[match.start():match.end()].startswith("@"):
@@ -94,31 +101,40 @@ def _is_direct_vocative(text: str, match: re.Match) -> bool:
     after = text[match.end():]
     before_trimmed = before.rstrip()
     after_trimmed = after.lstrip()
+    has_request_cue = bool(
+        _DIRECT_REQUEST_RE.search(before)
+        or _DIRECT_REQUEST_RE.search(after)
+        or _DIRECT_CALL_START_RE.search(after)
+    )
 
-    # Commas and similar separators are the strongest signal of a vocative.
+    # A name governed by a preposition or a reporting verb is normally a
+    # third-person reference ("hablé con Stella", "¿qué opinas de Stella?").
+    # A clear imperative/question directed at Stella still takes precedence.
+    object_reference = bool(_NAME_OBJECT_PREPOSITION_RE.search(before_trimmed))
+    if object_reference:
+        return False
+
+    # Commas, colons and semicolons can mark a vocative in the middle or end.
     if before_trimmed.endswith((",", ":", ";")) or after_trimmed.startswith((",", ":", ";")):
         return True
 
-    # Names at the end are accepted when the sentence is a greeting, request,
-    # question, or explicit affectionate expression.
+    # When the name closes the sentence, require a greeting, direct request,
+    # affectionate expression or explicit question/request wording.
     if not after_trimmed.strip(" .!?¡¿"):
         return bool(
             _GREETING_RE.match(before_trimmed + " ")
             or _DIRECT_REQUEST_RE.search(before)
+            or _DIRECT_CALL_START_RE.search(before)
             or _AFFECTION_RE.search(before)
             or _WARM_VOCATIVE_RE.search(before)
-            or "?" in before
-            or "¿" in before
-            or "!" in before
         )
 
-    # Mid-sentence invocations must look like a request/question, not a casual
-    # reference such as "Hoy hablé con stella en el chat".
+    # Mid-sentence calls work in forms such as "Oye Stella, ¿puedes...?"
+    # and "Tengo una duda, Stella: ...", without matching casual name mentions.
     return bool(
         _DIRECT_REQUEST_RE.search(before)
         or _DIRECT_CALL_START_RE.search(after)
-        or "?" in before
-        or "¿" in before
+        or has_request_cue
     )
 
 

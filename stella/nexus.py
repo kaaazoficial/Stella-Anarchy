@@ -81,8 +81,10 @@ def interpret_natural_request(value: str) -> str | None:
     normalized = _normalize(text)
     if not normalized:
         return None
+    if normalized in {"ayuda", "help"}:
+        return "asistente " + text[:300]
     patterns = (
-        (r"^(?:ayuda|que puedes hacer|que sabes hacer|comandos disponibles)$", "ayuda"),
+        (r"^(?:que puedes hacer|que sabes hacer|comandos disponibles)$", "ayuda"),
         (r"^(?:muestra|abre|consulta) (?:mi )?perfil$", "perfil"),
         (r"^(?:muestra|consulta) (?:mis )?puntos$", "puntos"),
         (r"^(?:muestra|abre|consulta) (?:el )?ranking$", "ranking"),

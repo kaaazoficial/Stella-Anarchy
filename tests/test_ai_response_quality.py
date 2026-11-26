@@ -185,3 +185,19 @@ def test_all_general_ai_instruction_modes_include_neutral_person_references():
         prompt = build_ai_instructions(frozenset(), intent)
         assert STELLA_IDENTITY_GUIDANCE in prompt
         assert "no los infieras por su nombre" in prompt.casefold()
+
+
+
+def test_stella_character_guidance_is_shared_by_all_conversation_prompts():
+    from stella.ai import STELLA_SYSTEM
+    from stella.ai_core import STELLA_IDENTITY_GUIDANCE, build_ai_instructions
+    from stella.persona import STELLA_CHARACTER_GUIDANCE
+
+    assert STELLA_CHARACTER_GUIDANCE in STELLA_SYSTEM
+    assert STELLA_CHARACTER_GUIDANCE in STELLA_IDENTITY_GUIDANCE
+    assert "opiniones" in STELLA_CHARACTER_GUIDANCE
+    assert "no inventes vivencias físicas" in STELLA_CHARACTER_GUIDANCE.casefold()
+    assert "no interrumpas conversaciones al azar" in STELLA_CHARACTER_GUIDANCE.casefold()
+
+    for intent in ("conversation", "action", "research", "multi_action"):
+        assert STELLA_CHARACTER_GUIDANCE in build_ai_instructions(frozenset(), intent)

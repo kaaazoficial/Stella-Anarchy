@@ -788,3 +788,209 @@ def test_sleep_social_action_does_not_assume_the_sender_gender():
     assert "Alex se queda junto a y acompaña a @Persona." in b.platform.sent[0][1]
     assert "dormido" not in b.platform.sent[0][1]
     assert "dormida" not in b.platform.sent[0][1]
+
+
+def test_proactive_participation_is_off_by_default():
+    b = bot()
+    b._proactive_cooldown = {}
+    calls = []
+
+    async def fake_ask(prompt, *, system=None):
+        calls.append(prompt)
+        return "Yo empezaría comparando las necesidades del proyecto."
+
+    b.ai = SimpleNamespace(ask=fake_ask)
+
+    asyncio.run(b._maybe_proactive_reply(
+        "room-a",
+        "member",
+        "Alex",
+        "¿Alguien sabe qué base de datos conviene para un proyecto pequeño?",
+        {"messageId": "msg-1"},
+    ))
+
+    assert calls == []
+    assert b.platform.sent == []
+
+
+def test_proactive_participation_only_answers_clear_room_invitations_and_respects_cooldown():
+    b = bot()
+    b._proactive_cooldown = {}
+    b.shared_state.values["stella_proactive:room-a"] = "1"
+    calls = []
+
+    async def fake_ask(prompt, *, system=None):
+        calls.append((prompt, system))
+        return "Yo empezaría comparando las necesidades, el volumen de datos y el presupuesto."
+
+    b.ai = SimpleNamespace(ask=fake_ask)
+    invitation = "¿Alguien sabe qué base de datos conviene para un proyecto pequeño?"
+    message = {"messageId": "msg-1"}
+
+    asyncio.run(b._maybe_proactive_reply("room-a", "member", "Alex", invitation, message))
+    asyncio.run(b._maybe_proactive_reply("room-a", "member-2", "Sam", invitation, {"messageId": "msg-2"}))
+
+    assert len(calls) == 1
+    assert "no ejecutes" in calls[0][1].casefold()
+    assert len(b.platform.sent) == 1
+    assert "presupuesto" in b.platform.sent[0][1].casefold()
+
+
+def test_proactive_participation_ignores_ordinary_chat_without_an_invitation():
+    b = bot()
+    b._proactive_cooldown = {}
+    b.shared_state.values["stella_proactive:room-a"] = "1"
+    calls = []
+
+    async def fake_ask(prompt, *, system=None):
+        calls.append(prompt)
+        return "No debería responder."
+
+    b.ai = SimpleNamespace(ask=fake_ask)
+
+    asyncio.run(b._maybe_proactive_reply(
+        "room-a", "member", "Alex", "Hoy estoy jugando Minecraft con mis amigos.", {}
+    ))
+
+    assert calls == []
+    assert b.platform.sent == []
+
+
+
+def test_proactive_presence_setting_is_admin_only_and_persisted():
+    b = bot()
+    b.settings.additional_admin_uids = ""
+    b.settings.admin_uids = "owner"
+    b._proactive_enabled_cache = {}
+    b._proactive_cooldown = {}
+
+    asyncio.run(b._stella_presence("room-a", "member", "Persona", "activar", {}))
+    assert b.shared_state.values.get("stella_proactive:room-a") is None
+
+    asyncio.run(b._stella_presence("room-a", "owner", "Owner", "activar", {}))
+    assert b.shared_state.values["stella_proactive:room-a"] == "1"
+    assert asyncio.run(b._proactive_enabled("room-a")) is True
+
+    asyncio.run(b._stella_presence("room-a", "owner", "Owner", "desactivar", {}))
+    assert b.shared_state.values["stella_proactive:room-a"] == "0"
+    assert asyncio.run(b._proactive_enabled("room-a")) is False
+
+
+
+def test_local_opt_out_blocks_persistent_memory_when_remote_storage_is_still_enabled():
+    b = bot()
+
+    async def remote_enabled(room_id, uid):
+        return True
+
+    b.ai_memory = SimpleNamespace(is_enabled=remote_enabled)
+    b.store.set_setting("room-a", "ai_memory_opt_out:member", "1")
+
+    assert asyncio.run(b._ai_memory_enabled("room-a", "member")) is False
+
+    b.store.set_setting("room-a", "ai_memory_opt_out:member", "0")
+    assert asyncio.run(b._ai_memory_enabled("room-a", "member")) is True
+
+
+
+@pytest.mark.parametrize("content, expected", [
+    ("Necesito ayuda, Stella", "Necesito ayuda"),
+    ("Oye, Stella, mira esto", "mira esto"),
+    ("Tengo una duda, Stella: ¿puedes revisarla?", "Tengo una duda ¿puedes revisarla?"),
+    ("¿Puedes ayudarme, Stella?", "¿Puedes ayudarme?"),
+    ("Mira esto, Stella", "Mira esto"),
+])
+def test_stella_call_is_recognized_at_the_start_middle_and_end(content, expected):
+    from stella.identity import extract_stella_call
+
+    assert extract_stella_call(content) == expected
+
+
+def test_plain_name_reference_is_not_a_stella_call():
+    from stella.identity import extract_stella_call
+
+    assert extract_stella_call("Hoy hablé con Stella en el chat") is None
+    assert extract_stella_call("¿Qué opinas de Stella?") is None
+
+
+def test_bare_help_in_reply_to_stella_is_not_the_help_command(monkeypatch):
+    import stella.bot as bot_module
+
+    b = bot()
+    ai_calls = []
+    command_calls = []
+
+    async def capture_ai(*args):
+        ai_calls.append(args)
+
+    async def capture_command(*args):
+        command_calls.append(args)
+
+    b._ai_assist = capture_ai
+    b._command = capture_command
+    monkeypatch.setattr(bot_module, "interpret_natural_request", lambda _value: None)
+
+    asyncio.run(b.handle_event({
+        "type": "message",
+        "threadId": "r",
+        "message": {
+            "content": "Ayuda",
+            "replyMessageId": "stella-msg",
+            "author": {"uid": "u", "nickname": "Persona"},
+        },
+    }))
+
+    assert ai_calls == []
+    assert command_calls == []
+    assert len(b.platform.sent) == 1
+    assert "¿Con qué necesitas ayuda?" in b.platform.sent[0][1]
+
+
+def test_explicit_help_command_still_works_when_replying_to_stella():
+    b = bot()
+    calls = []
+
+    async def capture_command(*args):
+        calls.append(args)
+
+    b._command = capture_command
+    asyncio.run(b.handle_event({
+        "type": "message",
+        "threadId": "r",
+        "message": {
+            "content": "!ayuda",
+            "replyMessageId": "stella-msg",
+            "author": {"uid": "u", "nickname": "Persona"},
+        },
+    }))
+
+    assert len(calls) == 1
+    assert calls[0][3] == "ayuda"
+
+
+def test_single_word_insult_in_reply_to_stella_routes_to_comeback_prompt(monkeypatch):
+    import stella.bot as bot_module
+
+    b = bot()
+    calls = []
+
+    async def capture_ai(*args):
+        calls.append(args)
+
+    b._ai_assist = capture_ai
+    monkeypatch.setattr(bot_module, "interpret_natural_request", lambda _value: None)
+
+    asyncio.run(b.handle_event({
+        "type": "message",
+        "threadId": "r",
+        "message": {
+            "content": "putita",
+            "replyMessageId": "stella-msg",
+            "author": {"uid": "u", "nickname": "Persona"},
+        },
+    }))
+
+    assert len(calls) == 1
+    assert "insultos" in calls[0][3].casefold() or "insultada" in calls[0][3].casefold()
+    assert "Mensaje recibido: putita" in calls[0][3]
+    assert b.platform.sent == []
