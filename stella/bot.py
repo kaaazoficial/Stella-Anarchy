@@ -29,6 +29,7 @@ from stella.matching import suggest_command
 from stella.spelling import detect_spanish_spelling_issues
 from stella.anarchy_events import update_voice_room_event, clear_voice_room, format_voice_state
 from stella.text import format_stella_text
+from stella.audit import audit_event
 from stella.utilities import calculate_expression, format_calculation_result
 from stella.link_analysis import extract_message_urls, inspect_link_signals, format_link_signals, classify_link_policy
 
@@ -284,12 +285,14 @@ class StellaBot:
         if not room_id:
             return
         if event_type == "room.ready":
+            audit_event("chat.room.ready", room_id=room_id)
             self.voice.notify_room_ready(room_id)
             return
         if event_type == "interaction":
             await self.voice.handle_interaction(event)
             return
         if event_type in {"room.end", "room.kicked", "thread.removed"}:
+            audit_event("chat.room.ended", room_id=room_id, event_type=event_type)
             self.voice.notify_room_ended(room_id)
             self._forget_room(room_id)
             clear_voice_room(room_id)
@@ -300,6 +303,16 @@ class StellaBot:
                     self.voice.interaction_sessions.pop(interaction_key, None)
             return
         if event_type in {"room.join", "room.leave", "room.speaker"}:
+            participant = event.get("user") or event.get("member") or event.get("author") or {}
+            if not isinstance(participant, dict):
+                participant = {}
+            audit_event(
+                "chat.room.activity",
+                room_id=room_id,
+                activity=event_type,
+                uid=participant.get("uid") or participant.get("userId") or participant.get("id"),
+                nickname=participant.get("nickname") or participant.get("displayName"),
+            )
             update_voice_room_event(event)
             return
         if event_type not in {"message", "message.created", "message_create"}:
@@ -311,6 +324,22 @@ class StellaBot:
         content = str(message.get("content") or "").strip()
         if not uid or not content or self._is_bot_message(message):
             return
+
+        # Render logs provide a live, searchable view of every user message,
+        # including ordinary chat that Stella intentionally does not answer.
+        audit_event(
+            "chat.message.in",
+            room_id=room_id,
+            message_id=message.get("messageId") or message.get("id"),
+            uid=uid,
+            nickname=name,
+            content=content,
+            addressed=bool(
+                extract_stella_call(content)
+                or self._is_stella_mentioned(message)
+                or self._is_stella_reply(room_id, message, event)
+            ),
+        )
 
         direct_call = extract_stella_call(content)
         mentioned = self._is_stella_mentioned(message)
