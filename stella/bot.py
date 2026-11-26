@@ -457,8 +457,7 @@ class StellaBot:
         if not uid or not content or self._is_bot_message(message):
             return
 
-        # Render logs provide a live, searchable view of every user message,
-        # including ordinary chat that Stella intentionally does not answer.
+        # Audit records retain only non-content metadata; message text is never logged.
         audit_event(
             "chat.message.in",
             room_id=room_id,
