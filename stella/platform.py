@@ -219,7 +219,7 @@ class AnarchyClient:
                 if not mention_uid or len(mention_uid) > 160 or mention_uid in seen_mentions:
                     continue
                 mention_name = re.sub(
-                    r"[\\x00-\\x1f\\x7f@<>]", "",
+                    r"[\x00-\x1f\x7f@<>]", "",
                     " ".join(str(mention.get("name") or "usuario").split()),
                 )[:48] or "usuario"
                 seen_mentions.add(mention_uid)
