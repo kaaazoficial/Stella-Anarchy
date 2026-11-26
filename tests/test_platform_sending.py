@@ -137,3 +137,16 @@ def test_send_message_converts_escaped_newlines_before_posting(monkeypatch):
         assert r"\\n" not in calls[0][2]["content"]
 
     asyncio.run(scenario())
+
+
+
+def test_retry_after_accepts_http_date_and_respects_long_server_wait():
+    from datetime import datetime, timezone, timedelta
+    from email.utils import format_datetime
+
+    future = datetime.now(timezone.utc) + timedelta(seconds=75)
+    value = format_datetime(future, usegmt=True)
+    delay = AnarchyClient._retry_after_seconds(value, 2.0)
+    assert 70 <= delay <= 76
+    assert AnarchyClient._retry_after_seconds("240", 2.0) == 240
+    assert AnarchyClient._retry_after_seconds("999", 2.0) == 300
