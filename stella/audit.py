@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import json
 import logging
 import re
@@ -25,12 +24,6 @@ def redact_secrets(value: Any) -> str:
     return text
 
 
-def _audit_fingerprint(value: Any) -> str:
-    """Create a short, non-reversible correlation token for audit metadata."""
-    raw = str(value or "").encode("utf-8", "replace")
-    return hashlib.sha256(raw).hexdigest()[:12]
-
-
 def audit_event(event: str, **fields: Any) -> None:
     """Emit metadata-only audit events; conversation text never enters logs."""
     payload = {
@@ -44,10 +37,8 @@ def audit_event(event: str, **fields: Any) -> None:
         if field in {"content", "text"}:
             payload["content_length"] = len(str(value))
             payload["content_redacted"] = True
-        elif field in {"uid", "message_id", "reply_id", "room_id"}:
-            payload[f"{field}_hash"] = _audit_fingerprint(value)
-        elif field == "nickname":
-            # Nicknames are user-controlled and may contain personal information.
+        elif field in {"uid", "message_id", "reply_id", "room_id", "nickname"}:
+            # Omit identifiers; plain hashes of predictable IDs can be reversed.
             continue
         else:
             payload[field] = value
