@@ -141,3 +141,22 @@ def test_advanced_ai_core_is_stella_only_and_bounded():
     assert "ayuda" in AI_PUBLIC_COMMANDS
     assert "investigar" in AI_COMMAND_CATALOG
     assert "" not in AI_PUBLIC_COMMANDS
+
+
+
+def test_ship_verdict_changes_its_reaction_by_compatibility_score(monkeypatch):
+    from stella.bot import ship_verdict
+
+    monkeypatch.setattr("stella.bot.random.choice", lambda values: values[0])
+    low = ship_verdict(5, "Ana", "Luis")
+    medium = ship_verdict(50, "Ana", "Luis")
+    high = ship_verdict(95, "Ana", "Luis")
+    perfect = ship_verdict(100, "Ana", "Luis")
+
+    assert "Compatibilidad: 5%" in low
+    assert "Compatibilidad: 50%" in medium
+    assert "Compatibilidad: 95%" in high
+    assert "Compatibilidad: 100%" in perfect
+    assert len({low.splitlines()[-1], medium.splitlines()[-1], high.splitlines()[-1], perfect.splitlines()[-1]}) == 4
+    assert "ficticio" not in perfect.casefold()
+    assert "recreativo" not in perfect.casefold()
