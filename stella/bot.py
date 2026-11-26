@@ -1153,6 +1153,17 @@ class StellaBot:
         self, room_id: str, message: dict[str, Any], event: dict[str, Any] | None = None
     ) -> bool:
         """Confirm a reply to Stella even after the local sent-ID cache is empty."""
+        # Explicit commands resolve quoted authors in their own dispatcher;
+        # skip the extra conversational lookup for these command messages.
+        content = str(message.get("content") or message.get("text") or "").strip()
+        prefixes = tuple(dict.fromkeys((
+            str(getattr(self.settings, "command_prefix", "!") or "!").strip() or "!",
+            "!", "-",
+        )))
+        if any(content.startswith(prefix) and len(content) > len(prefix) for prefix in prefixes):
+            return False
+        if re.match(r"^\s*(?:oye\s+)?@?stella\b\s*[!/-]\s*\w+", content, re.IGNORECASE):
+            return False
         if self._is_stella_reply(room_id, message, event):
             return True
         sources = (message, event or {})
