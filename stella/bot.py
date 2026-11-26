@@ -2573,7 +2573,9 @@ class StellaBot:
 
     async def _help_command(self, room_id, uid, name, args, message):
         prefix = self.settings.command_prefix
-        include_admin = self._is_admin(uid)
+        # Never publish the administrative catalogue into a shared room,
+        # even when an administrator requests the public help menu.
+        include_admin = False
         if args.strip():
             text = build_commands_help_text(prefix)
             await self._reply(
