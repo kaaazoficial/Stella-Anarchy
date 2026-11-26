@@ -220,5 +220,5 @@ def test_shared_response_quality_guidance_is_used_by_all_ai_providers():
 
     assert STELLA_RESPONSE_QUALITY_GUIDANCE in STELLA_SYSTEM
     assert STELLA_RESPONSE_QUALITY_GUIDANCE in STELLA_IDENTITY_GUIDANCE
-    assert "no conviertas cada turno en un cuestionario" in STELLA_RESPONSE_QUALITY_GUIDANCE
+    assert "sin convertir cada turno en un cuestionario" in STELLA_RESPONSE_QUALITY_GUIDANCE
     assert "ninguna palabra, pronombre, adjetivo" in STELLA_RESPONSE_QUALITY_GUIDANCE
