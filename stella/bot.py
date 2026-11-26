@@ -398,7 +398,9 @@ class StellaBot:
 
     async def _save_ai_memory(self, room_id: str, uid: str, session_key: str) -> bool:
         memory = getattr(self, "ai_memory", None)
-        if memory is None or not await self._ai_memory_enabled(room_id, uid):
+        if memory is None or self._ai_memory_locally_blocked(room_id, uid):
+            return False
+        if not await memory.is_enabled(room_id, uid):
             return False
         return await memory.save(room_id, uid, self.ai_core._history(session_key))
 
@@ -2324,28 +2326,32 @@ class StellaBot:
                 enabled = await ai_memory.set_enabled(room_id, uid, True) if ai_memory is not None else False
                 if enabled:
                     self.store.set_setting(room_id, ai_key, "1")
+                    self.store.set_setting(room_id, f"ai_memory_opt_out:{uid}", "0")
                     await self._restore_ai_memory(room_id, uid, f"{room_id}:{uid}")
                     await self._reply(room_id, "Memoria de conversación activada. Guardaré hasta 10 turnos tuyos y de Stella en esta sala, durante el plazo configurado. Puedes desactivarla o borrarla cuando quieras.", message)
                 else:
                     await self._reply(room_id, "No pude activar la memoria persistente. Comprueba la conexión con Qdrant antes de intentarlo de nuevo.", message)
             elif subaction in {"desactivar", "off", "apagar"}:
                 self.store.set_setting(room_id, ai_key, "0")
+                self.store.set_setting(room_id, f"ai_memory_opt_out:{uid}", "1")
                 self.ai_core.forget(f"{room_id}:{uid}")
                 deleted = await ai_memory.set_enabled(room_id, uid, False) if ai_memory is not None else False
                 await self._reply(room_id, "Memoria de conversación desactivada y contexto local eliminado." + ("" if deleted else " No pude confirmar el borrado remoto; revisa la conexión de Qdrant."), message)
             elif subaction in {"olvidar", "borrar", "forget"}:
+                self.store.set_setting(room_id, f"ai_memory_opt_out:{uid}", "1")
                 self.ai_core.forget(f"{room_id}:{uid}")
                 enabled = await ai_memory.is_enabled(room_id, uid) if ai_memory is not None else False
                 deleted = await ai_memory.clear(room_id, uid) if enabled and ai_memory is not None else False
                 await self._reply(room_id, "Contexto local eliminado." + (" También borré los turnos persistentes; la memoria sigue activada." if deleted else " No pude confirmar el borrado persistente."), message)
             else:
-                enabled = await ai_memory.is_enabled(room_id, uid) if ai_memory is not None else False
+                enabled = await self._ai_memory_enabled(room_id, uid)
                 status = ai_memory.status if ai_memory is not None else "no inicializada"
                 await self._reply(room_id, f"Memoria de conversación: {'activada' if enabled else 'desactivada'}; {status}. Usa !memoria conversacion activar|desactivar|olvidar.", message)
             return
         if action in {"off", "desactivar", "privado"}:
             self.store.set_setting(room_id, key, "0")
             self.store.set_setting(room_id, ai_key, "0")
+            self.store.set_setting(room_id, f"ai_memory_opt_out:{uid}", "1")
             if vector_memory is not None:
                 await vector_memory.forget_user(room_id, uid)
             self.ai_core.forget(f"{room_id}:{uid}")
@@ -2355,6 +2361,7 @@ class StellaBot:
             self.store.set_setting(room_id, key, "1")
             await self._reply(room_id, "Memoria semántica activada para tus próximos mensajes en esta sala. Para conservar el hilo de !ia tras reinicios, activa también !memoria conversacion activar.", message)
         elif action in {"olvidar", "borrar", "forget"}:
+            self.store.set_setting(room_id, f"ai_memory_opt_out:{uid}", "1")
             if vector_memory is not None:
                 await vector_memory.forget_user(room_id, uid)
             self.ai_core.forget(f"{room_id}:{uid}")
@@ -2369,7 +2376,7 @@ class StellaBot:
             memory_status = vector_memory.status if vector_memory is not None else "no inicializada en este proceso"
             retention_days = vector_memory.retention_days if vector_memory is not None else 30
             enabled = self.store.get_setting(room_id, key, "0") == "1"
-            ai_enabled = await ai_memory.is_enabled(room_id, uid) if ai_memory is not None else False
+            ai_enabled = await self._ai_memory_enabled(room_id, uid)
             ai_status = ai_memory.status if ai_memory is not None else "no inicializada"
             await self._reply(room_id, f"Memoria semántica: {memory_status}; tu estado: {'activada' if enabled else 'desactivada'}. Memoria de conversación: {'activada' if ai_enabled else 'desactivada'}; {ai_status}; retención semántica: {retention_days} días. Usa !memoria conversacion activar|desactivar|olvidar.", message)
 
