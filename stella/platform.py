@@ -36,6 +36,7 @@ class AnarchyClient:
         self._sent_message_ttl = 7 * 24 * 60 * 60
         self._sent_message_limit = 500
         self.identity: dict[str, Any] = {}
+        self.room_archive: Any | None = None
 
     async def close(self) -> None:
         await self._client.aclose()
@@ -268,6 +269,30 @@ class AnarchyClient:
                     )
                     if message_id:
                         self._remember_sent_message(room_id, message_id)
+                    archive = getattr(self, "room_archive", None)
+                    record_archive_event = getattr(archive, "record_event", None)
+                    if callable(record_archive_event):
+                        await record_archive_event(
+                            room_id,
+                            "chat.message.out",
+                            actor_uid=(
+                                str(self.identity.get("uid") or self.identity.get("botId") or "")
+                                or None
+                            ),
+                            actor_name=str(
+                                self.identity.get("nickname")
+                                or self.identity.get("displayName")
+                                or self.identity.get("name")
+                                or "Stella"
+                            ),
+                            message_id=message_id,
+                            reply_to_message_id=reply_id,
+                            content=body.get("content", ""),
+                            metadata={
+                                "origin": "anarchy.send_message",
+                                "buttons": body.get("buttons") or [],
+                            },
+                        )
                     if return_message_id:
                         return message_id or False
                     return True

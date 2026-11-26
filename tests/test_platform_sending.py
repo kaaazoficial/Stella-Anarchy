@@ -249,3 +249,38 @@ def test_get_message_rejects_non_numeric_message_ids_without_api_call():
         await client.close()
 
     asyncio.run(scenario())
+
+
+def test_successful_outgoing_message_is_archived_with_reply_and_author(monkeypatch):
+    async def scenario():
+        async def fake_sleep(_delay):
+            return None
+
+        monkeypatch.setattr("stella.platform.asyncio.sleep", fake_sleep)
+        client, calls = _client_with_responses([
+            {"ok": True, "status": 200, "data": {"message": {"messageId": "out-123"}}},
+        ])
+        client.identity = {"uid": "stella-uid", "name": "Stella"}
+        recorded = []
+
+        class Archive:
+            async def record_event(self, room_id, event_type, **fields):
+                recorded.append((room_id, event_type, fields))
+                return True
+
+        client.room_archive = Archive()
+
+        sent = await client.send_message("room-191", "Respuesta de Stella", reply_id="in-122")
+
+        assert sent is True
+        assert len(recorded) == 1
+        room_id, event_type, fields = recorded[0]
+        assert room_id == "room-191"
+        assert event_type == "chat.message.out"
+        assert fields["actor_uid"] == "stella-uid"
+        assert fields["actor_name"] == "Stella"
+        assert fields["message_id"] == "out-123"
+        assert fields["reply_to_message_id"] == "in-122"
+        assert fields["content"] == "Respuesta de Stella"
+
+    asyncio.run(scenario())
