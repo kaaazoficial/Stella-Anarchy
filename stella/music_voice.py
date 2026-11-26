@@ -292,9 +292,15 @@ class MusicVoice:
 
     @staticmethod
     def _is_transient_livekit_error(exc: Exception) -> bool:
+        detail = f"{type(exc).__name__} {exc}".casefold()
+        # Permission/authentication errors are deterministic, not reconnectable.
+        if any(marker in detail for marker in (
+            "http 401", "http 403", "status 401", "status 403",
+            "permission denied", "not authorized", "unauthorized", "forbidden",
+        )):
+            return False
         if isinstance(exc, (asyncio.TimeoutError, TimeoutError)):
             return True
-        detail = f"{type(exc).__name__} {exc}".casefold()
         return any(marker in detail for marker in (
             "publishtrackerror", "temporar", "not connected", "connection",
             "reconnect", "interrupted", "unavailable", "closed", "timeout",
@@ -1656,7 +1662,7 @@ class MusicVoice:
                 await self._send(
                     room_id,
                     f"🔄 Se interrumpió el audio de «{_clean(track.get('title') or 'la pista')}»; "
-                    "estoy intentando reanudarlo una vez.",
+                    "estoy reintentando la pista desde el principio una vez.",
                 )
 
     async def _music_worker(self, room_id: str, state: dict[str, Any]) -> None:
