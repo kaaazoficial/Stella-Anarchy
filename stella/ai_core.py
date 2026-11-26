@@ -329,8 +329,8 @@ def _retry_header_seconds(value: Any) -> float | None:
 def resolve_community_faq(question: str) -> str | None:
     """Resolve short, domain-independent conversational replies."""
     text = normalize_topic_text(question)
-    text = re.sub(r"\s+", " ", text).strip()
-    text = re.sub(r"\s+", " ", text).strip()
+    text = re.sub(r"^(?:stella)\s+", "", text).strip()
+    text = re.sub(r"^[¿¡\s]+|[?!.¡¿\s]+$", "", text).strip()
     if text in {"hola", "buenas", "buenos dias", "buenas tardes", "buenas noches"}:
         return "¡Hola! Soy Stella. ¿En qué puedo ayudarte?"
     if text in {"gracias", "muchas gracias", "te lo agradezco"}:
@@ -350,6 +350,7 @@ def resolve_community_faq(question: str) -> str | None:
     if text in {"eres humana", "eres una persona", "eres una persona real"}:
         return "Soy Stella, la asistente de esta comunidad; no soy una persona humana, pero puedo conversar contigo con naturalidad."
     return None
+
 
 def _normalize_ai_request(value: str) -> str:
     """Normalize an addressed utterance for intent and clarification checks."""
