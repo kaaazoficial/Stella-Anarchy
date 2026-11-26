@@ -250,10 +250,11 @@ def test_global_silence_blocks_commands_chat_replies_and_voice():
 
 def test_owner_can_restore_chat_with_natural_phrase_while_silenced():
     b=bot()
-    b.store.set_setting("__stella_global__", "chat_silence", "1")
+    b.shared_state.values["chat_silence"] = "1"
 
     asyncio.run(b.handle_event(_message("Ya puedes volver a hablar", "owner")))
 
+    assert b.shared_state.values["chat_silence"] == "0"
     assert b.store.get_setting("__stella_global__", "chat_silence", "1") == "0"
     assert len(b.platform.sent) == 1
     assert "silencio global desactivado" in b.platform.sent[0][1]
@@ -261,10 +262,11 @@ def test_owner_can_restore_chat_with_natural_phrase_while_silenced():
 
 def test_owner_can_restore_chat_with_reversible_command_while_silenced():
     b=bot()
-    b.store.set_setting("__stella_global__", "chat_silence", "1")
+    b.shared_state.values["chat_silence"] = "1"
 
     asyncio.run(b.handle_event(_message("!hablarchat", "owner")))
 
+    assert b.shared_state.values["chat_silence"] == "0"
     assert b.store.get_setting("__stella_global__", "chat_silence", "1") == "0"
     assert len(b.platform.sent) == 1
 
