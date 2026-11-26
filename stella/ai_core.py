@@ -971,19 +971,24 @@ class StellaAICore:
         }
 
     def _primary_provider_config(self) -> dict[str, str]:
+        """Choose Gemini whenever its credential is present; Groq is fallback only."""
+        gemini = self._gemini_provider_config()
+        if gemini["key"] and gemini["url"] and gemini["model"]:
+            # A stale STELLA_AI_PRIMARY_PROVIDER=groq must never silently
+            # override an available Gemini key in the production bot.
+            return gemini
+
         primary_setting = (
             os.getenv("STELLA_AI_PRIMARY_PROVIDER") or ""
         ).strip().casefold()
-        gemini_key = get_gemini_api_key()
         if primary_setting in {"gemini", "google", "google-gemini"}:
-            return self._gemini_provider_config()
-        if primary_setting in {"groq"}:
-            return self._groq_provider_config()
-        if gemini_key:
-            return self._gemini_provider_config()
+            return gemini
 
-        # Backward compatibility for existing deployments/tests using one
-        # STELLA_AI_* provider before the Gemini -> Groq chain is enabled.
+        groq = self._groq_provider_config()
+        if primary_setting == "groq" or groq["key"]:
+            return groq
+
+        # Backward compatibility for deployments with one legacy STELLA_AI_* provider.
         legacy_url = (
             os.getenv("STELLA_AI_API_URL")
             or "https://api.openai.com/v1/responses"
@@ -995,10 +1000,9 @@ class StellaAICore:
         ).strip()
         host = (urlsplit(legacy_url).hostname or "").casefold()
         if host == "generativelanguage.googleapis.com":
-            config = self._gemini_provider_config()
-            config["key"] = gemini_key or legacy_key
-            return config
-        if host == "api.groq.com" or host == "api.groq.ai" or host.endswith(".groq.com"):
+            gemini["key"] = gemini["key"] or legacy_key
+            return gemini
+        if host in {"api.groq.com", "api.groq.ai"} or host.endswith(".groq.com"):
             return {
                 "name": "Groq",
                 "key": legacy_key,
@@ -1132,6 +1136,27 @@ class StellaAICore:
             f"• {name}: {state_text} · {model} · {requests} solicitudes · "
             f"{failures} fallos{detail}{error_detail}"
         )
+
+    def provider_diagnostics(self) -> dict[str, Any]:
+        """Return privacy-safe provider configuration and actual usage counters."""
+        primary = self._primary_provider_config()
+        gemini = self._gemini_provider_config()
+        groq = self._groq_provider_config()
+        gemini_state = self._provider_runtime_state.get("Google Gemini", {})
+        groq_state = self._provider_runtime_state.get("Groq", {})
+        last = self._last_provider_summary or self._last_provider_context.get()
+        return {
+            "primary": primary["name"],
+            "primary_model": primary["model"],
+            "gemini_configured": bool(gemini["key"] and gemini["url"] and gemini["model"]),
+            "groq_configured": bool(groq["key"] and groq["url"] and groq["model"]),
+            "last_successful_provider": str(last.get("name")) if last else None,
+            "gemini_successes": int(gemini_state.get("successes", 0) or 0),
+            "gemini_failures": int(gemini_state.get("failures", 0) or 0),
+            "groq_successes": int(groq_state.get("successes", 0) or 0),
+            "groq_failures": int(groq_state.get("failures", 0) or 0),
+            "failovers": int(self.metrics.get("ai_provider_failovers", 0) or 0),
+        }
 
     def status(self, thread_id: str | None = None) -> str:
         primary = self._primary_provider_config()
