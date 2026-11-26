@@ -1406,11 +1406,7 @@ class StellaBot:
             if self._is_owner(uid):
                 await self._silence_chat(room_id, uid, name, "", message)
             else:
-                await self._reply(
-                    room_id,
-                    "Solo el propietario de Stella puede activar el silencio global.",
-                    message,
-                )
+                _audit_admin_operation("global_silence", room_id, False)
             return
         # A direct call containing only Stella's name (possibly with
         # punctuation or a short greeting) is a presence check, never an AI query.
