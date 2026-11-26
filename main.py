@@ -60,12 +60,16 @@ def log_bot_identity(identity: dict[str, Any] | None) -> None:
     bot_id = str(identity.get("botId") or identity.get("bot_id") or "").strip()
     account_uid = str(identity.get("uid") or "").strip()
     bot_name = str(identity.get("name") or identity.get("nickname") or "Stella").strip()
+    bot_kind = str(identity.get("kind") or "unknown").strip()
+    read_all_messages = identity.get("readAllMessages")
     if not bot_id:
         log.warning("Anarchy authenticated the token but returned no botId.")
         return
     log.info(
-        "Anarchy identity verified at startup: name=%s botId=%s uid=%s",
+        "Anarchy identity verified at startup: name=%s kind=%s readAllMessages=%s botId=%s uid=%s",
         bot_name[:80],
+        bot_kind,
+        read_all_messages if read_all_messages is not None else "unknown",
         bot_id,
         account_uid or "unavailable",
     )
