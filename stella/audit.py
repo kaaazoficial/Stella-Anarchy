@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 from datetime import datetime, timezone
 from typing import Any
@@ -38,19 +39,40 @@ _SECRET_REPLACEMENTS = (
         re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----[\s\S]*?-----END (?:RSA |EC |OPENSSH )?PRIVATE KEY-----"),
         "[REDACTED_PRIVATE_KEY]",
     ),
+    (
+        re.compile(r"(?i)\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b"),
+        "[EMAIL_OMITIDO]",
+    ),
+    (
+        re.compile(r"(?<!\w)\+?\d[\d ()-]{7,}\d(?!\w)"),
+        "[TELEFONO_OMITIDO]",
+    ),
 )
+
+_PRIVATE_FIELDS = frozenset({
+    "uid", "user_id", "userid", "author_id", "authorid",
+    "nickname", "display_name", "displayname",
+    "message_id", "messageid", "event_id", "eventid",
+})
 
 
 def redact_secrets(value: Any) -> str:
-    """Keep chat text searchable while masking common credentials before logging."""
+    """Mask credentials and direct contact details before optional audit logging."""
     text = str(value or "")
     for pattern, replacement in _SECRET_REPLACEMENTS:
         text = pattern.sub(replacement, text)
     return text
 
 
+def _content_logging_enabled() -> bool:
+    """Raw chat text is excluded from logs unless an operator explicitly opts in."""
+    return os.getenv("STELLA_AUDIT_LOG_CONTENT", "").strip().casefold() in {
+        "1", "true", "yes", "on",
+    }
+
+
 def audit_event(event: str, **fields: Any) -> None:
-    """Write structured chat/audit events to stdout so Render captures them."""
+    """Write structured operational events without retaining raw chat or member identifiers."""
     payload: dict[str, Any] = {
         "event": str(event),
         "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -61,19 +83,38 @@ def audit_event(event: str, **fields: Any) -> None:
         "anarchy_webhook_secret", "qdrant_api_key", "webhook_secret",
         "token", "secret", "password",
     }
+    keep_content = _content_logging_enabled()
     for key, value in fields.items():
         if value is None:
             continue
         field = str(key)
-        if field.casefold() in never_log:
+        normalized = field.casefold()
+        if normalized in never_log or normalized in _PRIVATE_FIELDS:
+            if normalized in {"message_id", "messageid"}:
+                payload["message_reference_present"] = bool(value)
             continue
-        if field in {"content", "text"}:
-            text = str(value or "")
-            safe_text = redact_secrets(text)
-            payload["content"] = safe_text
-            payload["content_length"] = len(text)
-            payload["content_redacted"] = safe_text != text
-        elif isinstance(value, str):
+        if normalized in {"content", "text"}:
+            raw_text = str(value or "")
+            payload["content_length"] = len(raw_text)
+            payload["content_logged"] = keep_content
+            if keep_content:
+                safe_text = redact_secrets(raw_text)
+                payload["content"] = safe_text
+                payload["content_redacted"] = safe_text != raw_text
+            continue
+        if normalized in {
+            "reply_message_id", "replymessageid",
+            "reply_to_message_id", "replytomessageid", "reply_id",
+        }:
+            payload["has_reply"] = bool(value)
+            continue
+        if normalized == "mentions":
+            try:
+                payload["mention_count"] = len(value)
+            except TypeError:
+                payload["mention_count"] = int(bool(value))
+            continue
+        if isinstance(value, str):
             payload[field] = redact_secrets(value)
         else:
             payload[field] = value
