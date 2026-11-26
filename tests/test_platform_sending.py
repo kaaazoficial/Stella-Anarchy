@@ -202,3 +202,50 @@ def test_send_message_uses_only_documented_anarchy_body_fields(monkeypatch):
         }
 
     asyncio.run(scenario())
+
+
+
+def test_get_message_uses_documented_anarchy_read_route(monkeypatch):
+    async def scenario():
+        client = AnarchyClient("https://api.anarchyapps.org/bot-api/v1", "test-token")
+        calls = []
+
+        async def fake_request(method, path, *, json_body=None):
+            calls.append((method, path, json_body))
+            return {
+                "ok": True,
+                "status": 200,
+                "data": {
+                    "message": {
+                        "messageId": "90210",
+                        "content": "hola",
+                        "author": {"uid": "target-uid", "nickname": "Persona X"},
+                        "own": False,
+                    }
+                },
+            }
+
+        client.request = fake_request
+        message = await client.get_message("48213", "90210")
+        assert message["author"]["uid"] == "target-uid"
+        assert calls == [("GET", "/threads/48213/messages/90210", None)]
+        await client.close()
+
+    asyncio.run(scenario())
+
+
+def test_get_message_rejects_non_numeric_message_ids_without_api_call():
+    async def scenario():
+        client = AnarchyClient("https://api.anarchyapps.org/bot-api/v1", "test-token")
+        calls = []
+
+        async def fake_request(*args, **kwargs):
+            calls.append((args, kwargs))
+            return {"ok": False, "status": 404, "data": {}}
+
+        client.request = fake_request
+        assert await client.get_message("48213", "../other") is None
+        assert calls == []
+        await client.close()
+
+    asyncio.run(scenario())
