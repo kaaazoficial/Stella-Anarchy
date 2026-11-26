@@ -211,12 +211,47 @@ async def test_durable_facts_survive_transcript_clear_and_can_be_deleted(memory)
 
 
 @pytest.mark.asyncio
-async def test_turn_saves_require_explicit_opt_in(memory):
+async def test_new_members_get_automatic_memory_without_commands(memory):
     store, _ = memory
-    assert await store.save("room-a", "user-1", [
-        {"role": "user", "content": "No debe guardarse sin consentimiento."},
+    assert await store.is_enabled("room-a", "user-1") is True
+    turns = [
+        {"role": "user", "content": "Estoy trabajando en un proyecto de fantasía."},
+        {"role": "assistant", "content": "Cuéntame más."},
+    ]
+    assert await store.save("room-a", "user-1", turns) is True
+    assert await store.load("room-a", "user-1") == turns
+
+
+@pytest.mark.asyncio
+async def test_facts_are_remembered_automatically_without_save_command(memory):
+    store, _ = memory
+    assert await store.is_enabled("room-a", "user-1") is True
+    saved = await store.remember_from_message(
+        "room-a", "user-1", "Estoy creando un mundo de fantasía llamado Elaria"
+    )
+    assert len(saved) == 1
+    facts = await store.load_facts("room-a", "user-1")
+    assert len(facts) == 1
+    assert "Elaria" in facts[0]["content"]
+
+
+@pytest.mark.asyncio
+async def test_explicit_opt_out_remains_disabled_without_commands_after_restart(memory):
+    store, client = memory
+    assert await store.set_enabled("room-a", "user-1", False) is True
+    restored = QdrantConversationMemory(client=client)
+    assert await restored.is_enabled("room-a", "user-1") is False
+    assert await restored.save("room-a", "user-1", [
+        {"role": "user", "content": "No se debe guardar tras desactivar."},
     ]) is False
-    assert await store.is_enabled("room-a", "user-1") is False
+
+
+@pytest.mark.asyncio
+async def test_periodic_cleanup_is_exposed_for_background_worker(memory):
+    store, client = memory
+    await store.cleanup()
+    assert any(method == "POST" and url.endswith("/points/delete?wait=true")
+               for method, url in client.requests)
 
 
 @pytest.mark.asyncio
