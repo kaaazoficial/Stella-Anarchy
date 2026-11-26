@@ -833,7 +833,7 @@ def test_proactive_participation_only_answers_clear_room_invitations_and_respect
     assert len(calls) == 1
     assert "no ejecutes" in calls[0][1].casefold()
     assert len(b.platform.sent) == 1
-    assert "base de datos" in b.platform.sent[0][1].casefold()
+    assert "presupuesto" in b.platform.sent[0][1].casefold()
 
 
 def test_proactive_participation_ignores_ordinary_chat_without_an_invitation():
