@@ -2606,7 +2606,9 @@ class StellaBot:
         sections = {
             "GENERAL E IA": [
                 f"{p}ayuda [categoría] · {p}menu · {p}ping · {p}miuid · {p}perfil",
-                f"{p}asistente <consulta> · {p}ia <consulta> · {p}ia estado",
+                f"{p}asistente <consulta> · {p}ia <consulta> · {p}ia estado · {p}ia olvidar",
+                f"{p}memoria conversacion activar|desactivar|olvidar · {p}memoria buscar <consulta>",
+                f"{p}presencia estado|activar|desactivar (ADMIN)",
                 f"{p}investigar <tema> · {p}analizar <enlace> · {p}analizartexto <modo> <texto>",
                 f"{p}calcular <operación> · {p}traducir <idioma> | <texto> · {p}fecha · {p}zona <Area/Ciudad>",
             ],
