@@ -285,10 +285,13 @@ class RoomArchive:
         )
 
         received_ns = time.time_ns()
-        order_key = max(received_ns, self._last_order_key + 1)
-        self._last_order_key = order_key
         received_ms = received_ns // 1_000_000
         occurred_ms = _to_epoch_ms(event_time, received_ms)
+        # Stable ordering for webhook retries and the outgoing-message echo.
+        # Qdrant integer payloads are signed 64-bit; millisecond * 1e6 stays safe.
+        tie_breaker = int(hashlib.sha256(identity.encode("utf-8")).hexdigest()[:6], 16) % 1_000_000
+        order_key = occurred_ms * 1_000_000 + tie_breaker
+        self._last_order_key = max(self._last_order_key, order_key)
         occurred_iso = datetime.fromtimestamp(
             occurred_ms / 1000, tz=timezone.utc
         ).isoformat()
@@ -318,22 +321,36 @@ class RoomArchive:
         try:
             await self.ensure_collection()
             client = await self._http()
-            response = await client.put(
-                f"{self._collection_url()}/points?wait=true",
-                headers=self._headers(),
-                json={
-                    "points": [
-                        {
-                            "id": point_id,
-                            "vector": [1.0],
-                            "payload": payload,
-                        }
-                    ]
-                },
-            )
-            response.raise_for_status()
-            self.events_written += 1
-            return True
+            body = {
+                "points": [
+                    {
+                        "id": point_id,
+                        "vector": [1.0],
+                        "payload": payload,
+                    }
+                ]
+            }
+            last_error: Exception | None = None
+            for attempt in range(3):
+                try:
+                    response = await client.put(
+                        f"{self._collection_url()}/points?wait=true",
+                        headers=self._headers(),
+                        json=body,
+                    )
+                    response.raise_for_status()
+                    self.events_written += 1
+                    return True
+                except (httpx.HTTPError, ValueError, RuntimeError) as exc:
+                    last_error = exc
+                    status = getattr(getattr(exc, "response", None), "status_code", None)
+                    if status in {400, 401, 403, 404, 422}:
+                        break
+                    if attempt < 2:
+                        await asyncio.sleep(0.2 * (2 ** attempt))
+            if last_error is not None:
+                raise last_error
+            return False
         except Exception as exc:
             self._report_failure("write", exc)
             return False
