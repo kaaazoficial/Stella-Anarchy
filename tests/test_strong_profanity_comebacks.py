@@ -62,6 +62,10 @@ def test_local_comebacks_are_strong_variable_and_do_not_assign_gender():
         assert build_stella_comeback("insult", "putita") in _STELLA_INSULT_COMEBACKS
 
 
-def test_laughter_only_does_not_trigger_a_hostile_comeback():
+def test_addressed_laughter_gets_a_light_reply_not_a_strong_insult():
+    from stella.bot import _STELLA_JOKE_COMEBACKS, build_stella_comeback
+
     for value in ("jajaja", "JAJAJAJA", "xD", "😂🤣"):
-        assert classify_playful_stella_message(value, explicitly_addressed=True) is None
+        assert classify_playful_stella_message(value, explicitly_addressed=True) == "teasing"
+        assert build_stella_comeback("teasing", value) in _STELLA_JOKE_COMEBACKS
+        assert classify_playful_stella_message(value) is None
