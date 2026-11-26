@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 import httpx
 import pytest
 
@@ -43,8 +44,16 @@ class FakeQdrant:
     async def post(self, url, *, headers=None, params=None, json=None):
         self.requests.append(("POST", url))
         if "/points/delete" in url:
-            point_ids = (json or {}).get("points", [])
+            body = json or {}
+            point_ids = body.get("points", [])
             if self.point and self.point["id"] in point_ids:
+                self.point = None
+            must = body.get("filter", {}).get("must", [])
+            if self.point and any(
+                item.get("key") == "expires_at"
+                and self.point["payload"].get("expires_at", 0) < item.get("range", {}).get("lt", 0)
+                for item in must
+            ):
                 self.point = None
         return self.response(200, url, {"result": {"operation_id": 2}})
 
