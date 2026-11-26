@@ -55,3 +55,26 @@ def test_general_profanity_and_unrelated_insults_are_not_misclassified():
     ]
     for message in samples:
         assert classify_playful_stella_message(message) is None
+
+
+def test_log_observed_attacks_and_humiliation_phrases_are_classified():
+    samples = [
+        ("putita", True, "insult"),
+        ("dale boluda de mierda", True, "insult"),
+        ("qué sos una conchuda pelotuda", True, "insult"),
+        ("humíllala", True, "teasing"),
+        ("Pobrecita, Stella parece un nene con alzheimer peleando", False, "teasing"),
+        ("when le estas metiendo la verga en la boca a stella ... toma tu leche desgraciada", False, "teasing"),
+    ]
+    for message, addressed, expected in samples:
+        assert classify_playful_stella_message(message, explicitly_addressed=addressed) == expected
+
+
+def test_unrelated_profane_conversation_is_not_treated_as_an_attack_on_stella():
+    for message in (
+        "Qué boluda estuvo esa película",
+        "Me encontré con Stella en la entrada",
+        "La canción dice hija de puta",
+        "¿Qué significa putita?",
+    ):
+        assert classify_playful_stella_message(message) is None
