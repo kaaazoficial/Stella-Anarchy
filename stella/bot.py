@@ -631,7 +631,7 @@ class StellaBot:
         )
         if has_reply_context:
             candidate = re.sub(
-                r"^(?:(?:<@!?[A-Za-z0-9_-]{1,160}>|@[A-Za-z0-9_.-]{1,64})[\\s,;:]+)+(?=[!/-])",
+                r"^(?:(?:<@!?[A-Za-z0-9_-]{1,160}>|@[A-Za-z0-9_.-]{1,64})[\s,;:]+)+(?=[!/-])",
                 "",
                 command_content,
             ).strip()
