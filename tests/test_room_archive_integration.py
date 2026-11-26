@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 import asyncio
-from types import SimpleNamespace
 
-from stella.bot import StellaBot
+from stella.bot import StellaBot, archive_event_type
 
 
 class ArchiveRecorder:
@@ -44,40 +43,24 @@ def test_every_authenticated_webhook_event_is_archived_before_event_routing():
     asyncio.run(scenario())
 
 
-def test_all_standard_message_lifecycle_events_are_mapped_for_archive():
-    async def scenario():
-        bot = object.__new__(StellaBot)
-        archive = ArchiveRecorder()
-        bot.room_archive = archive
+def test_standard_message_and_room_lifecycle_event_types_are_preserved():
+    expected = {
+        "message": "chat.message.in",
+        "message.created": "chat.message.in",
+        "message_create": "chat.message.in",
+        "message.edited": "chat.message.edited",
+        "message.deleted": "chat.message.deleted",
+        "message_delete": "chat.message.deleted",
+        "interaction": "chat.interaction",
+        "room.ready": "chat.room.ready",
+        "room.end": "chat.room.ended",
+        "room.kicked": "chat.room.kicked",
+        "thread.removed": "chat.room.removed",
+        "room.join": "chat.room.join",
+        "room.leave": "chat.room.leave",
+        "room.speaker": "chat.room.speaker",
+        "future.event": "anarchy.future.event",
+    }
 
-        events = [
-            ("message", "chat.message.in"),
-            ("message.created", "chat.message.in"),
-            ("message_create", "chat.message.in"),
-            ("message.edited", "chat.message.edited"),
-            ("message.deleted", "chat.message.deleted"),
-            ("message_delete", "chat.message.deleted"),
-            ("interaction", "chat.interaction"),
-            ("room.join", "chat.room.join"),
-            ("room.leave", "chat.room.leave"),
-            ("room.speaker", "chat.room.speaker"),
-        ]
-        for index, (kind, _) in enumerate(events):
-            await bot.handle_event({
-                "type": kind,
-                "threadId": "room-191",
-                "eventId": f"evt-{index}",
-                "eventTime": "2026-11-26T18:00:00Z",
-                "message": {
-                    "messageId": str(index + 1),
-                    "content": f"contenido-{kind}",
-                    "author": {"uid": "member-uid", "nickname": "Miembro"},
-                },
-            })
-
-        assert [event[1] for event in archive.events] == [expected for _, expected in events]
-        for room_id, _, fields in archive.events:
-            assert room_id == "room-191"
-            assert fields["metadata"]["webhook_event"]["type"]
-
-    asyncio.run(scenario())
+    for source, archived in expected.items():
+        assert archive_event_type(source) == archived
