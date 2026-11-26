@@ -230,7 +230,7 @@ def ship_verdict(score: int, first: str, second: str) -> str:
             "El ship naufragó antes de zarpar. 🚢",
             "Cero química por ahora. ¡Siguiente pareja! 😭",
         ]
-    return f"💞 SHIP · {first} + {second}\\nCompatibilidad: {score}%\\n{random.choice(reactions)}"
+    return f"💞 SHIP · {first} + {second}\nCompatibilidad: {score}%\n{random.choice(reactions)}"
 
 class StellaBot:
     def __init__(self, settings: Settings, store: Store, platform: AnarchyClient) -> None:
@@ -1327,7 +1327,7 @@ class StellaBot:
             finish = f"{winner} ganó por muy poco. ¡Estuvo reñido! 😮"
         await self._reply(
             room_id,
-            f"⚔️ DUELO\\n{name}: {left}\\n{target[1]}: {right}\\n{finish}",
+            f"⚔️ DUELO\n{name}: {left}\n{target[1]}: {right}\n{finish}",
             message,
         )
     async def _interaction_help(self, room_id, uid, name, args, message):
@@ -1383,7 +1383,7 @@ class StellaBot:
         await self._reply(room_id, f"🔥 {target}, {random.choice(lines)}", message)
 
     async def _ship(self, room_id, uid, name, args, message):
-        names = [part.strip() for part in re.split(r"\\s*(?:\\+|,|\\by\\b)\\s*", args, flags=re.I) if part.strip()]
+        names = [part.strip() for part in re.split(r"\s*(?:\+|,|\by\b)\s*", args, flags=re.I) if part.strip()]
         if len(names) != 2:
             await self._reply(room_id, "Uso: !ship <persona 1> + <persona 2>", message)
             return
