@@ -165,17 +165,18 @@ def test_ship_verdict_changes_its_reaction_by_compatibility_score(monkeypatch):
 
 
 
-def test_help_filter_hides_administrative_catalogue_from_public_views():
+def test_public_help_keeps_six_pages_without_administrative_commands():
     from stella.help import filter_commands_help_text
 
     full = build_commands_help_text("!")
     public = filter_commands_help_text(full, include_admin=False)
-    admin = filter_commands_help_text(full, include_admin=True)
+    admin_view = filter_commands_help_text(full, include_admin=True)
 
-    assert "6. ADMINISTRACIÓN Y ESTADO" not in public
+    assert "6. MEMORIA, CONTEXTO Y PRIVACIDAD" in public
+    assert "!memoria recuerdos" in public
     assert "!historial" not in public
-    assert "6. ADMINISTRACIÓN Y ESTADO" in admin
-    assert "!historial" in admin
+    assert "6. ADMINISTRACIÓN Y ESTADO" not in public
+    assert admin_view == public
 
 
 def test_public_help_does_not_expose_admin_category_alias():
