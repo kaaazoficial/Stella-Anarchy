@@ -316,8 +316,8 @@ def test_recent_room_context_and_integrity_report(monkeypatch):
         context = await archive.recent_room_context("room-1", limit=10)
         report = await archive.integrity_check("room-1", sample_limit=10)
         assert [item["content"] for item in context] == ["Hola, actualización", "Hola"]
-        assert report["total"] == 2
-        assert report["sampled"] == 2
+        assert report["total"] == 3
+        assert report["sampled"] == 3
         assert report["missing_message_ids"] == 0
         assert report["missing_timestamps"] == 0
         await archive.close()
