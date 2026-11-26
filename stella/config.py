@@ -2,10 +2,16 @@
 from __future__ import annotations
 
 from pathlib import Path
+import os
 import re
 
 from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+def get_gemini_api_key() -> str:
+    """Resolve Gemini credentials using Google's documented env-var precedence."""
+    return os.getenv("GOOGLE_API_KEY", "").strip() or os.getenv("GEMINI_API_KEY", "").strip()
 
 
 class StellaSettings(BaseSettings):
