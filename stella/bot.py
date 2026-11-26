@@ -476,16 +476,13 @@ class StellaBot:
 
     async def _reply(
         self, room_id: str, text: str, message: dict[str, Any],
-        *, mentions: list[dict[str, str]] | None = None,
     ) -> None:
         reply_id = message.get("messageId") or message.get("id")
         # Keep chat replies link-free; source names and attribution remain in the text.
         safe_text = re.sub(r"(?:https?://|www\.)[^\s<>]+", "[enlace omitido]", str(text), flags=re.IGNORECASE)
-        send_kwargs: dict[str, Any] = {"reply_id": str(reply_id) if reply_id else None}
-        if mentions:
-            send_kwargs["mentions"] = mentions
         await self.platform.send_message(
-            str(room_id), format_stella_text(safe_text)[:7000], **send_kwargs,
+            str(room_id), format_stella_text(safe_text)[:7000],
+            reply_id=str(reply_id) if reply_id else None,
         )
 
     @staticmethod
@@ -549,7 +546,9 @@ class StellaBot:
             return
         labels = " ".join(f"@{target['name']}" for target in targets)
         content = f"{labels} {args.strip()}".strip()
-        await self._reply(room_id, content, message, mentions=targets)
+        # Anarchy's documented bot-send API has no outbound mentions field.
+        # Keep the visible @name text, but do not send an undocumented payload.
+        await self._reply(room_id, content, message)
 
     async def handle_event(self, event: dict[str, Any]) -> None:
         event_type = str(event.get("type") or "").strip().casefold()
@@ -561,6 +560,19 @@ class StellaBot:
             self.voice.notify_room_ready(room_id)
             return
         if event_type == "interaction":
+            user = event.get("user") or {}
+            if not isinstance(user, dict):
+                user = {}
+            audit_event(
+                "chat.interaction",
+                room_id=room_id,
+                message_id=event.get("messageId"),
+                button_id=event.get("buttonId"),
+                label=event.get("label"),
+                uid=user.get("uid") or user.get("userId") or user.get("id"),
+                nickname=user.get("nickname") or user.get("displayName"),
+                event_id=event.get("eventId"),
+            )
             await self.voice.handle_interaction(event)
             return
         if event_type in {"room.end", "room.kicked", "thread.removed"}:
@@ -587,30 +599,54 @@ class StellaBot:
             )
             update_voice_room_event(event)
             return
-        if event_type not in {"message", "message.created", "message_create"}:
+        if event_type in {"message.deleted", "message_delete"}:
+            audit_event(
+                "chat.message.deleted",
+                room_id=room_id,
+                message_id=event.get("messageId") or event.get("message_id"),
+                event_id=event.get("eventId"),
+                event_time=event.get("eventTime"),
+            )
+            return
+
+        if event_type not in {"message", "message.created", "message_create", "message.edited"}:
             return
         message = event.get("message") or {}
         if not isinstance(message, dict):
             return
         uid, name = self._author(message)
-        content = str(message.get("content") or message.get("text") or message.get("body") or "").strip()
-        if not uid or not content or self._is_bot_message(message):
-            return
+        content = str(message.get("content") or message.get("text") or message.get("body") or "")
 
-        # Audit records retain only non-content metadata; message text is never logged.
+        author = message.get("author") or message.get("sender") or {}
+        if not isinstance(author, dict):
+            author = {}
         audit_event(
-            "chat.message.in",
+            "chat.message.edited" if event_type == "message.edited" else "chat.message.in",
             room_id=room_id,
             message_id=message.get("messageId") or message.get("id"),
-            uid=uid,
+            uid=uid or author.get("userId") or author.get("id"),
             nickname=name,
+            author_role=author.get("role"),
+            author_level=author.get("level"),
             content=content,
-            addressed=bool(
-                extract_stella_call(content)
-                or self._is_stella_mentioned(message)
-                or self._is_stella_reply(room_id, message, event)
+            mentions=message.get("mentions") or [],
+            reply_message_id=(
+                message.get("replyMessageId")
+                or message.get("replyToMessageId")
+                or message.get("reply_to_message_id")
             ),
+            trigger=event.get("trigger"),
+            command=event.get("command"),
+            event_id=event.get("eventId"),
+            event_time=event.get("eventTime"),
+            edited_time=message.get("editedTime"),
+            is_bot=self._is_bot_message(message),
         )
+        # Edited messages are logged for visibility but never execute commands again.
+        if event_type == "message.edited":
+            return
+        if not uid or not content.strip() or self._is_bot_message(message):
+            return
 
         direct_call = extract_stella_call(content)
         mentioned = self._is_stella_mentioned(message)
