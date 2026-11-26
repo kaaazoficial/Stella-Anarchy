@@ -254,6 +254,17 @@ _SILENCE_REQUESTS = frozenset({
     "entra en silencio",
     "modo silencio",
     "silencio global",
+    "activa el silencio global",
+    "activa silencio global",
+    "activar el silencio global",
+    "activar silencio global",
+    "enciende el silencio global",
+    "silencia el chat global",
+    "silencia todos los chats",
+    "silencia todos los chat",
+    "no hables en ningun chat",
+    "no respondas en ningun chat",
+    "no hables en los chats",
     "callate",
 })
 _RESUME_REQUESTS = frozenset({
@@ -271,6 +282,16 @@ _RESUME_REQUESTS = frozenset({
     "quita el silencio",
     "reactiva tus respuestas",
     "deja el modo silencio",
+    "desactiva el silencio global",
+    "desactiva silencio global",
+    "desactivar el silencio global",
+    "desactivar silencio global",
+    "reactiva el silencio global",
+    "reactiva silencio global",
+    "reactiva el chat global",
+    "reactiva todos los chats",
+    "vuelve a hablar en todos los chats",
+    "ya puedes hablar en todos los chats",
 })
 
 
@@ -414,12 +435,8 @@ class StellaBot:
         """Read the global silence flag from Qdrant so every Render instance agrees."""
         try:
             value = await self.shared_state.get_setting(_GLOBAL_CHAT_SILENCE_KEY)
-            if value is None:
-                # One-time migration from the previous per-instance SQLite setting.
-                value = self.store.get_setting(
-                    _GLOBAL_SETTINGS_ROOM_ID, _GLOBAL_CHAT_SILENCE_KEY, "0"
-                )
-                await self.shared_state.set_setting(_GLOBAL_CHAT_SILENCE_KEY, value)
+            # Never import a local SQLite value here: a different Render instance
+            # may hold a stale value. The shared store is the only source of truth.
             return value == "1"
         except Exception:
             # Fail closed: never let an instance speak when shared state is uncertain.
