@@ -171,11 +171,13 @@ def test_help_command_sends_all_six_pages():
         "3. JUEGOS, ECONOMÍA Y COMUNIDAD",
         "4. MÚSICA, VOZ Y LECTURA",
         "5. UTILIDADES Y MULTIMEDIA",
-        "6. ADMINISTRACIÓN Y ESTADO",
+        "6. MEMORIA, CONTEXTO Y PRIVACIDAD",
     )
     delivered = "\\n".join(message for _, message, _ in b.platform.sent)
     for title in expected_titles:
         assert title in delivered
+    assert "ADMINISTRACIÓN" not in delivered
+    assert "!historial" not in delivered
 
 def test_unknown_command_suggests_typo_without_executing_it():
     b=bot()
