@@ -196,8 +196,8 @@ def test_stella_character_guidance_is_shared_by_all_conversation_prompts():
     assert STELLA_CHARACTER_GUIDANCE in STELLA_SYSTEM
     assert STELLA_CHARACTER_GUIDANCE in STELLA_IDENTITY_GUIDANCE
     assert "opiniones" in STELLA_CHARACTER_GUIDANCE
-    assert "no inventes vivencias físicas" in STELLA_CHARACTER_GUIDANCE
-    assert "No interrumpas conversaciones al azar" in STELLA_CHARACTER_GUIDANCE
+    assert "no inventes vivencias físicas" in STELLA_CHARACTER_GUIDANCE.casefold()
+    assert "no interrumpas conversaciones al azar" in STELLA_CHARACTER_GUIDANCE.casefold()
 
     for intent in ("conversation", "action", "research", "multi_action"):
         assert STELLA_CHARACTER_GUIDANCE in build_ai_instructions(frozenset(), intent)
