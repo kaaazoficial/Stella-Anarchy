@@ -994,3 +994,81 @@ def test_single_word_insult_in_reply_to_stella_routes_to_comeback_prompt(monkeyp
     assert "insultos" in calls[0][3].casefold() or "insultada" in calls[0][3].casefold()
     assert "Mensaje recibido: putita" in calls[0][3]
     assert b.platform.sent == []
+
+
+
+def test_reply_to_stella_can_be_confirmed_after_local_sent_id_cache_is_empty():
+    b = bot()
+    b.platform.ids.clear()
+    b.platform.read_messages["123456"] = {
+        "messageId": "123456",
+        "author": {"uid": "stella-account"},
+    }
+    assert asyncio.run(b._is_stella_reply_with_lookup(
+        "r", {"replyMessageId": "123456"}
+    )) is True
+    assert b.platform.read_requests == [("r", "123456")]
+
+
+def test_reply_to_another_member_is_not_confirmed_as_stella():
+    b = bot()
+    b.platform.ids.clear()
+    b.platform.read_messages["123457"] = {
+        "messageId": "123457",
+        "author": {"uid": "other-member"},
+    }
+    assert asyncio.run(b._is_stella_reply_with_lookup(
+        "r", {"replyMessageId": "123457"}
+    )) is False
+
+
+def test_direct_insult_gets_local_comeback_without_calling_ai():
+    b = bot()
+    ai_calls = []
+
+    async def capture_ai(*args):
+        ai_calls.append(args)
+
+    b._ai_assist = capture_ai
+    asyncio.run(b.handle_event({
+        "type": "message",
+        "threadId": "r",
+        "message": {
+            "content": "Stella, putita",
+            "author": {"uid": "u", "nickname": "Persona"},
+        },
+    }))
+
+    assert len(b.platform.sent) == 1
+    response = b.platform.sent[0][1].casefold()
+    assert any(word in response for word in ("imbécil", "mierda", "estupidez", "idiotez"))
+    assert ai_calls == []
+
+
+def test_insult_reply_to_stella_gets_local_comeback_even_without_cached_id():
+    b = bot()
+    b.platform.ids.clear()
+    b.platform.read_messages["123458"] = {
+        "messageId": "123458",
+        "author": {"uid": "stella-account"},
+    }
+    ai_calls = []
+
+    async def capture_ai(*args):
+        ai_calls.append(args)
+
+    b._ai_assist = capture_ai
+    asyncio.run(b.handle_event({
+        "type": "message",
+        "threadId": "r",
+        "message": {
+            "content": "putita",
+            "replyMessageId": "123458",
+            "author": {"uid": "u", "nickname": "Persona"},
+        },
+    }))
+
+    assert len(b.platform.sent) == 1
+    response = b.platform.sent[0][1].casefold()
+    assert any(word in response for word in ("imbécil", "mierda", "estupidez", "idiotez"))
+    assert ai_calls == []
