@@ -237,6 +237,15 @@ async def health() -> JSONResponse:
         get_gemini_api_key()
         or os.getenv("GROQ_API_KEY", "").strip()
     )
+    ai_core = getattr(bot, "ai_core", None)
+    ai_diagnostics = {}
+    diagnostics_func = getattr(ai_core, "provider_diagnostics", None)
+    if callable(diagnostics_func):
+        try:
+            ai_diagnostics = diagnostics_func()
+        except Exception as exc:
+            log.warning("AI provider diagnostics failed (%s).", type(exc).__name__)
+            ai_diagnostics = {"status": "diagnostics_unavailable"}
     payload = {
         "ok": database_ok,
         "status": "healthy" if database_ok else "unhealthy",
@@ -248,6 +257,7 @@ async def health() -> JSONResponse:
             "anarchy_token_configured": bool(settings.bot_token),
             "webhook_secret_configured": bool(settings.webhook_secret),
             "ai_provider_configured": ai_configured,
+            "ai_providers": ai_diagnostics,
             "vector_memory": vector_status,
         },
     }
