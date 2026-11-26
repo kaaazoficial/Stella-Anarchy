@@ -382,15 +382,18 @@ class StellaBot:
             allowed.update(AI_ADMIN_COMMANDS)
         return frozenset(allowed)
 
+    def _ai_memory_locally_blocked(self, room_id: str, uid: str) -> bool:
+        return self.store.get_setting(room_id, f"ai_memory_opt_out:{uid}", "0") == "1"
+
     async def _ai_memory_enabled(self, room_id: str, uid: str) -> bool:
         memory = getattr(self, "ai_memory", None)
-        return bool(memory is not None and await memory.is_enabled(room_id, uid))
+        if memory is None or self._ai_memory_locally_blocked(room_id, uid):
+            return False
+        return await memory.is_enabled(room_id, uid)
 
     async def _restore_ai_memory(self, room_id: str, uid: str, session_key: str) -> None:
         memory = getattr(self, "ai_memory", None)
-        if memory is None or not await self._ai_memory_enabled(room_id, uid):
-            return
-        if self.ai_core._history(session_key):
+        if memory is None or self._ai_memory_locally_blocked(room_id, uid) or self.ai_core._history(session_key):
             return
         turns = await memory.load(room_id, uid)
         for turn in turns:
