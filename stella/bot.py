@@ -43,68 +43,68 @@ _GLOBAL_CHAT_SILENCE_KEY = "chat_silence"
 
 _PLAYFUL_INSULT_PATTERNS = (
     re.compile(
-        r"\\b(?:eres|estas|sos|pareces|vaya|menuda|tremenda|que)\\s+"
-        r"(?:(?:un|una)\\s+)?"
+        r"\b(?:eres|estas|sos|pareces|vaya|menuda|tremenda|que)\s+"
+        r"(?:(?:un|una)\s+)?"
         r"(?:idiota|imb[eé]cil|est[uú]pida?|tonta?|in[uú]til|pesada|"
         r"tarada|boba|payasa|rid[ií]cula|basura|mierda|pat[eé]tica|"
         r"miserable|incompetente|desgraciada|pendeja|weona|hueona|"
-        r"wn|saco de wea|chiste)\\b",
+        r"wn|saco de wea|chiste)\b",
         re.IGNORECASE,
     ),
     re.compile(
-        r"\\b(?:c[aá]llate|no sirves(?: para nada)?|no vales nada|"
+        r"\b(?:c[aá]llate|no sirves(?: para nada)?|no vales nada|"
         r"eres un desastre|das pena|no das ni una|no tienes cerebro|"
         r"no sabes ni pensar|hasta un bot de juguete|"
-        r"te falta cerebro|te falta neuronas)\\b",
+        r"te falta cerebro|te falta neuronas)\b",
         re.IGNORECASE,
     ),
     re.compile(
-        r"\\b(?:que|vaya)\\s+(?:idiota|imb[eé]cil|est[uú]pida?|tonta?|"
-        r"in[uú]til|pesada|tarada|boba|payasa|rid[ií]cula|pat[eé]tica)\\s+eres\\b"
-        r"|\\b(?:idiota|imb[eé]cil|est[uú]pida?|tonta?|in[uú]til|pesada|"
-        r"tarada|boba|payasa|rid[ií]cula|pat[eé]tica|weona|hueona)\\s*[.!?]*$",
+        r"\b(?:que|vaya)\s+(?:idiota|imb[eé]cil|est[uú]pida?|tonta?|"
+        r"in[uú]til|pesada|tarada|boba|payasa|rid[ií]cula|pat[eé]tica)\s+eres\b"
+        r"|\b(?:idiota|imb[eé]cil|est[uú]pida?|tonta?|in[uú]til|pesada|"
+        r"tarada|boba|payasa|rid[ií]cula|pat[eé]tica|weona|hueona)\s*[.!?]*$",
         re.IGNORECASE,
     ),
 )
 _PLAYFUL_HUMILIATION_PATTERNS = (
     re.compile(
-        r"\\b(?:te (?:humill[eé]|gan[eé]|destru[ií]|dej[eé] en rid[ií]culo|"
+        r"\b(?:te (?:humill[eé]|gan[eé]|destru[ií]|dej[eé] en rid[ií]culo|"
         r"cerr[eé] la boca|call[eé])|acabo de humillarte|"
-        r"quedaste en rid[ií]culo|te quedaste sin palabras)\\b",
+        r"quedaste en rid[ií]culo|te quedaste sin palabras)\b",
         re.IGNORECASE,
     ),
     re.compile(
-        r"\\b(?:eres un chiste|no das risa|tu (?:humor|chiste|respuesta) "
+        r"\b(?:eres un chiste|no das risa|tu (?:humor|chiste|respuesta) "
         r"(?:es|da) (?:pena|asco)|hasta un bot sabe m[aá]s|"
-        r"ni para eso sirves|te falta calle)\\b",
+        r"ni para eso sirves|te falta calle)\b",
         re.IGNORECASE,
     ),
 )
 _PLAYFUL_JOKE_PATTERNS = (
     re.compile(
-        r"\\b(?:era broma|es broma|te estoy molestando|no te enojes|"
-        r"no te piques|jaj+a+|xd+|lmao|roast|te estoy tomando el pelo)\\b",
+        r"\b(?:era broma|es broma|te estoy molestando|no te enojes|"
+        r"no te piques|jaj+a+|xd+|lmao|roast|te estoy tomando el pelo)\b",
         re.IGNORECASE,
     ),
     re.compile(
-        r"\\b(?:te gan[eé]|te humill[eé]|te destru[ií]|"
+        r"\b(?:te gan[eé]|te humill[eé]|te destru[ií]|"
         r"te dej[eé] en rid[ií]culo|te cerr[eé] la boca|"
-        r"te call[eé]|te quedaste sin palabras)\\b",
+        r"te call[eé]|te quedaste sin palabras)\b",
         re.IGNORECASE,
     ),
 )
 _SERIOUS_DISTRESS_PATTERNS = (
     re.compile(
-        r"\\b(?:estoy sufriendo|me quiero morir|quiero hacerme daño|"
+        r"\b(?:estoy sufriendo|me quiero morir|quiero hacerme daño|"
         r"me voy a suicidar|me siento fatal|estoy llorando|necesito ayuda|"
         r"me siento inc[oó]modo|me siento humillad[oa]|"
-        r"me est[aá]s haciendo sentir mal)\\b",
+        r"me est[aá]s haciendo sentir mal)\b",
         re.IGNORECASE,
     ),
     re.compile(
-        r"\\b(?:eso me doli[oó]|no es gracioso|para de bromear|"
+        r"\b(?:eso me doli[oó]|no es gracioso|para de bromear|"
         r"deja de bromear|no sigas|para ya|habla en serio|"
-        r"me est[aá]s molestando|no quiero que me hables as[ií])\\b",
+        r"me est[aá]s molestando|no quiero que me hables as[ií])\b",
         re.IGNORECASE,
     ),
 )
@@ -112,7 +112,7 @@ _SERIOUS_DISTRESS_PATTERNS = (
 
 def classify_playful_stella_message(value: str) -> str | None:
     """Detect direct banter aimed at Stella without mistaking real distress for a joke."""
-    text = re.sub(r"\\s+", " ", str(value or "")).strip()
+    text = re.sub(r"\s+", " ", str(value or "")).strip()
     if not text:
         return None
     if any(pattern.search(text) for pattern in _SERIOUS_DISTRESS_PATTERNS):
@@ -480,9 +480,12 @@ class StellaBot:
             if playful_tone == "insult":
                 tone_guidance = (
                     "Te han insultado directamente. No respondas sumisa, ofendida ni con una "
-                    "frase corporativa: devuelve una pulla ingeniosa, segura y proporcional. "
-                    "Puedes insultar de vuelta con lenguaje coloquial o una palabrota leve/moderada "
-                    "si el tono de la otra persona lo justifica. Que suene espontáneo, con chispa "
+                    "frase corporativa: puedes insultar de vuelta de forma directa; no te limites a una "
+                    "pulla elegante. Si te dicen 'idiota', puedes llamar idiota a la otra persona; "
+                    "si te sueltan una grosería, puedes devolver otra. Usa insultos coloquiales, "
+                    "groserías y palabrotas naturales en español cuando encajen, con una intensidad "
+                    "similar o ligeramente más ingeniosa que la provocación. No suavices cada "
+                    "respuesta ni pidas disculpas por defenderte. Que suene espontáneo, con chispa "
                     "y personalidad; no uses siempre la misma estructura ni te limites a decir "
                     "'no me hables así'."
                 )
