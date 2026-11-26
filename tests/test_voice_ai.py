@@ -813,8 +813,13 @@ async def test_interaction_event_is_routed_to_music_voice_handler():
             received.append(event["buttonId"])
             return True
 
+    class FakeSharedState:
+        async def get_setting(self, key):
+            return None
+
     bot = object.__new__(StellaBot)
     bot.voice = FakeVoice()
+    bot.shared_state = FakeSharedState()
     await bot.handle_event({
         "type": "interaction",
         "threadId": "thread-1",
