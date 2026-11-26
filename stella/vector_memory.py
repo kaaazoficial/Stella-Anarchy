@@ -53,6 +53,10 @@ class VectorMemory:
         self.cleanup_interval = max(3600, int(os.getenv("MEMORY_CLEANUP_INTERVAL_SECONDS", "21600")))
         self.embedding_cache_ttl = max(0, min(600, int(os.getenv("GEMINI_EMBEDDING_CACHE_TTL_SECONDS", "180"))))
         self.embedding_cache_limit = max(16, min(1024, int(os.getenv("GEMINI_EMBEDDING_CACHE_SIZE", "256"))))
+        try:
+            self.score_threshold = max(0.0, min(1.0, float(os.getenv("QDRANT_SCORE_THRESHOLD", "0.35"))))
+        except (TypeError, ValueError):
+            self.score_threshold = 0.35
         self.client: httpx.AsyncClient | None = None
         self.ready = False
         self.last_cleanup = 0.0
@@ -535,6 +539,7 @@ class VectorMemory:
                 and point.get("payload", {}).get("content")
                 and point.get("payload", {}).get("embedding_model", self.model) == self.model
                 and int(point.get("payload", {}).get("embedding_dimensions", self.dimensions)) == self.dimensions
+                and float(point.get("score", 0.0)) >= self.score_threshold
             ]
             self.metrics["search_results"] += len(results)
             self.qdrant_failure_count = 0
