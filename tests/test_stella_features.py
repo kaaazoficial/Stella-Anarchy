@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import time
+
+import pytest
 from pathlib import Path
 
 from stella.ai import StellaAI
@@ -163,7 +165,7 @@ def test_ship_verdict_changes_its_reaction_by_compatibility_score(monkeypatch):
 
 
 
-def test_public_help_hides_administrative_catalogue_but_admin_help_keeps_it():
+def test_help_filter_hides_administrative_catalogue_from_public_views():
     from stella.help import filter_commands_help_text
 
     full = build_commands_help_text("!")
