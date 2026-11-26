@@ -307,10 +307,15 @@ def test_recent_room_context_and_integrity_report(monkeypatch):
             event_time="2026-11-26T10:01:00Z",
             source_event_id="join-1", content=None,
         )
+        await archive.record_event(
+            "room-1", "chat.message.edited",
+            event_time="2026-11-26T10:02:00Z",
+            source_event_id="edit-1", message_id="message-1",
+            content="Hola, actualización",
+        )
         context = await archive.recent_room_context("room-1", limit=10)
         report = await archive.integrity_check("room-1", sample_limit=10)
-        assert len(context) == 1
-        assert context[0]["content"] == "Hola"
+        assert [item["content"] for item in context] == ["Hola, actualización", "Hola"]
         assert report["total"] == 2
         assert report["sampled"] == 2
         assert report["missing_message_ids"] == 0
