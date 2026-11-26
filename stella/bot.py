@@ -309,7 +309,7 @@ _STELLA_JOKE_COMEBACKS = (
 
 
 def build_stella_comeback(kind: str, value: str = "") -> str:
-    """Return a variable, locally generated comeback; clear insults never rely on the LLM."""
+    """Return an emergency local comeback when both AI providers fail."""
     normalized = unicodedata.normalize("NFKC", str(value or "")).casefold()
     if kind == "insult":
         return random.choice(_STELLA_INSULT_COMEBACKS)
