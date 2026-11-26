@@ -2585,8 +2585,6 @@ class StellaBot:
             )
             return
         blocks = build_commands_help_blocks(prefix)
-        if not include_admin:
-            blocks = blocks[:5]
         await self._reply(room_id, blocks[0], message)
         for block in blocks[1:]:
             await self.platform.send_message(room_id, format_stella_text(block)[:1800])
