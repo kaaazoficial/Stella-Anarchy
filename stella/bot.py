@@ -401,10 +401,16 @@ class StellaBot:
             return False
         return await memory.save(room_id, uid, self.ai_core._history(session_key))
 
+    async def _proactive_enabled(self, room_id: str) -> bool:
+        try:
+            return await self.shared_state.get_setting(f"stella_proactive:{room_id}") == "1"
+        except Exception:
+            return False
+
     async def _maybe_proactive_reply(
         self, room_id: str, uid: str, name: str, content: str, message: dict[str, Any]
     ) -> None:
-        if self.store.get_setting(room_id, "stella_proactive_enabled", "0") != "1":
+        if not await self._proactive_enabled(room_id):
             return
         text = " ".join(str(content or "").split())
         if len(text) < 12 or len(text) > 500 or text.startswith(("!", "-", "/")):
@@ -2274,14 +2280,22 @@ class StellaBot:
             return
         action = str(args or "").casefold().strip()
         if action in {"activar", "on", "encender"}:
-            self.store.set_setting(room_id, "stella_proactive_enabled", "1")
+            try:
+                await self.shared_state.set_setting(f"stella_proactive:{room_id}", "1")
+            except Exception:
+                await self._reply(room_id, "No pude guardar el ajuste de participación en el almacenamiento compartido. No lo activé.", message)
+                return
             await self._reply(room_id, "Participación espontánea activada en esta sala. Solo intervendré ante invitaciones claras al chat y con una pausa mínima de cinco minutos.", message)
         elif action in {"desactivar", "off", "apagar"}:
-            self.store.set_setting(room_id, "stella_proactive_enabled", "0")
+            try:
+                await self.shared_state.set_setting(f"stella_proactive:{room_id}", "0")
+            except Exception:
+                await self._reply(room_id, "No pude guardar el ajuste de participación en el almacenamiento compartido. No puedo confirmar que se haya desactivado.", message)
+                return
             self._proactive_cooldown.pop(room_id, None)
             await self._reply(room_id, "Participación espontánea desactivada. Volveré a intervenir solo cuando me llamen o me escriban directamente.", message)
         else:
-            enabled = self.store.get_setting(room_id, "stella_proactive_enabled", "0") == "1"
+            enabled = await self._proactive_enabled(room_id)
             await self._reply(room_id, f"Participación espontánea: {'activada' if enabled else 'desactivada'}. Usa !presencia activar|desactivar.", message)
 
     async def _vector_memory_command(self, room_id, uid, name, args, message):
