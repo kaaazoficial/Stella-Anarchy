@@ -48,8 +48,9 @@ class StellaAI:
         self.groq_key = os.getenv("GROQ_API_KEY", "").strip()
         self.groq_model = os.getenv("GROQ_MODEL", DEFAULT_GROQ_MODEL).strip()
         self.groq_base = os.getenv("GROQ_API_URL", DEFAULT_GROQ_BASE).rstrip("/")
-        primary = os.getenv("STELLA_AI_PRIMARY_PROVIDER", "gemini").casefold().strip()
-        self.primary = "groq" if primary == "groq" else "gemini"
+        # Gemini stays primary whenever its key exists; legacy Groq overrides
+        # are ignored so utility calls follow the same provider policy as chat.
+        self.primary = "gemini" if self.gemini_key else "groq"
         self.timeout = httpx.Timeout(35.0, connect=8.0)
         self._client: httpx.AsyncClient | None = None
         self.calls = {"gemini": 0, "groq": 0}
