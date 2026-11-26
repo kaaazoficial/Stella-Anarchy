@@ -250,6 +250,7 @@ def test_global_silence_blocks_commands_chat_replies_and_voice():
 
     assert b.platform.sent == []
     assert b.voice.speech == []
+    assert b.voice.speech_stopped is True
 
 
 def test_owner_can_restore_chat_with_natural_phrase_while_silenced():
@@ -766,3 +767,4 @@ def test_global_silence_blocks_voice_button_interactions():
     )
 
     assert b.voice.interactions == []
+    assert b.voice.speech_stopped is True
