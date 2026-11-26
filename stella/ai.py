@@ -84,7 +84,8 @@ class StellaAI:
         return (
             f"IA principal: {primary}. Gemini: {gemini_state} "
             f"({self.gemini_model}). Groq: {groq_state} ({self.groq_model}). "
-            "Las peticiones no se guardan como historial en Stella."
+            "La memoria persistente de conversación es opcional y se gestiona aparte en Qdrant; "
+            "solo se guarda cuando cada persona la activa explícitamente para esa sala."
         )
 
     @staticmethod
