@@ -2061,9 +2061,20 @@ class MusicVoice:
         parts = raw_args.split(maxsplit=1)
         action = parts[0].casefold() if parts else "ayuda"
         rest = parts[1].strip() if len(parts) > 1 else ""
+        if action in {"ayuda", "help", "comandos"}:
+            return (
+                "🎧 DJ DE STELLA\n"
+                "!dj buscar <tema> · !dj ambiente <estilo>\n"
+                "!dj reproducir <n> · !dj encolar <n> · !dj resultados · !dj cola · !dj actual\n"
+                "!dj pausa · !dj reanudar · !dj saltar · !dj detener · !dj volumen <0-100>\n"
+                "!dj favorito lista|guardar <n>|reproducir <n>|quitar <n> [ADMIN]\n"
+                "!dj fuentes · !dj youtube <tema> (búsqueda externa) · !dj archivos"
+            )
         if action in {"youtube", "yt"}:
             return self.youtube_search_message(rest)
         if action in {"buscar", "search"}:
+            if not rest:
+                return "Indica qué quieres escuchar. Ejemplo: !dj buscar música ambiental."
             ok, message = await self.search_music(room_id, rest)
             return message
         if action in {"reproducir", "play", "encolar", "agregar"}:
@@ -2135,6 +2146,8 @@ class MusicVoice:
             items = saved.get("items") or []
             return "\n".join([ "🎧 RESULTADOS DE BÚSQUEDA" ] + [f"{i}. {item.get('title')} — {item.get('creator')} · {item.get('source')}" for i, item in enumerate(items, 1)])
         if action in {"ambiente", "mood"}:
+            if not rest:
+                return "Indica el ambiente que buscas. Ejemplo: !dj ambiente concentración."
             from stella.astra import resolve_music_mood
             ok, message = await self.search_music(room_id, resolve_music_mood(rest))
             return message
@@ -2228,6 +2241,7 @@ class MusicVoice:
             )
         return (
             "🎧 DJ DE STELLA\n"
+            "Usa !dj ayuda para ver todos los controles.\n"
             "!dj buscar <artista, tema o ambiente>\n"
             "!dj reproducir <número> | !dj encolar <número>\n"
             "!dj cola | !dj pausa | !dj reanudar | !dj saltar | !dj detener\n"
