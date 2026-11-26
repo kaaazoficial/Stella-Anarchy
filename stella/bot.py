@@ -58,7 +58,7 @@ _PLAYFUL_INSULT_PATTERNS = (
         re.IGNORECASE,
     ),
     re.compile(
-        r"\b(?:eres|estas|sos|pareces|vaya|menuda|tremenda|que)\s+"
+        r"\b(?:eres|estas|sos|pareces|vaya|menuda|tremenda|qu[eé])\s+"
         r"(?:(?:un|una)\s+)?"
         r"(?:idiota|imb[eé]cil|est[uú]pida?|tonta?|in[uú]til|pesada|"
         r"tarada|boba|payasa|rid[ií]cula|basura|mierda|pat[eé]tica|"
@@ -74,8 +74,9 @@ _PLAYFUL_INSULT_PATTERNS = (
         re.IGNORECASE,
     ),
     re.compile(
-        r"\b(?:que|vaya)\s+(?:idiota|imb[eé]cil|est[uú]pida?|tonta?|"
-        r"in[uú]til|pesada|tarada|boba|payasa|rid[ií]cula|pat[eé]tica)\s+eres\b",
+        r"\b(?:qu[eé]|vaya)\s+(?:idiota|imb[eé]cil|est[uú]pida?|tonta?|"
+        r"in[uú]til|pesada|tarada|boba|payasa|rid[ií]cula|pat[eé]tica)\s+eres"
+        r"(?:\s+(?:jaj+a+|xd+|lmao))?\b",
         re.IGNORECASE,
     ),
 )
