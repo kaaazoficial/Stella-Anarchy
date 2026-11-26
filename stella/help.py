@@ -46,7 +46,7 @@ def _sections(p: str):
             f"▸ {p}dj quitar <n>|mover <a> <b>|vaciar|repetir off|una|cola.",
             f"▸ {p}dj transicion <0-2000>|duck on|off|estado — Fundido y atenuación durante TTS.",
             f"▸ {p}dj archivos|añadir <archivo> · {p}reproducir <archivo> — Audio local.",
-            f"▸ {p}dj favorito lista|guardar <n>|reproducir <n>|quitar <n>.
+            f"▸ {p}dj favorito lista|guardar <n>|reproducir <n>|quitar <n>.",
             f"▸ {p}playlist crear|lista|agregar|ver|reproducir|borrar.",
             f"▸ {p}volumen <0-100>|subirvolumen|bajarvolumen|silencio.",
             f"▸ {p}leer|noleer · {p}tts voces|probar|voz|velocidad|volumen|enlaces|menciones.",
