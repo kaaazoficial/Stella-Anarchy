@@ -188,3 +188,10 @@ def test_health_head_returns_503_when_database_is_unhealthy(monkeypatch):
     response = asyncio.run(main.health_head())
     assert response.status_code == 503
     assert response.body == b""
+
+
+
+def test_public_api_docs_are_disabled_by_default():
+    assert main.app.docs_url is None
+    assert main.app.redoc_url is None
+    assert main.app.openapi_url is None

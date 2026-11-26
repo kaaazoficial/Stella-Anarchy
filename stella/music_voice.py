@@ -897,7 +897,19 @@ class MusicVoice:
                     "iiprop": "url|size|mime|mediatype|extmetadata",
                     "iiextmetadatafilter": "LicenseShortName|LicenseUrl|Artist|Credit|ObjectName",
                 },
-                headers={"Accept": "application/json", "User-Agent": "Stella-Anarchy/1.0 (licensed audio catalog)"},
+                headers={
+                    "Accept": "application/json",
+                    "User-Agent": (
+                        "StellaAnarchy/1.0 "
+                        "(https://github.com/kaaazoficial/Stella-Anarchy"
+                        + (
+                            "; " + os.getenv("STELLA_CONTACT_EMAIL", "").strip()
+                            if os.getenv("STELLA_CONTACT_EMAIL", "").strip()
+                            else ""
+                        )
+                        + ")"
+                    ),
+                },
             )
             response.raise_for_status()
             pages = (response.json().get("query") or {}).get("pages") or {}

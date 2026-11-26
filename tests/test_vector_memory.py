@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import httpx
 import pytest
 
@@ -141,3 +142,29 @@ async def test_vector_search_is_scoped_to_the_requesting_user(monkeypatch):
 
 async def _fake_embedding():
     return [0.0] * 768
+
+
+
+@pytest.mark.asyncio
+async def test_concurrent_collection_initialization_is_serialized(monkeypatch):
+    monkeypatch.setenv("QDRANT_URL", "https://qdrant.example")
+    monkeypatch.setenv("QDRANT_API_KEY", "qdrant-test")
+    monkeypatch.setenv("GEMINI_API_KEY", "gemini-test")
+    memory = VectorMemory()
+    calls = 0
+    gate = asyncio.Event()
+
+    async def initialize():
+        nonlocal calls
+        calls += 1
+        await gate.wait()
+        memory.ready = True
+
+    memory._ensure_collection_locked = initialize
+    first = asyncio.create_task(memory.ensure_collection())
+    second = asyncio.create_task(memory.ensure_collection())
+    await asyncio.sleep(0)
+    gate.set()
+    await asyncio.gather(first, second)
+    assert calls == 1
+    await memory.close()

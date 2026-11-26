@@ -43,22 +43,22 @@ _GLOBAL_CHAT_SILENCE_KEY = "chat_silence"
 
 _PLAYFUL_INSULT_PATTERNS = (
     re.compile(
-        r"\\b(?:malparid[oa]s?|hij[oa]s? de puta|hij[oa]s? de la gran puta|"
+        r"\b(?:malparid[oa]s?|hij[oa]s? de puta|hij[oa]s? de la gran puta|"
         r"put[oa]s?|puta madre|conchatumadre|concha de tu madre|"
         r"gonorrea|gonorre[oa]|carechimba|careverga|maric[oó]n|"
         r"cabron(?:a|es)?|culer[oa]s?|pendej[oa]s?|"
-        r"perr[oa]s?|zorr[oa]s?|mierda|hdp|hpt[as]?|hp)\\b",
+        r"perr[oa]s?|zorr[oa]s?|mierda|hdp|hpt[as]?|hp)\b",
         re.IGNORECASE,
     ),
     re.compile(
-        r"\\b(?:eres|sos|estas|est[aá]s|vaya|menuda|tremenda)\\s+"
-        r"(?:una?\\s+)?(?:malparid[oa]|hij[oa] de puta|gonorrea|"
+        r"\b(?:eres|sos|estas|est[aá]s|vaya|menuda|tremenda)\s+"
+        r"(?:(?:un|una)\s+)?(?:malparid[oa]|hij[oa] de puta|gonorrea|"
         r"carechimba|careverga|maric[oó]n|cabron[ae]?|perr[oa]|"
-        r"pendej[oa]|hij[oa] de la gran puta)\\b",
+        r"pendej[oa]|hij[oa] de la gran puta)\b",
         re.IGNORECASE,
     ),
     re.compile(
-        r"\b(?:eres|estas|sos|pareces|vaya|menuda|tremenda|que)\s+"
+        r"\b(?:eres|estas|sos|pareces|vaya|menuda|tremenda)\s+"
         r"(?:(?:un|una)\s+)?"
         r"(?:idiota|imb[eé]cil|est[uú]pida?|tonta?|in[uú]til|pesada|"
         r"tarada|boba|payasa|rid[ií]cula|basura|mierda|pat[eé]tica|"
@@ -74,10 +74,9 @@ _PLAYFUL_INSULT_PATTERNS = (
         re.IGNORECASE,
     ),
     re.compile(
-        r"\b(?:que|vaya)\s+(?:idiota|imb[eé]cil|est[uú]pida?|tonta?|"
-        r"in[uú]til|pesada|tarada|boba|payasa|rid[ií]cula|pat[eé]tica)\s+eres\b"
-        r"|\b(?:idiota|imb[eé]cil|est[uú]pida?|tonta?|in[uú]til|pesada|"
-        r"tarada|boba|payasa|rid[ií]cula|pat[eé]tica|weona|hueona)\s*[.!?]*$",
+        r"\b(?:qu[eé]|vaya)\s+(?:idiota|imb[eé]cil|est[uú]pida?|tonta?|"
+        r"in[uú]til|pesada|tarada|boba|payasa|rid[ií]cula|pat[eé]tica)\s+eres"
+        r"(?:\s+(?:jaj+a+|xd+|lmao))?\b",
         re.IGNORECASE,
     ),
 )
@@ -126,20 +125,42 @@ _SERIOUS_DISTRESS_PATTERNS = (
 
 
 def classify_playful_stella_message(value: str) -> str | None:
-    """Detect direct banter aimed at Stella without mistaking real distress for a joke."""
+    """Classify playful messages while requiring evidence they are aimed at Stella."""
     text = re.sub(r"\s+", " ", str(value or "")).strip()
     if not text:
         return None
     if any(pattern.search(text) for pattern in _SERIOUS_DISTRESS_PATTERNS):
         return None
-    if any(pattern.search(text) for pattern in _PLAYFUL_INSULT_PATTERNS):
+
+    # A name vocative permits short direct insults with no verb (e.g. "Stella, gonorrea").
+    # Without it, only second-person constructions count; profanity about other people
+    # or situations must not trigger Stella's comeback behavior.
+    prefix = re.match(
+        r"^(?:oye\s+)?@?stella\b[\s,;:!?¡¿.-]*",
+        text,
+        re.IGNORECASE,
+    )
+    suffix = re.search(r"[,;:]\s*@?stella[.!?¡¿]*$", text, re.IGNORECASE)
+    explicitly_addressed = prefix is not None or suffix is not None
+    if prefix is not None:
+        text = text[prefix.end():].strip()
+    elif suffix is not None:
+        text = text[:suffix.start()].strip()
+
+    if not text:
+        return None
+    insult_patterns = (
+        _PLAYFUL_INSULT_PATTERNS
+        if explicitly_addressed
+        else _PLAYFUL_INSULT_PATTERNS[1:]
+    )
+    if any(pattern.search(text) for pattern in insult_patterns):
         return "insult"
     if any(pattern.search(text) for pattern in _PLAYFUL_HUMILIATION_PATTERNS):
         return "teasing"
     if any(pattern.search(text) for pattern in _PLAYFUL_JOKE_PATTERNS):
         return "teasing"
     return None
-
 
 _SILENCE_REQUESTS = frozenset({
     "no le hables a nadie",
@@ -436,8 +457,7 @@ class StellaBot:
         if not uid or not content or self._is_bot_message(message):
             return
 
-        # Render logs provide a live, searchable view of every user message,
-        # including ordinary chat that Stella intentionally does not answer.
+        # Audit records retain only non-content metadata; message text is never logged.
         audit_event(
             "chat.message.in",
             room_id=room_id,

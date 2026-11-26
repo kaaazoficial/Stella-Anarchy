@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from email.utils import parsedate_to_datetime
 import re
 import time
 from collections import defaultdict, deque
@@ -27,8 +28,9 @@ class AnarchyClient:
         # enough distance between requests so multi-page replies are delivered.
         self._message_send_lock = asyncio.Lock()
         self._last_message_send_at = 0.0
-        self._message_min_interval = 1.0
+        self._message_min_interval = 1.25
         self._message_max_attempts = 4
+        self._message_backoff_until = 0.0
         # IDs only; message text and conversation content are never retained.
         self._sent_message_ids: dict[str, deque[tuple[float, str]]] = defaultdict(deque)
         self._sent_message_ttl = 7 * 24 * 60 * 60
@@ -180,12 +182,17 @@ class AnarchyClient:
 
     @staticmethod
     def _retry_after_seconds(value: Any, fallback: float) -> float:
+        raw = str(value or "").strip()
         try:
-            delay = float(str(value).strip())
+            delay = float(raw)
         except (TypeError, ValueError):
-            delay = fallback
-        # Avoid tight retry loops and unreasonable waits from malformed headers.
-        return min(30.0, max(0.5, delay))
+            try:
+                parsed = parsedate_to_datetime(raw)
+                delay = parsed.timestamp() - time.time()
+            except (TypeError, ValueError, OverflowError):
+                delay = fallback
+        # Respect server Retry-After values up to five minutes; never retry early.
+        return min(300.0, max(0.5, delay))
 
     async def send_message(
         self,
@@ -217,6 +224,9 @@ class AnarchyClient:
 
         async with self._message_send_lock:
             for attempt in range(self._message_max_attempts):
+                cooldown = self._message_backoff_until - time.monotonic()
+                if cooldown > 0:
+                    await asyncio.sleep(cooldown)
                 elapsed = time.monotonic() - self._last_message_send_at
                 wait_for_slot = self._message_min_interval - elapsed
                 if wait_for_slot > 0:
@@ -255,6 +265,10 @@ class AnarchyClient:
                 fallback = 2.0 * (2 ** attempt)
                 retry_delay = self._retry_after_seconds(
                     result.get("retry_after"), fallback
+                )
+                self._message_backoff_until = max(
+                    self._message_backoff_until,
+                    time.monotonic() + retry_delay,
                 )
                 log.warning(
                     "Anarchy message rate limit reached; retrying in %.2f seconds "

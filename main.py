@@ -82,7 +82,14 @@ async def lifespan(_: FastAPI):
     await bot.close()
 
 
-app = FastAPI(title="Stella · Anarchy Community Bot", lifespan=lifespan)
+docs_enabled = os.getenv("API_DOCS_ENABLED", "").strip().casefold() in {"1", "true", "yes", "on"}
+app = FastAPI(
+    title="Stella · Anarchy Community Bot",
+    lifespan=lifespan,
+    docs_url="/docs" if docs_enabled else None,
+    redoc_url="/redoc" if docs_enabled else None,
+    openapi_url="/openapi.json" if docs_enabled else None,
+)
 
 
 def verify_signature(raw: bytes, timestamp: str, signature: str, secret: str) -> bool:
@@ -171,7 +178,7 @@ async def receive_webhook(request: Request) -> dict[str, bool]:
 
 @app.get("/")
 async def root() -> dict[str, str]:
-    return {"name": "Stella", "status": "online", "docs": "/docs"}
+    return {"name": "Stella", "status": "online"}
 
 
 @app.head("/")

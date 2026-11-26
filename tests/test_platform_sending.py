@@ -9,6 +9,7 @@ def _client_with_responses(responses):
     client._last_message_send_at = 0.0
     client._message_min_interval = 1.0
     client._message_max_attempts = 4
+    client._message_backoff_until = 0.0
     calls = []
 
     async def request(method, path, *, json_body=None):
@@ -135,5 +136,45 @@ def test_send_message_converts_escaped_newlines_before_posting(monkeypatch):
         assert result is True
         assert calls[0][2]["content"] == "Primera línea\nSegunda línea\nTercera línea"
         assert r"\\n" not in calls[0][2]["content"]
+
+    asyncio.run(scenario())
+
+
+
+def test_retry_after_accepts_http_date_and_respects_long_server_wait():
+    from datetime import datetime, timezone, timedelta
+    from email.utils import format_datetime
+
+    future = datetime.now(timezone.utc) + timedelta(seconds=75)
+    value = format_datetime(future, usegmt=True)
+    delay = AnarchyClient._retry_after_seconds(value, 2.0)
+    assert 70 <= delay <= 76
+    assert AnarchyClient._retry_after_seconds("240", 2.0) == 240
+    assert AnarchyClient._retry_after_seconds("999", 2.0) == 300
+
+
+
+def test_rate_limit_cooldown_is_shared_with_following_messages(monkeypatch):
+    async def scenario():
+        sleeps = []
+        async def fake_sleep(delay):
+            sleeps.append(delay)
+        monkeypatch.setattr("stella.platform.asyncio.sleep", fake_sleep)
+        client, calls = _client_with_responses([
+            {"ok": False, "status": 429, "retry_after": "2", "data": {}}
+            for _ in range(4)
+        ])
+        assert await client.send_message("room", "first") is False
+        assert len(calls) == 4
+        cooldown = client._message_backoff_until
+        assert cooldown > 0
+        # A second send must respect the server cooldown even after the first
+        # send exhausted its retry budget.
+        client.request = _request_success = async_success
+        assert await client.send_message("room", "second") is True
+        assert any(delay >= 1.9 for delay in sleeps)
+
+    async def async_success(method, path, *, json_body=None):
+        return {"ok": True, "status": 200, "data": {}}
 
     asyncio.run(scenario())

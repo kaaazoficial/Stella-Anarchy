@@ -25,7 +25,7 @@ def redact_secrets(value: Any) -> str:
 
 
 def audit_event(event: str, **fields: Any) -> None:
-    """Emit a structured, content-bearing audit event to stdout/Render logs."""
+    """Emit metadata-only audit events; conversation text never enters logs."""
     payload = {
         "event": str(event),
         "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -33,5 +33,13 @@ def audit_event(event: str, **fields: Any) -> None:
     for key, value in fields.items():
         if value is None:
             continue
-        payload[str(key)] = redact_secrets(value) if key in {"content", "text", "nickname"} else value
+        field = str(key)
+        if field in {"content", "text"}:
+            payload["content_length"] = len(str(value))
+            payload["content_redacted"] = True
+        elif field in {"uid", "message_id", "reply_id", "room_id", "nickname"}:
+            # Omit identifiers; plain hashes of predictable IDs can be reversed.
+            continue
+        else:
+            payload[field] = value
     log.info("%s", json.dumps(payload, ensure_ascii=False, separators=(",", ":"), default=str))

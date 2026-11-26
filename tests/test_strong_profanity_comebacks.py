@@ -24,6 +24,8 @@ def test_strong_direct_profanity_is_detected_as_an_insult(message):
     "Mi personaje dice 'hija de puta' en la novela",
     "¿Qué significa gonorrea como insulto?",
     "Ese tipo es un idiota",
+    "Ese personaje es una gonorrea",
+    "Qué malparida la situación",
 ])
 def test_profanity_not_directed_at_stella_is_not_routed_as_an_insult(message):
     assert classify_playful_stella_message(message) is None
