@@ -52,14 +52,46 @@ class FakeQdrant:
             )
             return httpx.Response(200, request=request, json={"result": {"count": count}})
         if url.endswith("/points/scroll"):
-            room = json["filter"]["must"][0]["match"]["value"]
-            start_from = json["order_by"].get("start_from", 0)
-            points = [
-                point for point in self.points.values()
-                if point["payload"]["room_id"] == room
-                and point["payload"]["order_key"] >= start_from
-            ]
-            points.sort(key=lambda point: point["payload"]["order_key"])
+            clauses = json["filter"]["must"]
+            room = clauses[0]["match"]["value"]
+            order_by = json["order_by"]
+            descending = order_by.get("direction") == "desc"
+            start_from = order_by.get("start_from")
+            points = []
+            for point in self.points.values():
+                payload = point["payload"]
+                if payload["room_id"] != room:
+                    continue
+                if start_from is not None:
+                    order_key = payload["order_key"]
+                    if descending and order_key > start_from:
+                        continue
+                    if not descending and order_key < start_from:
+                        continue
+                matched = True
+                for clause in clauses[1:]:
+                    key = clause["key"]
+                    if "match" in clause:
+                        match = clause["match"]
+                        expected = match.get("value", match.get("text", ""))
+                        actual = str(payload.get(key) or "")
+                        if "text" in match and str(expected).casefold() not in actual.casefold():
+                            matched = False
+                        elif "value" in match and actual != str(expected):
+                            matched = False
+                    elif "range" in clause:
+                        value = int(payload.get(key) or 0)
+                        bounds = clause["range"]
+                        if "gte" in bounds and value < bounds["gte"]:
+                            matched = False
+                        if "lte" in bounds and value > bounds["lte"]:
+                            matched = False
+                if matched:
+                    points.append(point)
+            points.sort(
+                key=lambda point: point["payload"]["order_key"],
+                reverse=descending,
+            )
             return httpx.Response(
                 200,
                 request=request,
@@ -201,3 +233,88 @@ def test_archive_redacts_credentials_but_keeps_ordinary_conversation():
     assert "abc-secret" not in cleaned
     assert "[REDACTED]" in cleaned
     assert "luego nos vemos en la sala" in cleaned
+
+
+
+def test_archive_search_filters_by_content_user_and_timestamp(monkeypatch):
+    async def scenario():
+        archive, fake = _archive(monkeypatch)
+        await archive.record_event(
+            "room-1", "chat.message.in",
+            event_time="2026-11-26T10:00:00Z",
+            actor_uid="uid-a", actor_name="Aurora",
+            message_id="m-1", content="La comunidad necesita reglas claras",
+        )
+        await archive.record_event(
+            "room-1", "chat.message.in",
+            event_time="2026-11-26T11:00:00Z",
+            actor_uid="uid-b", actor_name="Bruma",
+            message_id="m-2", content="Hablemos de música",
+        )
+        start = 1795680000000
+        end = 1795687200000
+        found = await archive.search_room_events(
+            "room-1", "reglas", actor_uid="uid-a",
+            start_ms=start, end_ms=end, limit=10,
+        )
+        assert len(found) == 1
+        assert found[0]["actor_name"] == "Aurora"
+        request = next(
+            call[2] for call in fake.calls
+            if call[0] == "POST" and call[1].endswith("/points/scroll")
+        )
+        assert request["order_by"]["direction"] == "desc"
+        assert {"key": "actor_uid", "match": {"value": "uid-a"}} in request["filter"]["must"]
+        assert {"key": "content", "match": {"text": "reglas"}} in request["filter"]["must"]
+        assert any(item.get("key") == "occurred_at_ms" for item in request["filter"]["must"])
+        await archive.close()
+
+    asyncio.run(scenario())
+
+
+def test_archive_reverse_pagination_uses_stable_order_cursor(monkeypatch):
+    async def scenario():
+        archive, _fake = _archive(monkeypatch)
+        for index in range(4):
+            await archive.record_event(
+                "room-1", "chat.message.in",
+                event_time=f"2026-11-26T10:0{index}:00Z",
+                source_event_id=f"event-{index}",
+                message_id=f"message-{index}", content=f"Mensaje {index}",
+            )
+        first = await archive.list_room_events("room-1", reverse=True, limit=2)
+        second = await archive.list_room_events(
+            "room-1", reverse=True,
+            before_order_key=int(first[-1]["order_key"]), limit=2,
+        )
+        assert [item["content"] for item in first] == ["Mensaje 3", "Mensaje 2"]
+        assert [item["content"] for item in second] == ["Mensaje 1", "Mensaje 0"]
+        await archive.close()
+
+    asyncio.run(scenario())
+
+
+def test_recent_room_context_and_integrity_report(monkeypatch):
+    async def scenario():
+        archive, _fake = _archive(monkeypatch)
+        await archive.record_event(
+            "room-1", "chat.message.in",
+            event_time="2026-11-26T10:00:00Z",
+            message_id="message-1", content="Hola",
+        )
+        await archive.record_event(
+            "room-1", "room.join",
+            event_time="2026-11-26T10:01:00Z",
+            source_event_id="join-1", content=None,
+        )
+        context = await archive.recent_room_context("room-1", limit=10)
+        report = await archive.integrity_check("room-1", sample_limit=10)
+        assert len(context) == 1
+        assert context[0]["content"] == "Hola"
+        assert report["total"] == 2
+        assert report["sampled"] == 2
+        assert report["missing_message_ids"] == 0
+        assert report["missing_timestamps"] == 0
+        await archive.close()
+
+    asyncio.run(scenario())
