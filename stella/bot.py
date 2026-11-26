@@ -1448,7 +1448,9 @@ class StellaBot:
             "roast", "afinidad", "amistad", "reputacion", "duelo",
             "pagar", "transferir", "regalo",
         }
-        if command in target_commands and not args:
+        if command in target_commands and (
+            not args or (command in {"pagar", "transferir"} and not self._mentioned_user(message))
+        ):
             reply_target = await self._resolve_reply_target(room_id, message, uid)
             if reply_target:
                 message["_stella_reply_target"] = reply_target
