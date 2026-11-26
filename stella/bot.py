@@ -316,9 +316,9 @@ def build_stella_comeback(kind: str, value: str = "") -> str:
     if any(pattern.search(normalized) for pattern in _PLAYFUL_HUMILIATION_PATTERNS):
         return random.choice(_STELLA_HUMILIATION_COMEBACKS)
     if re.search(
-        r"\\b(?:era broma|es broma|te estoy molestando|te estoy tomando el pelo|no te piques)\\b",
+        r"\b(?:era broma|es broma|te estoy molestando|te estoy tomando el pelo|no te piques)\b",
         normalized,
-    ):
+    ) or re.fullmatch(r"(?:j+a+j+a+|x+d+|l+m+a+o+|[😂🤣😆😹]+)[.!?¡¿]*", normalized):
         return random.choice(_STELLA_JOKE_COMEBACKS)
     return random.choice(_STELLA_HUMILIATION_COMEBACKS + _STELLA_JOKE_COMEBACKS)
 
