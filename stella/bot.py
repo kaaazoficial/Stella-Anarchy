@@ -140,7 +140,7 @@ _MULTILINGUAL_INSULT_PATTERNS = tuple(
         r"\b(?:du bist|du bist ein|du bist eine|ihr seid)\s+(?:(?:ein|eine)\s+)?(?:idiot|idiotin|dummkopf|arschloch|vollidiot|wichser|verlierer|mistkerl)\b",
         r"\b(?:fick dich|halt die fresse|leck mich|du bist scheiße|du bist scheisse)\b",
         # Italian.
-        r"\b(?:sei un|sei una|tu sei|sei proprio)\s+(?:(?:un|una)\s+)?(?:idiota|stronzo|stronza|coglione|cogliona|cretino|cretina|bastardo|bastarda|deficiente)\b",
+        r"\b(?:sei un|sei uno|sei una|tu sei|sei proprio)\s+(?:(?:un|uno|una)\s+)?(?:idiota|stronzo|stronza|coglione|cogliona|cretino|cretina|bastardo|bastarda|deficiente)\b",
         r"\b(?:vaffanculo|vai a cagare|pezzo di merda|testa di cazzo)\b",
         # Russian.
         r"(?:\bты\s+(?:дурак|дура|идиот|идиотка|дебил|тупой|тупая|урод|мразь)\b|\b(?:пошёл|пошел)\s+нахуй\b|\bиди\s+на\s+хуй\b)",
