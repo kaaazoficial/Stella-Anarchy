@@ -45,7 +45,8 @@ _GLOBAL_CHAT_SILENCE_KEY = "chat_silence"
 _PLAYFUL_INSULT_PATTERNS = (
     re.compile(
         r"\b(?:malparid[oa]s?|hij[oa]s? de puta|hij[oa]s? de la gran puta|"
-        r"put[oa]s?|puta madre|conchatumadre|concha de tu madre|"
+        r"put[oa]s?|putit[oa]s?|puta madre|conchatumadre|concha de tu madre|" +
+        r"conchud[oa]s?|pelotud[oa]s?|bolud[oa]s?|forr[oa]s?|gilipollas|"
         r"gonorrea|gonorre[oa]|carechimba|careverga|maric[oó]n|"
         r"cabron(?:a|es)?|culer[oa]s?|pendej[oa]s?|"
         r"perr[oa]s?|zorr[oa]s?|mierda|hdp|hpt[as]?|hp)\b",
@@ -55,7 +56,8 @@ _PLAYFUL_INSULT_PATTERNS = (
         r"\b(?:eres|sos|estas|est[aá]s|vaya|menuda|tremenda)\s+"
         r"(?:(?:un|una)\s+)?(?:malparid[oa]|hij[oa] de puta|gonorrea|"
         r"carechimba|careverga|maric[oó]n|cabron[ae]?|perr[oa]|"
-        r"pendej[oa]|hij[oa] de la gran puta)\b",
+        r"pendej[oa]|hij[oa] de la gran puta|putit[oa]|conchud[oa]|"
+        r"pelotud[oa]|bolud[oa]|forr[oa]|gilipollas)\b",
         re.IGNORECASE,
     ),
     re.compile(
@@ -85,11 +87,15 @@ _PLAYFUL_HUMILIATION_PATTERNS = (
     re.compile(
         r"\b(?:te (?:humill[eé]|gan[eé]|destru[ií]|dej[eé] en rid[ií]culo|"
         r"cerr[eé] la boca|call[eé])|acabo de humillarte|"
-        r"quedaste en rid[ií]culo|te quedaste sin palabras)\b",
+        r"quedaste en rid[ií]culo|te quedaste sin palabras|"
+        r"hum[ií]ll(?:ala|lo)|dale una humillada|"
+        r"dej[aá]la en rid[ií]culo|dej[aá]lo en rid[ií]culo|"
+        r"ridicul[ií]zala|ridicul[ií]zalo)\b",
         re.IGNORECASE,
     ),
     re.compile(
-        r"\b(?:eres un chiste|no das risa|tu (?:humor|chiste|respuesta) "
+        r"\b(?:pobrecit[oa].{0,70}(?:parece|pareces|act[uú]a|peleando|discutiendo)|"
+        r"eres un chiste|no das risa|tu (?:humor|chiste|respuesta) "
         r"(?:es|da) (?:pena|asco)|hasta un bot sabe m[aá]s|"
         r"ni para eso sirves|te falta calle)\b",
         re.IGNORECASE,
@@ -162,7 +168,8 @@ _MULTILINGUAL_INSULT_PATTERNS = tuple(
 _MULTI_STANDALONE_INSULT = re.compile(
     r"^(?:idiot|moron|dumbass|stupid|fool|loser|bitch|asshole|arsehole|"
     r"bastard|shithead|dipshit|connard|connasse|salaud|salope|abruti|"
-    r"idiota|imbecil|burro|burra|otário|otaria|babaca|stronzo|stronza|"
+    r"idiota|imbecil|burro|burra|putit[oa]|conchud[oa]|pelotud[oa]|bolud[oa]|"
+    r"forr[oa]|gilipollas|otário|otaria|babaca|stronzo|stronza|"
     r"coglione|cogliona|cretino|cretina|дурак|дура|идиот|идиотка|дебил|"
     r"غبي|غبية|أحمق|احمق|حمار|بلاهة|बेवकूफ|मूर्ख|गधा|傻逼|傻子|白痴|笨蛋|"
     r"バカ|馬鹿|アホ|クズ|바보|병신|개새끼)[.!?！。？]*$",
@@ -905,6 +912,15 @@ class StellaBot:
             await self._reply(room_id, "¡Aquí estoy! ¿Qué necesitas?", message)
             return
 
+        normalized_request = re.sub(
+            r"[^a-z0-9]+",
+            " ",
+            unicodedata.normalize("NFKD", request_text).casefold(),
+        ).strip()
+        if normalized_request in {"ayuda", "help"}:
+            await self._reply(room_id, "Claro. ¿Con qué necesitas ayuda?", message)
+            return
+
         playful_tone = classify_playful_stella_message(
             request_text,
             explicitly_addressed=bool(direct_call is not None or mentioned or replied),
@@ -931,9 +947,12 @@ class StellaBot:
             else:
                 tone_guidance = (
                     "La persona está bromeando, presumiendo de haberte ganado o intentando "
-                    "dejarte en ridículo. Síguele el juego y remata con un contraataque creativo, "
-                    "un comentario mordaz o una broma que le devuelva la jugada. No respondas "
-                    "como si fuera una consulta seria."
+                    "dejarte en ridículo. Síguele el juego y responde con un contraataque "
+                    "realmente ingenioso, mordaz y contundente. Si la provocación es fuerte, "
+                    "puedes añadir un insulto coloquial no discriminatorio, sin quedarte en una "
+                    "pulla elegante ni en una frase corporativa. Usa el detalle concreto de la "
+                    "burla para darle la vuelta y dejar al provocador en evidencia. No respondas "
+                    "como si fuera una consulta seria ni repitas remates prefabricados."
                 )
             playful_prompt = (
                 "CONTEXTO DE CONVERSACIÓN INFORMAL. " + tone_guidance + " "
