@@ -2547,6 +2547,7 @@ class StellaAICore:
             and difficulty in {"simple", "standard"}
             and not request_is_specialized_subject
             and not history
+            and not room_context
             and len(text) <= 160
             and not re.search(
                 r"\b(?:yo|soy|somos|nos|nosotros|mi|mis|mio|mia|me|tengo|estoy|siento|necesito|quiero|pareja|cuenta|usuario|edad|nombre|vivo|ubicacion|telefono|correo|uid|perfil|saldo)\b",
