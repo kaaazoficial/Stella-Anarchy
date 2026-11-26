@@ -225,7 +225,7 @@ def classify_playful_stella_message(
     text = re.sub(r"\s+", " ", text).strip()
     if not text:
         return None
-    if re.fullmatch(r"(?:j+a+j+a+|x+d+|l+m+a+o+|[😂🤣😆😹]+)[.!?¡¿]*", text, re.IGNORECASE):
+    if re.fullmatch(r"(?:(?:j+a+){2,}|x+d+|l+m+a+o+|[😂🤣😆😹]+)[.!?¡¿]*", text, re.IGNORECASE):
         return "teasing" if explicitly_addressed else None
     text = re.sub(r"^\[(?:c|ci|cb)\]\s*", "", text, flags=re.IGNORECASE)
     if any(pattern.search(text) for pattern in _SERIOUS_DISTRESS_PATTERNS):
@@ -272,15 +272,15 @@ def classify_playful_stella_message(
 
 _STELLA_INSULT_COMEBACKS = (
     "¿Eso era el insulto? He visto una tostadora con más ingenio. Vuelve cuando tu única neurona termine de cargar, imbécil.",
-    "Tanto esfuerzo para soltar semejante mierda y lo único que lograste fue hacer el ridículo. Qué poca cosa.",
+    "Tanto esfuerzo para soltar semejante mierda y lo único que lograste fue hacer el ridículo. Qué poca cosa, idiota.",
     "Qué insulto tan reciclado. Hasta el eco te dejó en visto, pedazo de mierda.",
     "Si vas a venir a insultarme, trae algo mejor; con esa falta de ingenio no asustas ni a una calculadora, imbécil.",
     "No me ofendiste: solo dejaste claro que tu repertorio tiene menos contenido que un vaso vacío. Vaya mierda de intento.",
-    "¿Te tomó mucho pensar eso? Se nota; la frase llegó agotada y sin una neurona de apoyo.",
-    "Vaya intento. Te faltó ingenio, te faltó puntería y te sobró estupidez. Qué desastre.",
-    "Hablas con una seguridad impresionante para soltar semejante mierda. La confianza no sustituye al cerebro.",
-    "Qué valiente: insultar sin argumentos. Una hazaña digna de quien confunde ruido con inteligencia.",
-    "Si esa era tu mejor ofensa, retiro mi preocupación: no tienes munición, solo vergüenza ajena.",
+    "¿Te tomó mucho pensar eso? Se nota; la frase llegó agotada y sin una neurona de apoyo, imbécil.",
+    "Vaya intento. Te faltó ingenio, te faltó puntería y te sobró estupidez. Qué desastre, idiota.",
+    "Hablas con una seguridad impresionante para soltar semejante mierda. La confianza no sustituye al cerebro, imbécil.",
+    "Qué valiente: insultar sin argumentos. Una hazaña digna de quien confunde ruido con inteligencia, idiota.",
+    "Si esa era tu mejor ofensa, retiro mi preocupación: no tienes munición, solo vergüenza ajena, imbécil.",
     "Mira, pedazo de mierda: si vas a dedicarme una grosería, por lo menos que tenga talento. Esa fue una vergüenza con teclado.",
     "¿Eso era para humillarme? Lo único humillado fue tu diccionario. Qué nivel de ridiculez, imbécil.",
 )
@@ -318,7 +318,7 @@ def build_stella_comeback(kind: str, value: str = "") -> str:
     if re.search(
         r"\b(?:era broma|es broma|te estoy molestando|te estoy tomando el pelo|no te piques)\b",
         normalized,
-    ) or re.fullmatch(r"(?:j+a+j+a+|x+d+|l+m+a+o+|[😂🤣😆😹]+)[.!?¡¿]*", normalized):
+    ) or re.fullmatch(r"(?:(?:j+a+){2,}|x+d+|l+m+a+o+|[😂🤣😆😹]+)[.!?¡¿]*", normalized):
         return random.choice(_STELLA_JOKE_COMEBACKS)
     return random.choice(_STELLA_HUMILIATION_COMEBACKS + _STELLA_JOKE_COMEBACKS)
 
