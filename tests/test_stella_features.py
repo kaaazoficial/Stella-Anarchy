@@ -212,21 +212,24 @@ async def test_public_admin_command_is_audited_but_not_replied_to(monkeypatch):
     from stella.bot import StellaBot
 
     calls = []
+    sent = []
+
+    async def hidden_send(*args, **kwargs):
+        sent.append((args, kwargs))
+
     async def hidden_admin_handler(room_id, uid, name, args, message):
         await bot._reply(room_id, "esto no debe aparecer", message)
 
-    monkeypatch.setattr("stella.bot._audit_admin_operation",
-        lambda command, room_id, authorized: calls.append((command, room_id, authorized)))
+    monkeypatch.setattr(
+        "stella.bot._audit_admin_operation",
+        lambda command, room_id, authorized: calls.append((command, room_id, authorized)),
+    )
 
     bot = object.__new__(StellaBot)
     bot.settings = SimpleNamespace(command_prefix="!")
     bot.platform = SimpleNamespace(send_message=hidden_send)
     bot._is_admin = lambda uid: uid == "admin-1"
     bot._admin_panel = hidden_admin_handler
-
-    sent = []
-    async def hidden_send(*args, **kwargs):
-        sent.append((args, kwargs))
 
     message = {"messageId": "msg-1"}
     await bot._command("room-1", "admin-1", "Admin", "admin resumen", message)
