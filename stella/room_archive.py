@@ -501,8 +501,8 @@ class RoomArchive:
         return [
             event for event in events
             if str(event.get("event_type") or "").casefold() in {
-                "chat.message.in", "chat.message.out", "message.created",
-                "message.create", "message.edited",
+                "chat.message.in", "chat.message.out", "chat.message.edited",
+                "message.created", "message.create", "message.edited",
             }
             and str(event.get("content") or "").strip()
         ]
