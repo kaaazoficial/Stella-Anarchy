@@ -729,3 +729,21 @@ def test_prefixed_command_executes_when_replying_to_another_member():
     assert len(calls) == 1
     assert calls[0][3] == "ping"
     assert b.platform.sent == []
+
+
+def test_owner_can_activate_and_resume_global_silence_with_natural_language():
+    b = bot()
+
+    asyncio.run(
+        b.handle_event(
+            _message("Stella, activa el silencio global.", "owner")
+        )
+    )
+    assert b.shared_state.values["chat_silence"] == "1"
+
+    asyncio.run(
+        b.handle_event(
+            _message("Stella, desactiva el silencio global.", "owner")
+        )
+    )
+    assert b.shared_state.values["chat_silence"] == "0"
