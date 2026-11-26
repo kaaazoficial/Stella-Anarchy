@@ -25,6 +25,10 @@ class QdrantConversationMemory:
         self.api_key = os.getenv("QDRANT_API_KEY", "").strip()
         self.collection = os.getenv("QDRANT_AI_MEMORY_COLLECTION", "stella_ai_memory").strip()
         self.retention_days = max(1, min(90, int(os.getenv("AI_MEMORY_RETENTION_DAYS", "30"))))
+        self.cleanup_interval_seconds = max(
+            300, min(86400, int(os.getenv("AI_MEMORY_CLEANUP_INTERVAL_SECONDS", "21600")))
+        )
+        self._last_cleanup = 0.0
         self.max_turns = 10
         self.client = client
         self._owns_client = client is None
@@ -92,6 +96,30 @@ class QdrantConversationMemory:
                 raise RuntimeError("Qdrant AI memory collection has an incompatible vector size")
             self._ready = True
 
+    async def _cleanup_expired_if_due(self) -> None:
+        """Physically remove expired payloads periodically, not only hide them on read."""
+        now = time.monotonic()
+        if now - self._last_cleanup < self.cleanup_interval_seconds:
+            return
+        self._last_cleanup = now
+        try:
+            client = await self._http()
+            response = await client.post(
+                f"{self._collection_url()}/points/delete?wait=true",
+                headers=self._headers(),
+                json={
+                    "filter": {
+                        "must": [{
+                            "key": "expires_at",
+                            "range": {"lt": int(time.time())},
+                        }]
+                    }
+                },
+            )
+            response.raise_for_status()
+        except Exception as exc:
+            log.warning("Expired AI memory cleanup failed (%s).", type(exc).__name__)
+
     @staticmethod
     def _clean_turns(turns: list[dict[str, Any]], limit: int = 10) -> list[dict[str, str]]:
         cleaned: list[dict[str, str]] = []
@@ -122,6 +150,7 @@ class QdrantConversationMemory:
             return []
         try:
             await self.ensure_collection()
+            await self._cleanup_expired_if_due()
             digest, point_id = self._identity(room_id, uid)
             client = await self._http()
             response = await client.get(
