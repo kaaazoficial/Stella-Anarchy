@@ -874,3 +874,19 @@ def test_proactive_presence_setting_is_admin_only_and_persisted():
     asyncio.run(b._stella_presence("room-a", "owner", "Owner", "desactivar", {}))
     assert b.shared_state.values["stella_proactive:room-a"] == "0"
     assert asyncio.run(b._proactive_enabled("room-a")) is False
+
+
+
+def test_local_opt_out_blocks_persistent_memory_when_remote_storage_is_still_enabled():
+    b = bot()
+
+    async def remote_enabled(room_id, uid):
+        return True
+
+    b.ai_memory = SimpleNamespace(is_enabled=remote_enabled)
+    b.store.set_setting("room-a", "ai_memory_opt_out:member", "1")
+
+    assert asyncio.run(b._ai_memory_enabled("room-a", "member")) is False
+
+    b.store.set_setting("room-a", "ai_memory_opt_out:member", "0")
+    assert asyncio.run(b._ai_memory_enabled("room-a", "member")) is True
