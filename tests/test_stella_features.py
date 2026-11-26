@@ -175,6 +175,9 @@ def test_public_help_keeps_six_pages_without_administrative_commands():
     assert "6. MEMORIA, CONTEXTO Y PRIVACIDAD" in public
     assert "!memoria recuerdos" in public
     assert "!historial" not in public
+    assert "!idbot" not in public
+    assert "!salas" not in public
+    assert "[ADMIN]" not in public
     assert "6. ADMINISTRACIÓN Y ESTADO" not in public
     assert admin_view == public
 
