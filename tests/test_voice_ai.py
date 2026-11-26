@@ -944,3 +944,19 @@ async def test_livekit_does_not_retry_permission_errors():
     voice = object.__new__(MusicVoice)
     assert not voice._is_transient_livekit_error(RuntimeError("LiveKit HTTP 403 permission denied"))
     assert not voice._is_transient_livekit_error(RuntimeError("Unauthorized: forbidden"))
+
+
+
+@pytest.mark.asyncio
+async def test_dj_help_shows_available_controls():
+    voice = object.__new__(MusicVoice)
+    response = await voice._dj_command("room", "ayuda")
+    assert "!dj buscar <tema>" in response
+    assert "!dj detener" in response
+
+
+@pytest.mark.asyncio
+async def test_dj_search_requires_a_query():
+    voice = object.__new__(MusicVoice)
+    response = await voice._dj_command("room", "buscar")
+    assert "Indica qué quieres escuchar" in response
