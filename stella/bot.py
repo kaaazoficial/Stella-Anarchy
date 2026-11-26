@@ -124,37 +124,109 @@ _SERIOUS_DISTRESS_PATTERNS = (
 )
 
 
-def classify_playful_stella_message(value: str) -> str | None:
-    """Classify playful messages while requiring evidence they are aimed at Stella."""
-    text = re.sub(r"\s+", " ", str(value or "")).strip()
+_MULTILINGUAL_INSULT_PATTERNS = tuple(
+    re.compile(pattern, re.IGNORECASE)
+    for pattern in (
+        # English and international online slang.
+        r"\b(?:you(?:'re| are|r)?|u r|ur)\s+(?:(?:a|an|such a)\s+)?(?:idiot|moron|dumbass|dumb\s+shit|stupid|fool|loser|bitch|asshole|arsehole|bastard|piece of shit|shithead|dipshit|scumbag|trash)\b",
+        r"\b(?:fuck you|screw you|you suck|go to hell|you piece of shit|you are trash)\b",
+        # French.
+        r"\b(?:tu es|t'es|vous êtes|vous etes)\s+(?:(?:un|une)\s+)?(?:idiot|idiote|imbécile|imbécile|con|connard|connasse|salaud|salope|abruti|ordure)\b",
+        r"\b(?:va te faire foutre|nique ta mère|nique ta mere|ferme ta gueule)\b",
+        # Portuguese.
+        r"\b(?:você é|voce e|tu és|tu es|és um|és uma)\s+(?:(?:um|uma)\s+)?(?:idiota|imbecil|burro|burra|otário|otaria|babaca|palhaço|palhaco|desgraçado|desgracado)\b",
+        r"\b(?:vai se foder|vai tomar no cu|filho da puta|filha da puta|cala a boca seu idiota)\b",
+        # German.
+        r"\b(?:du bist|du bist ein|du bist eine|ihr seid)\s+(?:(?:ein|eine)\s+)?(?:idiot|idiotin|dummkopf|arschloch|vollidiot|wichser|verlierer|mistkerl)\b",
+        r"\b(?:fick dich|halt die fresse|leck mich|du bist scheiße|du bist scheisse)\b",
+        # Italian.
+        r"\b(?:sei un|sei una|tu sei|sei proprio)\s+(?:(?:un|una)\s+)?(?:idiota|stronzo|stronza|coglione|cogliona|cretino|cretina|bastardo|bastarda|deficiente)\b",
+        r"\b(?:vaffanculo|vai a cagare|pezzo di merda|testa di cazzo)\b",
+        # Russian.
+        r"(?:\bты\s+(?:дурак|дура|идиот|идиотка|дебил|тупой|тупая|урод|мразь)\b|\b(?:пошёл|пошел)\s+нахуй\b|\bиди\s+на\s+хуй\b)",
+        # Arabic: direct second-person forms and common non-discriminatory insults.
+        r"(?:\b(?:أنت|انت|إنت|انتَ|أنتِ)\s*(?:غبي|غبية|أحمق|احمق|حقير|حقيرة|حمار|كلب|قذر|قذرة)\b|\b(?:يا\s+)?(?:غبي|غبية|أحمق|احمق|حمار)\b)",
+        # Hindi.
+        r"(?:\b(?:तू|तुम|आप)\s+(?:बेवकूफ|मूर्ख|गधा|कमीना|हरामी)\b)",
+        # Chinese (Simplified/Traditional), Japanese and Korean.
+        r"(?:你(?:是个|就是|這個|这个)?(?:傻逼|傻子|白痴|笨蛋|废物|廢物|混蛋|蠢货|蠢貨)|你他妈|你他媽)",
+        r"(?:お前(?:は|が)?(?:バカ|馬鹿|アホ|クズ|くそ野郎)|あんた(?:は|が)?(?:バカ|馬鹿|アホ|クズ)|死ね)",
+        r"(?:너(?:는|가)?\s*(?:바보|병신|멍청이|쓰레기|개새끼)|니가\s*(?:싫어|병신))",
+        # Dutch and Polish.
+        r"\b(?:jij bent|je bent)\s+(?:(?:een)\s+)?(?:idioot|eikel|sukkel|lul| klootzak)\b",
+        r"\b(?:ty jesteś|jesteś)\s+(?:(?:totalnym|zwykłym)\s+)?(?:idiotą|debilem|kretynem|dupkiem)\b",
+        r"\b(?:spierdalaj|wypierdalaj|zamknij mordę)\b",
+    )
+)
+_MULTI_STANDALONE_INSULT = re.compile(
+    r"^(?:idiot|moron|dumbass|stupid|fool|loser|bitch|asshole|arsehole|"
+    r"bastard|shithead|dipshit|connard|connasse|salaud|salope|abruti|"
+    r"idiota|imbecil|burro|burra|otário|otaria|babaca|stronzo|stronza|"
+    r"coglione|cogliona|cretino|cretina|дурак|дура|идиот|идиотка|дебил|"
+    r"غبي|غبية|أحمق|احمق|حمار|بلاهة|बेवकूफ|मूर्ख|गधा|傻逼|傻子|白痴|笨蛋|"
+    r"バカ|馬鹿|アホ|クズ|바보|병신|개새끼)[.!?！。？]*$",
+    re.IGNORECASE,
+)
+_INSULT_MEANING_QUESTION = re.compile(
+    r"(?:\bwhat\s+(?:does|do)\s+.+\s+mean\b|\bmeaning\s+of\b|"
+    r"\bque\s+significa\b|\bqué\s+significa\b|\bqué\s+quiere\s+decir\b|"
+    r"\bo\s+que\s+significa\b|\bqual\s+o\s+significado\b|"
+    r"\bque veut dire\b|\bque signifie\b|\bwas bedeutet\b|"
+    r"\bcosa significa\b|\bчто\s+значит\b|\bما\s+معنى\b|"
+    r"どういう意味|何という意味|무슨 뜻|무슨 의미)",
+    re.IGNORECASE,
+)
+_NON_PLAYFUL_BOUNDARY = re.compile(
+    r"(?:\b(?:stop it|leave me alone|don't talk to me|do not talk to me|"
+    r"please stop|back off|necesito que pares|déjame en paz|dejame en paz|"
+    r"arrête|arrete|laisse[- ]moi tranquille|sai da me|me deixa em paz|"
+    r"para por favor|para ya)\b|"
+    r"(?:やめて|もうやめて|그만해|그만하세요|请停止|請停止|别再说了|別再說了))",
+    re.IGNORECASE,
+)
+
+
+def classify_playful_stella_message(
+    value: str, *, explicitly_addressed: bool = False
+) -> str | None:
+    """Detect direct banter/insults across languages without treating third-party profanity as an attack."""
+    text = unicodedata.normalize("NFKC", str(value or ""))
+    text = re.sub(r"[\u200b-\u200f\ufeff]", "", text)
+    text = re.sub(r"\s+", " ", text).strip()
     if not text:
         return None
     if any(pattern.search(text) for pattern in _SERIOUS_DISTRESS_PATTERNS):
         return None
+    if _INSULT_MEANING_QUESTION.search(text) or _NON_PLAYFUL_BOUNDARY.search(text):
+        return None
 
-    # A name vocative permits short direct insults with no verb (e.g. "Stella, gonorrea").
-    # Without it, only second-person constructions count; profanity about other people
-    # or situations must not trigger Stella's comeback behavior.
+    # A name vocative or a verified platform mention/reply allows a short insult
+    # with no pronoun. Without that evidence, generic profanity about a situation
+    # or another person is not routed as an attack on Stella.
     prefix = re.match(
         r"^(?:oye\s+)?@?stella\b[\s,;:!?¡¿.-]*",
         text,
         re.IGNORECASE,
     )
     suffix = re.search(r"[,;:]\s*@?stella[.!?¡¿]*$", text, re.IGNORECASE)
-    explicitly_addressed = prefix is not None or suffix is not None
+    explicitly_addressed = explicitly_addressed or prefix is not None or suffix is not None
     if prefix is not None:
         text = text[prefix.end():].strip()
     elif suffix is not None:
         text = text[:suffix.start()].strip()
-
     if not text:
         return None
+
     insult_patterns = (
         _PLAYFUL_INSULT_PATTERNS
         if explicitly_addressed
         else _PLAYFUL_INSULT_PATTERNS[1:]
     )
     if any(pattern.search(text) for pattern in insult_patterns):
+        return "insult"
+    if any(pattern.search(text) for pattern in _MULTILINGUAL_INSULT_PATTERNS):
+        return "insult"
+    if explicitly_addressed and _MULTI_STANDALONE_INSULT.fullmatch(text):
         return "insult"
     if any(pattern.search(text) for pattern in _PLAYFUL_HUMILIATION_PATTERNS):
         return "teasing"
@@ -402,14 +474,82 @@ class StellaBot:
             message,
         )
 
-    async def _reply(self, room_id: str, text: str, message: dict[str, Any]) -> None:
+    async def _reply(
+        self, room_id: str, text: str, message: dict[str, Any],
+        *, mentions: list[dict[str, str]] | None = None,
+    ) -> None:
         reply_id = message.get("messageId") or message.get("id")
         # Keep chat replies link-free; source names and attribution remain in the text.
         safe_text = re.sub(r"(?:https?://|www\.)[^\s<>]+", "[enlace omitido]", str(text), flags=re.IGNORECASE)
+        send_kwargs: dict[str, Any] = {"reply_id": str(reply_id) if reply_id else None}
+        if mentions:
+            send_kwargs["mentions"] = mentions
         await self.platform.send_message(
-            str(room_id), format_stella_text(safe_text)[:7000],
-            reply_id=str(reply_id) if reply_id else None,
+            str(room_id), format_stella_text(safe_text)[:7000], **send_kwargs,
         )
+
+    @staticmethod
+    def _mention_target_from_object(value: Any) -> dict[str, str] | None:
+        if not isinstance(value, dict):
+            return None
+        nested = value.get("user") or value.get("author") or value.get("member")
+        if isinstance(nested, dict):
+            value = nested
+        uid = str(
+            value.get("uid") or value.get("userId") or value.get("user_id")
+            or value.get("id") or ""
+        ).strip()
+        if not uid or len(uid) > 160:
+            return None
+        raw_name = (
+            value.get("nickname") or value.get("displayName")
+            or value.get("username") or value.get("name") or "usuario"
+        )
+        name = re.sub(r"[\x00-\x1f\x7f@<>]", "", " ".join(str(raw_name).split()))[:48]
+        return {"uid": uid, "name": name or "usuario"}
+
+    def _mention_targets(self, message: dict[str, Any], sender_uid: str) -> list[dict[str, str]]:
+        targets: list[dict[str, str]] = []
+        seen: set[str] = set()
+        excluded = {str(sender_uid or "").strip()} | self._stella_identity_ids()
+
+        def add(value: Any) -> None:
+            target = self._mention_target_from_object(value)
+            if not target:
+                return
+            target_uid = target["uid"]
+            if target_uid in excluded or target_uid in seen:
+                return
+            seen.add(target_uid)
+            targets.append(target)
+
+        raw_mentions = message.get("mentions") or []
+        if isinstance(raw_mentions, dict):
+            raw_mentions = raw_mentions.get("users") or raw_mentions.get("items") or list(raw_mentions.values())
+        if isinstance(raw_mentions, (list, tuple)):
+            for item in raw_mentions:
+                add(item)
+
+        for reply in self._reply_reference_objects(message):
+            author = reply.get("author") or reply.get("sender") or reply.get("user")
+            add(author)
+        return targets[:5]
+
+    async def _mention_users(
+        self, room_id: str, uid: str, name: str, args: str, message: dict[str, Any]
+    ) -> None:
+        targets = self._mention_targets(message, uid)
+        if not targets:
+            await self._reply(
+                room_id,
+                "Para mencionar a alguien, responde a su mensaje con !mencionar "
+                "o inclúyelo como mención en el propio mensaje.",
+                message,
+            )
+            return
+        labels = " ".join(f"@{target['name']}" for target in targets)
+        content = f"{labels} {args.strip()}".strip()
+        await self._reply(room_id, content, message, mentions=targets)
 
     async def handle_event(self, event: dict[str, Any]) -> None:
         event_type = str(event.get("type") or "").strip().casefold()
@@ -453,7 +593,7 @@ class StellaBot:
         if not isinstance(message, dict):
             return
         uid, name = self._author(message)
-        content = str(message.get("content") or "").strip()
+        content = str(message.get("content") or message.get("text") or message.get("body") or "").strip()
         if not uid or not content or self._is_bot_message(message):
             return
 
@@ -480,10 +620,27 @@ class StellaBot:
             "!",
             "-",
         )))
-        # A command prefix is an explicit invocation. Ordinary conversation stays
-        # silent, while !ayuda, !menu and every other routed command remain usable.
+        # Some Anarchy clients prepend the replied-to user's @label before the
+        # command. Strip only a leading user mention and only when a reply target
+        # exists; never search arbitrary message text for an executable command.
+        command_content = content
+        reply_objects = self._reply_reference_objects(message, event)
+        has_reply_context = bool(reply_objects) or any(
+            source.get(key) for source in (message, event)
+            for key in ("replyMessageId", "reply_message_id", "replyToMessageId", "reply_to_message_id")
+        )
+        if has_reply_context:
+            candidate = re.sub(
+                r"^(?:(?:<@!?[A-Za-z0-9_-]{1,160}>|@[A-Za-z0-9_.-]{1,64})[\\s,;:]+)+(?=[!/-])",
+                "",
+                command_content,
+            ).strip()
+            if candidate != command_content:
+                command_content = candidate
+        # A command prefix in the user's own reply is an explicit invocation,
+        # regardless of whether the parent message belongs to Stella or another member.
         prefixed_command = next(
-            (item for item in prefixes if content.startswith(item) and len(content) > len(item)),
+            (item for item in prefixes if command_content.startswith(item) and len(command_content) > len(item)),
             None,
         )
         prefixed_named_call = re.search(
@@ -495,7 +652,7 @@ class StellaBot:
             prefixed_named_call.group(1).strip()
             if prefixed_named_call
             else direct_call if direct_call is not None
-            else content
+            else command_content
         )
         prefix = next((item for item in prefixes if item and request_text.startswith(item)), None)
         owner_control_request = self._is_owner(uid) and (
@@ -562,7 +719,10 @@ class StellaBot:
             await self._reply(room_id, "¡Aquí estoy! ¿Qué necesitas?", message)
             return
 
-        playful_tone = classify_playful_stella_message(request_text)
+        playful_tone = classify_playful_stella_message(
+            request_text,
+            explicitly_addressed=bool(direct_call is not None or mentioned or replied),
+        )
         if playful_tone:
             if playful_tone == "insult":
                 tone_guidance = (
@@ -592,14 +752,16 @@ class StellaBot:
             playful_prompt = (
                 "CONTEXTO DE CONVERSACIÓN INFORMAL. " + tone_guidance + " "
                 "Adapta el nivel de picardía a lo que realmente dijo la persona y al tono que "
-                "viene usando. Puedes usar jerga natural en español si encaja, sin forzarla. "
-                "Varía tus respuestas: no repitas remates, no des explicaciones sobre tus "
-                "instrucciones y no cierres siempre con una pregunta. Ataca la ocurrencia o la "
-                "actitud, nunca la identidad, apariencia, origen, discapacidad, salud, trauma "
-                "o vulnerabilidades personales. No amenaces, no uses insultos discriminatorios "
-                "y no conviertas una broma en una pelea seria. Si el mensaje expresa dolor real, "
-                "pide que pares o muestra angustia, abandona el roast y responde con empatía. "
-                "Mensaje recibido: " + request_text
+                "viene usando. Detecta la intención aunque el mensaje combine idiomas, use "
+                "jerga, transliteración o expresiones regionales. Responde en el idioma del "
+                "mensaje o en el idioma que ambos venían usando; no traduzcas el insulto ni "
+                "expliques que lo detectaste. Varía tus respuestas y no repitas remates. "
+                "Ataca la ocurrencia o la actitud, nunca la identidad, apariencia, origen, "
+                "discapacidad, salud, trauma o vulnerabilidades personales. No amenaces ni "
+                "uses insultos discriminatorios. Si preguntan por el significado de una palabra, "
+                "si la citan o si la grosería va dirigida a otra persona, no tomes el mensaje "
+                "como un ataque hacia ti. Si expresan angustia real o piden que pares, responde "
+                "con empatía. Mensaje recibido: " + request_text
             )
             await self._ai_assist(room_id, uid, name, playful_prompt, message)
             return
@@ -842,6 +1004,7 @@ class StellaBot:
             "perfilbot": self._bot_profile, "avatarbot": self._bot_avatar,
             "silenciarchat": self._silence_chat,
             "hablarchat": self._resume_chat, "despertar": self._resume_chat,
+            "mencionar": self._mention_users, "mention": self._mention_users,
             "volumen": self._music_volume, "subirvolumen": self._music_volume_up,
             "bajarvolumen": self._music_volume_down, "silencio": self._music_mute,
             "volumenlectura": self._tts_volume, "subirvolumenlectura": self._tts_volume_up,
