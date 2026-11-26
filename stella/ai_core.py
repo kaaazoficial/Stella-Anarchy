@@ -15,6 +15,7 @@ from email.utils import parsedate_to_datetime
 from collections import OrderedDict, defaultdict, deque
 from typing import Any, Awaitable, Callable
 
+from stella.config import get_gemini_api_key
 from stella.topics import is_specialized_subject_related_request, normalize_topic_text
 from urllib.parse import quote, urlsplit
 
@@ -911,7 +912,7 @@ class StellaAICore:
     def _gemini_provider_config(self) -> dict[str, str]:
         return {
             "name": "Google Gemini",
-            "key": (os.getenv("GEMINI_API_KEY") or "").strip(),
+            "key": get_gemini_api_key(),
             "url": (
                 os.getenv("GEMINI_API_URL")
                 or "https://generativelanguage.googleapis.com/v1beta"
@@ -948,7 +949,7 @@ class StellaAICore:
         primary_setting = (
             os.getenv("STELLA_AI_PRIMARY_PROVIDER") or ""
         ).strip().casefold()
-        gemini_key = (os.getenv("GEMINI_API_KEY") or "").strip()
+        gemini_key = get_gemini_api_key()
         if primary_setting in {"gemini", "google", "google-gemini"}:
             return self._gemini_provider_config()
         if primary_setting in {"groq"}:
