@@ -463,6 +463,7 @@ class StellaBot:
         self._auto_reply_cooldown: dict[tuple[str, int], float] = {}
         # Game sessions exist only in RAM and expire automatically.
         self._game_sessions: dict[str, dict[str, Any]] = {}
+        self._background_tasks: set[asyncio.Task] = set()
 
     def _ai_allowed_commands(self, uid: str) -> frozenset[str]:
         allowed = set(AI_PUBLIC_COMMANDS)
@@ -495,15 +496,30 @@ class StellaBot:
             return False
         return await memory.save(room_id, uid, self.ai_core._history(session_key))
 
+    def _schedule_background(self, coroutine, *, label: str) -> None:
+        """Run non-critical persistence work without delaying a chat reply."""
+        task = asyncio.create_task(coroutine, name=f"stella-{label}")
+        self._background_tasks.add(task)
+
+        def finished(done: asyncio.Task) -> None:
+            self._background_tasks.discard(done)
+            if done.cancelled():
+                return
+            error = done.exception()
+            if error is not None:
+                log.warning("Background %s failed (%s).", label, type(error).__name__)
+
+        task.add_done_callback(finished)
+
     async def _remember_ai_facts(self, room_id: str, uid: str, content: str) -> list[str]:
         """Capture only clear, useful first-person facts under the automatic memory policy."""
         memory = getattr(self, "ai_memory", None)
-        if (
-            memory is None
-            or not uid
-            or self._ai_memory_locally_blocked(room_id, uid)
-            or not await self._ai_memory_enabled(room_id, uid)
-        ):
+        if memory is None or not uid or self._ai_memory_locally_blocked(room_id, uid):
+            return []
+        extract = getattr(memory, "extract_explicit_facts", None)
+        if callable(extract) and not extract(content):
+            return []
+        if not await self._ai_memory_enabled(room_id, uid):
             return []
         remember = getattr(memory, "remember_from_message", None)
         if not callable(remember):
@@ -597,7 +613,7 @@ class StellaBot:
                 self.ai_core._append_history(session_key, "user", prompt[:1500])
                 self.ai_core._append_history(session_key, "assistant", answer[:700])
             await self._reply(room_id, answer[:700], message)
-            await self._save_ai_memory(room_id, uid, session_key)
+            self._schedule_background(self._save_ai_memory(room_id, uid, session_key), label="memory-save")
             return
 
         ai_memory = getattr(self, "ai_memory", None)
@@ -658,7 +674,7 @@ class StellaBot:
         answer = str(result.get("answer") or "").strip()
         if answer:
             await self._reply(room_id, answer, message)
-        await self._save_ai_memory(room_id, uid, session_key)
+        self._schedule_background(self._save_ai_memory(room_id, uid, session_key), label="memory-save")
 
     @staticmethod
     def _author(message: dict[str, Any]) -> tuple[str, str]:
@@ -1029,10 +1045,26 @@ class StellaBot:
                     await self._reply(room_id, f"⚠️ {name}, detecté actividad repetitiva. Se registró una advertencia #{warning_id}.", message)
             return
 
-        remembered_facts = await self._remember_ai_facts(room_id, uid, content)
+        remember_match = re.match(
+            r"^(?:stella[, ]*)?(?:recuerda(?:me)?|no olvides|ten en cuenta|ten presente|"
+            r"guarda en tu memoria|acu[eé]rdate de)\b",
+            content.strip(), flags=re.IGNORECASE,
+        )
+        remembered_facts: list[str] = []
+        if remember_match:
+            remembered_facts = await self._remember_ai_facts(room_id, uid, content)
+        else:
+            memory = getattr(self, "ai_memory", None)
+            extract = getattr(memory, "extract_explicit_facts", None)
+            if callable(extract) and extract(content):
+                self._schedule_background(
+                    self._remember_ai_facts(room_id, uid, content), label="fact-capture"
+                )
         vector_memory = getattr(self, "vector_memory", None)
         if addressed and vector_memory is not None and self.store.get_setting(room_id, f'vector_memory_enabled:{uid}', '0') == '1':
-            await vector_memory.index_message(room_id, uid, name, content)
+            self._schedule_background(
+                vector_memory.index_message(room_id, uid, name, content), label="vector-index"
+            )
 
         if not addressed:
             await self._maybe_proactive_reply(room_id, uid, name, content, message)
@@ -2907,6 +2939,10 @@ class StellaBot:
         if shared_state is not None:
             await shared_state.close()
         await self.ai.close()
+        for task in tuple(self._background_tasks):
+            task.cancel()
+        if self._background_tasks:
+            await asyncio.gather(*self._background_tasks, return_exceptions=True)
         await self.services.close()
         if self.voice_platform is not self.platform:
             await self.voice_platform.close()
