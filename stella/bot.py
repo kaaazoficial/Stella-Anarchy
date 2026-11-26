@@ -21,6 +21,7 @@ from stella.platform import AnarchyClient
 from stella.services import StellaServices
 from stella.music_voice import MusicVoice
 from stella.storage import Store
+from stella.shared_state import QdrantSharedState
 from stella.extra_commands import calculate, datetime_text, CalculationError
 from stella.help import build_commands_help_text, build_commands_help_blocks, filter_commands_help_text
 from stella.identity import extract_stella_call, detect_affectionate_expression
@@ -330,6 +331,7 @@ class StellaBot:
         self.settings = settings
         self.store = store
         self.platform = platform
+        self.shared_state = QdrantSharedState()
         self.services = StellaServices()
         self.ai = StellaAI()
         self.ai_core = StellaAICore(memory_ttl=600, memory_turns=5)
@@ -408,10 +410,21 @@ class StellaBot:
         """Only SINNER_UID can change Stella's global speaking state."""
         return bool(uid) and uid in _uid_set(getattr(self.settings, "sinner_uid", ""))
 
-    def _global_chat_silenced(self) -> bool:
-        return self.store.get_setting(
-            _GLOBAL_SETTINGS_ROOM_ID, _GLOBAL_CHAT_SILENCE_KEY, "0"
-        ) == "1"
+    async def _global_chat_silenced(self) -> bool:
+        """Read the global silence flag from Qdrant so every Render instance agrees."""
+        try:
+            value = await self.shared_state.get_setting(_GLOBAL_CHAT_SILENCE_KEY)
+            if value is None:
+                # One-time migration from the previous per-instance SQLite setting.
+                value = self.store.get_setting(
+                    _GLOBAL_SETTINGS_ROOM_ID, _GLOBAL_CHAT_SILENCE_KEY, "0"
+                )
+                await self.shared_state.set_setting(_GLOBAL_CHAT_SILENCE_KEY, value)
+            return value == "1"
+        except Exception:
+            # Fail closed: never let an instance speak when shared state is uncertain.
+            log.exception("Unable to read shared global chat-silence state; suppressing replies.")
+            return True
 
     @staticmethod
     def _normalize_chat_control_phrase(value: str) -> str:
@@ -446,9 +459,19 @@ class StellaBot:
                 message,
             )
             return
-        self.store.set_setting(
-            _GLOBAL_SETTINGS_ROOM_ID, _GLOBAL_CHAT_SILENCE_KEY, "1"
-        )
+        try:
+            await self.shared_state.set_setting(_GLOBAL_CHAT_SILENCE_KEY, "1")
+            self.store.set_setting(
+                _GLOBAL_SETTINGS_ROOM_ID, _GLOBAL_CHAT_SILENCE_KEY, "1"
+            )
+        except Exception:
+            log.exception("Unable to persist global chat silence in shared state.")
+            await self._reply(
+                room_id,
+                "No pude activar el silencio global porque el estado compartido no está disponible. No he cambiado el modo.",
+                message,
+            )
+            return
         stop_speech = getattr(self.voice, "stop_all_speech", None)
         if callable(stop_speech):
             await stop_speech()
@@ -466,9 +489,19 @@ class StellaBot:
                 message,
             )
             return
-        self.store.set_setting(
-            _GLOBAL_SETTINGS_ROOM_ID, _GLOBAL_CHAT_SILENCE_KEY, "0"
-        )
+        try:
+            await self.shared_state.set_setting(_GLOBAL_CHAT_SILENCE_KEY, "0")
+            self.store.set_setting(
+                _GLOBAL_SETTINGS_ROOM_ID, _GLOBAL_CHAT_SILENCE_KEY, "0"
+            )
+        except Exception:
+            log.exception("Unable to clear global chat silence in shared state.")
+            await self._reply(
+                room_id,
+                "No pude desactivar el silencio global porque el estado compartido no está disponible. El silencio sigue activo.",
+                message,
+            )
+            return
         await self._reply(
             room_id,
             "Modo de silencio global desactivado. Ya puedo volver a responder.",
@@ -707,7 +740,7 @@ class StellaBot:
 
         # Global silence suppresses chat replies, automatic replies and voice reading.
         # Only the configured owner can use the explicit wake-up command while muted.
-        if self._global_chat_silenced():
+        if await self._global_chat_silenced():
             if addressed and self._is_owner(uid):
                 restore_command = ""
                 if prefix:
@@ -2317,6 +2350,9 @@ class StellaBot:
         vector_memory = getattr(self, "vector_memory", None)
         if vector_memory is not None:
             await vector_memory.close()
+        shared_state = getattr(self, "shared_state", None)
+        if shared_state is not None:
+            await shared_state.close()
         await self.ai.close()
         await self.services.close()
         if self.voice_platform is not self.platform:
