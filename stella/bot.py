@@ -180,6 +180,58 @@ _RESUME_REQUESTS = frozenset({
 })
 
 
+def ship_verdict(score: int, first: str, second: str) -> str:
+    """Return a playful, score-sensitive ship reaction."""
+    if score == 100:
+        reactions = [
+            "Esto ya no es química: es una reacción imposible de detener. 💍",
+            "El universo hizo el ship y hasta el destino lo está celebrando. ✨",
+            "Boda, luna de miel y playlist compartida. No tengo más preguntas. 💘",
+        ]
+    elif score >= 90:
+        reactions = [
+            "La química entre ustedes está por las nubes. 👀",
+            "Aquí hay miraditas, tensión romántica y demasiadas coincidencias. 💗",
+            "Esto tiene pinta de historia que todos quieren ver avanzar. 🥹",
+        ]
+    elif score >= 75:
+        reactions = [
+            "Hay conexión de sobra; solo falta que alguien dé el primer paso. 💞",
+            "Se nota la chispa. No se hagan los desentendidos. 😉",
+            "Este dúo tiene potencial para algo bastante bonito. ✨",
+        ]
+    elif score >= 60:
+        reactions = [
+            "Hay interés, aunque todavía queda algo por descubrir. 💓",
+            "La conexión está empezando a tomar forma. Denle tiempo. 🌷",
+            "No está nada mal: una buena conversación podría subir esa cifra. 👀",
+        ]
+    elif score >= 40:
+        reactions = [
+            "Podría funcionar, pero alguien tendrá que poner de su parte. 😏",
+            "Hay una chispa pequeña. Ahora toca ver si prende. 🔥",
+            "La historia está en desarrollo; todavía no hay veredicto. 📖",
+        ]
+    elif score >= 25:
+        reactions = [
+            "Hay que trabajar esa química, porque por ahora está tímida. 😅",
+            "Como amistad puede funcionar de maravilla. 👀",
+            "El destino está dudando, pero tampoco ha cerrado la puerta. 🤷",
+        ]
+    elif score >= 10:
+        reactions = [
+            "La química está de vacaciones. Quizá vuelvan a coincidir otro día. 🫠",
+            "Esto necesita más que una playlist compartida para funcionar. 😭",
+            "El universo les recomienda empezar por saludarse. 💀",
+        ]
+    else:
+        reactions = [
+            "Ni el algoritmo encuentra la chispa. Mejor déjenlo en amistad. 💀",
+            "El ship naufragó antes de zarpar. 🚢",
+            "Cero química por ahora. ¡Siguiente pareja! 😭",
+        ]
+    return f"💞 SHIP · {first} + {second}\nCompatibilidad: {score}%\n{random.choice(reactions)}"
+
 class StellaBot:
     def __init__(self, settings: Settings, store: Store, platform: AnarchyClient) -> None:
         self.settings = settings
@@ -1263,9 +1315,21 @@ class StellaBot:
             await self._reply(room_id, "Uso: !duelo @usuario.", message)
             return
         left, right = random.randint(1, 100), random.randint(1, 100)
-        winner = name if left >= right else target[1]
-        await self._reply(room_id, f"⚔️ DUELO\n{name}: {left}\n{target[1]}: {right}\nGanador: {winner}. Resultado recreativo.", message)
-
+        winner = name if left > right else target[1] if right > left else None
+        margin = abs(left - right)
+        if winner is None:
+            finish = "¡Empate! Nadie pudo imponerse esta vez. 🤝"
+        elif margin >= 40:
+            finish = f"{winner} arrasó con el duelo. ¡Victoria aplastante! 🏆"
+        elif margin >= 15:
+            finish = f"{winner} se lleva la victoria con bastante ventaja. ⚔️"
+        else:
+            finish = f"{winner} ganó por muy poco. ¡Estuvo reñido! 😮"
+        await self._reply(
+            room_id,
+            f"⚔️ DUELO\n{name}: {left}\n{target[1]}: {right}\n{finish}",
+            message,
+        )
     async def _interaction_help(self, room_id, uid, name, args, message):
         await self._reply(
             room_id,
@@ -1323,11 +1387,9 @@ class StellaBot:
         if len(names) != 2:
             await self._reply(room_id, "Uso: !ship <persona 1> + <persona 2>", message)
             return
-        import hashlib
         digest = hashlib.sha256(("|".join(sorted(names, key=str.casefold))).casefold().encode("utf-8")).digest()
         score = int.from_bytes(digest[:2], "big") % 101
-        await self._reply(room_id, f"💞 Compatibilidad de {names[0]} + {names[1]}: {score}%. Solo es un resultado recreativo.", message)
-
+        await self._reply(room_id, ship_verdict(score, names[0], names[1]), message)
     async def _choose(self, room_id, uid, name, args, message):
         options = [item.strip() for item in args.split("|") if item.strip()]
         if len(options) < 2:
