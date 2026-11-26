@@ -2341,7 +2341,6 @@ class StellaBot:
                 deleted = await ai_memory.set_enabled(room_id, uid, False) if ai_memory is not None else False
                 await self._reply(room_id, "Memoria de conversación desactivada y contexto local eliminado." + ("" if deleted else " No pude confirmar el borrado remoto; revisa la conexión de Qdrant."), message)
             elif subaction in {"olvidar", "borrar", "forget"}:
-                self.store.set_setting(room_id, f"ai_memory_opt_out:{uid}", "1")
                 self.ai_core.forget(f"{room_id}:{uid}")
                 enabled = await ai_memory.is_enabled(room_id, uid) if ai_memory is not None else False
                 deleted = await ai_memory.clear(room_id, uid) if enabled and ai_memory is not None else False
