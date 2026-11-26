@@ -24,7 +24,8 @@ _MEMORY_SECRET_RE = re.compile(
     r"bearer|https?://|www\\.|[\\w.+-]+@[\\w.-]+\\.[a-z]{2,}|\\b\\d{7,}\\b)"
 )
 _MEMORY_SENSITIVE_RE = re.compile(
-    r"(?i)\\b(?:me diagnosticaron|tengo (?:depresi[oó]n|ansiedad|bipolaridad|"
+    r"(?i)\\b(?:mi diagn[oó]stico|mi enfermedad|mi trastorno|mi tratamiento|"
+    r"me diagnosticaron|tengo (?:depresi[oó]n|ansiedad|bipolaridad|"
     r"diabetes|epilepsia|vih|c[aá]ncer|una enfermedad)|tomo (?:medicaci[oó]n|"
     r"antidepresivos|ansiol[ií]ticos)|mi historial m[eé]dico|mi salud mental|"
     r"mi orientaci[oó]n sexual|mi vida sexual|mi religi[oó]n|soy (?:cat[oó]lic[oa]|"
