@@ -96,6 +96,13 @@ class VectorMemory:
 
     @property
     def status(self) -> str:
+        if not self.enabled:
+            missing = []
+            if not self.url or not self.api_key or not self.collection:
+                missing.append("Qdrant")
+            if not self.gemini_key:
+                missing.append("Gemini Embeddings")
+            return "sin configurar: faltan credenciales de " + " y ".join(missing)
         if not self.url or not self.api_key or not self.collection:
             qdrant = "Qdrant sin configurar"
         elif self.qdrant_blocked_status is not None:
