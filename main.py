@@ -230,6 +230,18 @@ async def health() -> JSONResponse:
         str(getattr(room_archive, "status", "no inicializado"))
         if room_archive is not None else "no inicializado"
     )
+    vector_diagnostics = (
+        getattr(vector_memory, "diagnostics", {})
+        if vector_memory is not None else {}
+    )
+    voice = getattr(bot, "voice", None)
+    voice_diagnostics: dict[str, Any] = {}
+    try:
+        value = getattr(voice, "diagnostics", {}) if voice is not None else {}
+        voice_diagnostics = value if isinstance(value, dict) else {}
+    except Exception as exc:
+        log.warning("Voice diagnostics failed (%s).", type(exc).__name__)
+        voice_diagnostics = {"status": "diagnostics_unavailable"}
     ai_configured = bool(
         get_gemini_api_key()
         or os.getenv("GROQ_API_KEY", "").strip()
@@ -256,7 +268,9 @@ async def health() -> JSONResponse:
             "ai_provider_configured": ai_configured,
             "ai_providers": ai_diagnostics,
             "vector_memory": vector_status,
+            "vector_memory_diagnostics": vector_diagnostics,
             "room_archive": room_archive_status,
+            "voice": voice_diagnostics,
         },
     }
     # Render and other HTTP monitors must receive a failing status when the
