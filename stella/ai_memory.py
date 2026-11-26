@@ -108,11 +108,11 @@ class QdrantConversationMemory:
                 continue
             # Never preserve obvious credentials or secrets in long-term context.
             content = re.sub(
-                r"(?i)\\b(api[_ -]?key|access[_ -]?token|password|contraseña|clave|secret)\\s*[:=]\\s*([^\\s,;]+)",
-                r"\\1=[REDACTED]",
+                r"(?i)\b(api[_ -]?key|access[_ -]?token|password|contraseña|clave|secret)\s*[:=]\s*([^\s,;]+)",
+                r"\1=[REDACTED]",
                 content,
             )
-            content = re.sub(r"(?i)\\bBearer\\s+[^\\s,;]+", "Bearer [REDACTED]", content)
+            content = re.sub(r"(?i)\bBearer\s+[^\s,;]+, "Bearer [REDACTED]", content)
             maximum = 1400 if role == "user" else 1200
             cleaned.append({"role": role, "content": content[:maximum]})
         return cleaned[-safe_limit:]
