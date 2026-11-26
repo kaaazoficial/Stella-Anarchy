@@ -44,6 +44,29 @@ ANTISPAM_WINDOW_SECONDS = 8
 ANTISPAM_WARNING_COOLDOWN = 60
 _GLOBAL_CHAT_SILENCE_KEY = "chat_silence"
 
+_ARCHIVE_EVENT_TYPES = {
+    "message": "chat.message.in",
+    "message.created": "chat.message.in",
+    "message_create": "chat.message.in",
+    "message.edited": "chat.message.edited",
+    "message.deleted": "chat.message.deleted",
+    "message_delete": "chat.message.deleted",
+    "interaction": "chat.interaction",
+    "room.ready": "chat.room.ready",
+    "room.end": "chat.room.ended",
+    "room.kicked": "chat.room.kicked",
+    "thread.removed": "chat.room.removed",
+    "room.join": "chat.room.join",
+    "room.leave": "chat.room.leave",
+    "room.speaker": "chat.room.speaker",
+}
+
+
+def archive_event_type(event_type: str) -> str:
+    normalized = str(event_type or "").strip().casefold()
+    return _ARCHIVE_EVENT_TYPES.get(normalized, f"anarchy.{normalized or 'unknown'}")
+
+
 _PLAYFUL_INSULT_PATTERNS = (
     re.compile(
         r"\b(?:malparid[oa]s?|hij[oa]s? de puta|hij[oa]s? de la gran puta|"
@@ -921,22 +944,7 @@ class StellaBot:
             or event.get("replyMessageId")
             or event.get("reply_message_id")
         )
-        archive_type = {
-            "message": "chat.message.in",
-            "message.created": "chat.message.in",
-            "message_create": "chat.message.in",
-            "message.edited": "chat.message.edited",
-            "message.deleted": "chat.message.deleted",
-            "message_delete": "chat.message.deleted",
-            "interaction": "chat.interaction",
-            "room.ready": "chat.room.ready",
-            "room.end": "chat.room.ended",
-            "room.kicked": "chat.room.kicked",
-            "thread.removed": "chat.room.removed",
-            "room.join": "chat.room.join",
-            "room.leave": "chat.room.leave",
-            "room.speaker": "chat.room.speaker",
-        }.get(event_type, f"anarchy.{event_type or 'unknown'}")
+        archive_type = archive_event_type(event_type)
         archive = getattr(self, "room_archive", None)
         record_archive_event = getattr(archive, "record_event", None)
         if callable(record_archive_event):
