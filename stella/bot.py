@@ -359,6 +359,7 @@ class StellaBot:
         self.vector_memory = VectorMemory()
         self.ai_memory = QdrantConversationMemory()
         self._proactive_cooldown: dict[str, float] = {}
+        self._proactive_enabled_cache: dict[str, tuple[float, bool]] = {}
         community_token = settings.community_bot_token or settings.bot_token
         self.voice_platform = (
             AnarchyClient(settings.api_base, community_token)
@@ -402,10 +403,20 @@ class StellaBot:
         return await memory.save(room_id, uid, self.ai_core._history(session_key))
 
     async def _proactive_enabled(self, room_id: str) -> bool:
+        now = time.monotonic()
+        cache = getattr(self, "_proactive_enabled_cache", {})
+        cached = cache.get(room_id)
+        if cached and cached[0] > now:
+            return cached[1]
         try:
-            return await self.shared_state.get_setting(f"stella_proactive:{room_id}") == "1"
+            enabled = await self.shared_state.get_setting(f"stella_proactive:{room_id}") == "1"
         except Exception:
-            return False
+            enabled = False
+        if len(cache) >= 300 and room_id not in cache:
+            cache.pop(next(iter(cache)), None)
+        cache[room_id] = (now + 60, enabled)
+        self._proactive_enabled_cache = cache
+        return enabled
 
     async def _maybe_proactive_reply(
         self, room_id: str, uid: str, name: str, content: str, message: dict[str, Any]
@@ -2282,6 +2293,7 @@ class StellaBot:
         if action in {"activar", "on", "encender"}:
             try:
                 await self.shared_state.set_setting(f"stella_proactive:{room_id}", "1")
+                self._proactive_enabled_cache[room_id] = (time.monotonic() + 60, True)
             except Exception:
                 await self._reply(room_id, "No pude guardar el ajuste de participación en el almacenamiento compartido. No lo activé.", message)
                 return
@@ -2289,6 +2301,7 @@ class StellaBot:
         elif action in {"desactivar", "off", "apagar"}:
             try:
                 await self.shared_state.set_setting(f"stella_proactive:{room_id}", "0")
+                self._proactive_enabled_cache[room_id] = (time.monotonic() + 60, False)
             except Exception:
                 await self._reply(room_id, "No pude guardar el ajuste de participación en el almacenamiento compartido. No puedo confirmar que se haya desactivado.", message)
                 return
