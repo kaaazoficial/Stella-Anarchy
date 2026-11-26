@@ -960,3 +960,84 @@ async def test_dj_search_requires_a_query():
     voice = object.__new__(MusicVoice)
     response = await voice._dj_command("room", "buscar")
     assert "Indica qué quieres escuchar" in response
+
+
+@pytest.mark.asyncio
+async def test_stop_music_clears_queue_and_joins_playback_worker():
+    from collections import deque
+
+    voice = object.__new__(MusicVoice)
+    skip_event = asyncio.Event()
+    paused_event = asyncio.Event()
+    paused_event.set()
+
+    class FakeSource:
+        def __init__(self):
+            self.cleared = 0
+        def clear_queue(self):
+            self.cleared += 1
+
+    source = FakeSource()
+    track = {"title": "track"}
+    state = {
+        "music_queue": deque([track]),
+        "music_skip": skip_event,
+        "music_paused": paused_event,
+        "music_source": source,
+        "music_current": track,
+    }
+
+    async def worker():
+        await skip_event.wait()
+
+    state["music_task"] = asyncio.create_task(worker())
+    voice.rooms = {"room-1": state}
+    await asyncio.sleep(0)
+
+    message = await voice.stop_music("room-1")
+
+    assert not state["music_queue"]
+    assert source.cleared == 1
+    assert state["music_task"].done()
+    assert state["music_current"] is None
+    assert "Música detenida" in message
+
+
+def test_voice_diagnostics_are_aggregate_and_exclude_room_identifiers():
+    from collections import deque
+
+    voice = object.__new__(MusicVoice)
+    voice._rtc = object()
+    voice._av = object()
+    voice._np = object()
+    voice._edge_tts = None
+    voice._load_errors = {"tts": "ModuleNotFoundError"}
+
+    class ConnectedRoom:
+        @staticmethod
+        def isconnected():
+            return True
+
+    state = {
+        "room": ConnectedRoom(),
+        "connected": True,
+        "connection_state": "connected",
+        "music_current": {"title": "private track"},
+        "music_queue": deque([{"title": "other track"}]),
+        "speech_queue": asyncio.Queue(),
+        "tts_enabled": True,
+    }
+    state["speech_queue"].put_nowait("private speech")
+    voice.rooms = {"private-room-id": state}
+
+    report = voice.diagnostics
+
+    assert report["active_rooms"] == 1
+    assert report["connected_rooms"] == 1
+    assert report["music_players"] == 1
+    assert report["queued_tracks"] == 1
+    assert report["speech_queues"] == 1
+    assert report["tts_enabled_rooms"] == 1
+    assert "private-room-id" not in repr(report)
+    assert "private track" not in repr(report)
+    assert "private speech" not in repr(report)
