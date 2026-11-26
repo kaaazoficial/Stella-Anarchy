@@ -451,7 +451,7 @@ def test_unaddressed_messages_are_not_read_aloud_even_when_voice_reading_is_enab
     "Stella, cállate payasa",
     "Stella, no sirves para nada XD",
 ])
-def test_playful_insults_receive_local_comebacks_without_ai(content):
+def test_playful_insults_are_routed_to_ai_generation(content):
     b = bot()
     calls = []
 
@@ -465,10 +465,10 @@ def test_playful_insults_receive_local_comebacks_without_ai(content):
         "message": {"content": content, "author": {"uid": "u", "nickname": "Persona"}},
     }))
 
-    assert calls == []
-    assert len(b.platform.sent) == 1
-    reply = b.platform.sent[0][1].casefold()
-    assert any(word in reply for word in ("imbécil", "mierda", "estupidez", "idiotez"))
+    assert len(calls) == 1
+    assert calls[0][3] == content
+    assert calls[0][5] == "insult"
+    assert b.platform.sent == []
 
 
 @pytest.mark.parametrize("content", [
@@ -476,7 +476,7 @@ def test_playful_insults_receive_local_comebacks_without_ai(content):
     "Stella, te gané XD",
     "Stella, no te piques, te estoy molestando",
 ])
-def test_teasing_receives_local_playful_comeback_without_ai(content):
+def test_teasing_is_routed_to_ai_generated_playful_reply(content):
     b = bot()
     calls = []
 
@@ -490,9 +490,10 @@ def test_teasing_receives_local_playful_comeback_without_ai(content):
         "message": {"content": content, "author": {"uid": "u", "nickname": "Persona"}},
     }))
 
-    assert calls == []
-    assert len(b.platform.sent) == 1
-    assert b.platform.sent[0][1].strip()
+    assert len(calls) == 1
+    assert calls[0][3] == content
+    assert calls[0][5] == "teasing"
+    assert b.platform.sent == []
 
 
 @pytest.mark.parametrize("content", [
@@ -966,7 +967,7 @@ def test_explicit_help_command_still_works_when_replying_to_stella():
     assert calls[0][3] == "ayuda"
 
 
-def test_single_word_insult_in_reply_to_stella_gets_local_comeback(monkeypatch):
+def test_single_word_insult_in_reply_to_stella_uses_ai_generation(monkeypatch):
     b = bot()
     calls = []
 
@@ -984,12 +985,10 @@ def test_single_word_insult_in_reply_to_stella_gets_local_comeback(monkeypatch):
         },
     }))
 
-    assert calls == []
-    assert len(b.platform.sent) == 1
-    assert any(
-        word in b.platform.sent[0][1].casefold()
-        for word in ("imbécil", "mierda", "estupidez", "idiotez")
-    )
+    assert len(calls) == 1
+    assert calls[0][3] == "putita"
+    assert calls[0][5] == "insult"
+    assert b.platform.sent == []
 
 
 
@@ -1018,7 +1017,7 @@ def test_reply_to_another_member_is_not_confirmed_as_stella():
     )) is False
 
 
-def test_direct_insult_gets_local_comeback_without_calling_ai():
+def test_direct_insult_is_forwarded_to_ai_instead_of_local_phrase_bank():
     b = bot()
     ai_calls = []
 
@@ -1035,13 +1034,12 @@ def test_direct_insult_gets_local_comeback_without_calling_ai():
         },
     }))
 
-    assert len(b.platform.sent) == 1
-    response = b.platform.sent[0][1].casefold()
-    assert any(word in response for word in ("imbécil", "mierda", "estupidez", "idiotez"))
-    assert ai_calls == []
+    assert len(ai_calls) == 1
+    assert ai_calls[0][5] == "insult"
+    assert b.platform.sent == []
 
 
-def test_insult_reply_to_stella_gets_local_comeback_even_without_cached_id():
+def test_insult_reply_to_stella_uses_ai_even_without_cached_id():
     b = bot()
     b.platform.ids.clear()
     b.platform.read_messages["123458"] = {
@@ -1064,7 +1062,6 @@ def test_insult_reply_to_stella_gets_local_comeback_even_without_cached_id():
         },
     }))
 
-    assert len(b.platform.sent) == 1
-    response = b.platform.sent[0][1].casefold()
-    assert any(word in response for word in ("imbécil", "mierda", "estupidez", "idiotez"))
-    assert ai_calls == []
+    assert len(ai_calls) == 1
+    assert ai_calls[0][5] == "insult"
+    assert b.platform.sent == []
