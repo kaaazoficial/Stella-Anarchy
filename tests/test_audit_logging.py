@@ -19,11 +19,12 @@ def test_audit_event_logs_metadata_without_message_content(caplog):
     payload = json.loads(records[-1])
     rendered = records[-1]
     assert payload["event"] == "chat.message.in"
-    assert payload["room_id_hash"]
-    assert payload["uid_hash"]
-    assert payload["message_id_hash"]
+    assert "room_id" not in payload and "room_id_hash" not in payload
+    assert "uid" not in payload and "uid_hash" not in payload
+    assert "message_id" not in payload
     assert "room-1" not in rendered
     assert "user-1" not in rendered
+    assert "message-1" not in rendered
     assert "Persona" not in rendered
     assert "Hola Stella" not in rendered
     assert payload["content_length"] == len("Hola Stella, ¿cómo estás?")
