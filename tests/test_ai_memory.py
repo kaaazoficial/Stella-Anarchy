@@ -100,7 +100,9 @@ async def test_clear_preserves_opt_in_and_disable_deletes_the_record(memory):
 
     assert await store.set_enabled("room-a", "user-1", False) is True
     assert await store.is_enabled("room-a", "user-1") is False
-    assert client.point is None
+    assert client.point is not None
+    assert client.point["payload"]["enabled"] is False
+    assert json.loads(client.point["payload"]["turns"]) == []
 
 
 def test_memory_turns_are_bounded_and_obvious_credentials_are_redacted():
@@ -130,3 +132,18 @@ def test_memory_identity_does_not_expose_room_or_member_identifiers():
     assert "private-room-123" not in point_id
     assert "member-456" not in point_id
     assert len(digest) == 64
+
+
+
+@pytest.mark.asyncio
+async def test_expired_memory_is_not_restored_and_is_removed(memory, monkeypatch):
+    store, client = memory
+    assert await store.set_enabled("room-a", "user-1", True) is True
+    assert await store.save("room-a", "user-1", [
+        {"role": "user", "content": "Este contexto debe caducar."},
+    ]) is True
+    client.point["payload"]["expires_at"] = 1
+
+    assert await store.is_enabled("room-a", "user-1") is False
+    assert await store.load("room-a", "user-1") == []
+    assert client.point is None
