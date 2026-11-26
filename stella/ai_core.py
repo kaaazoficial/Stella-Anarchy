@@ -19,6 +19,7 @@ from stella.config import get_gemini_api_key
 from stella.persona import (
     GENDER_NEUTRAL_GUIDANCE,
     STELLA_CHARACTER_GUIDANCE,
+    STELLA_GROUP_CHAT_GUIDANCE,
     STELLA_RESPONSE_QUALITY_GUIDANCE,
 )
 from stella.topics import is_specialized_subject_related_request, normalize_topic_text
