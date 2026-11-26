@@ -498,11 +498,15 @@ class StellaBot:
 
     def _schedule_background(self, coroutine, *, label: str) -> None:
         """Run non-critical persistence work without delaying a chat reply."""
+        tasks = getattr(self, "_background_tasks", None)
+        if tasks is None:
+            tasks = set()
+            self._background_tasks = tasks
         task = asyncio.create_task(coroutine, name=f"stella-{label}")
-        self._background_tasks.add(task)
+        tasks.add(task)
 
         def finished(done: asyncio.Task) -> None:
-            self._background_tasks.discard(done)
+            tasks.discard(done)
             if done.cancelled():
                 return
             error = done.exception()
@@ -2928,6 +2932,13 @@ class StellaBot:
                 log.warning("%s memory cleanup failed (%s).", label, type(exc).__name__)
 
     async def close(self) -> None:
+        tasks = tuple(getattr(self, "_background_tasks", ()))
+        if tasks:
+            _, pending = await asyncio.wait(tasks, timeout=2.0)
+            for task in pending:
+                task.cancel()
+            if pending:
+                await asyncio.gather(*pending, return_exceptions=True)
         await self.voice.close()
         vector_memory = getattr(self, "vector_memory", None)
         if vector_memory is not None:
@@ -2939,10 +2950,6 @@ class StellaBot:
         if shared_state is not None:
             await shared_state.close()
         await self.ai.close()
-        for task in tuple(self._background_tasks):
-            task.cancel()
-        if self._background_tasks:
-            await asyncio.gather(*self._background_tasks, return_exceptions=True)
         await self.services.close()
         if self.voice_platform is not self.platform:
             await self.voice_platform.close()
