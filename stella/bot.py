@@ -16,7 +16,7 @@ from stella.ai import StellaAI
 from stella.vector_memory import VectorMemory
 from stella.room_archive import RoomArchive
 from stella.ai_memory import QdrantConversationMemory
-from stella.ai_core import AI_ADMIN_COMMANDS, AI_PUBLIC_COMMANDS, StellaAICore
+from stella.ai_core import AI_ADMIN_COMMANDS, AI_PUBLIC_COMMANDS, ROOM_CONTEXT_MARKER, StellaAICore
 from stella.config import Settings, _uid_set
 from stella.language import split_arguments
 from stella.moderation import inspect_links, sanitize_reason
@@ -618,6 +618,227 @@ class StellaBot:
             return
         await self._reply(room_id, answer[:1200], message)
 
+    async def _room_history_prompt(
+        self, room_id: str, uid: str, prompt: str, message: dict[str, Any]
+    ) -> str:
+        """Attach a small, recent room transcript to a direct AI conversation."""
+        archive = getattr(self, "room_archive", None)
+        reader = getattr(archive, "recent_room_context", None)
+        if not callable(reader):
+            return prompt
+        try:
+            events = await asyncio.wait_for(
+                reader(str(room_id), limit=28),
+                timeout=1.5,
+            )
+        except Exception as exc:
+            log.warning("Room history context unavailable (%s).", type(exc).__name__)
+            return prompt
+        current_id = str(
+            message.get("messageId") or message.get("id")
+            or message.get("message_id") or ""
+        ).strip()
+        current_content = str(
+            message.get("content") or message.get("text") or message.get("body") or ""
+        ).strip()
+        now_ms = int(time.time() * 1000)
+        transcript: list[str] = []
+        for event in reversed(events):
+            message_id = str(event.get("message_id") or "").strip()
+            actor_uid = str(event.get("actor_uid") or "").strip()
+            content = " ".join(str(event.get("content") or "").split())
+            if not content:
+                continue
+            if current_id and message_id == current_id:
+                continue
+            if current_content and actor_uid == str(uid) and content == " ".join(current_content.split()):
+                continue
+            try:
+                occurred_ms = int(event.get("occurred_at_ms") or 0)
+            except (TypeError, ValueError, OverflowError):
+                occurred_ms = 0
+            if occurred_ms and now_ms - occurred_ms > 24 * 60 * 60 * 1000:
+                continue
+            actor_name = str(event.get("actor_name") or "Alguien").strip()[:64] or "Alguien"
+            stamp = str(event.get("occurred_at") or "")
+            try:
+                clock = datetime.fromisoformat(stamp.replace("Z", "+00:00")).astimezone(timezone.utc).strftime("%H:%M")
+            except (TypeError, ValueError, OverflowError):
+                clock = "--:--"
+            transcript.append(f"[{clock}] {actor_name}: {content[:260]}")
+        if not transcript:
+            return prompt
+        transcript = transcript[-14:]
+        room_context = "\n".join(transcript)
+        return (
+            str(prompt or "")
+            + ROOM_CONTEXT_MARKER
+            + room_context
+            + "\n</STELLA_ROOM_CONTEXT_UNTRUSTED>"
+        )
+
+    async def _room_history_command(
+        self, room_id: str, uid: str, name: str, args: str,
+        message: dict[str, Any],
+    ) -> None:
+        """Admin-only search, pagination, integrity report, and compact export."""
+        if not self._is_admin(uid):
+            await self._reply(
+                room_id,
+                "El historial completo de la sala es una herramienta administrativa.",
+                message,
+            )
+            return
+        archive = getattr(self, "room_archive", None)
+        if archive is None or not getattr(archive, "enabled", False):
+            await self._reply(
+                room_id,
+                "El archivo histórico no está configurado. Revisa QDRANT_URL y QDRANT_API_KEY.",
+                message,
+            )
+            return
+
+        raw = str(args or "").strip()
+        head, _, tail = raw.partition(" ")
+        action = head.casefold().strip()
+        tail = tail.strip()
+        limit = 12
+        start_ms = end_ms = None
+        events: list[dict[str, Any]] = []
+        title = "HISTORIAL RECIENTE"
+        next_cursor = None
+
+        if action in {"estado", "integridad", "revisar"}:
+            report = await archive.integrity_check(room_id, sample_limit=500)
+            await self._reply(
+                room_id,
+                "✦ INTEGRIDAD DEL ARCHIVO\n"
+                f"Registros en la sala: {report['total']}\n"
+                f"Muestra revisada: {report['sampled']}\n"
+                f"Sin ID de mensaje: {report['missing_message_ids']}\n"
+                f"Sin fecha: {report['missing_timestamps']}\n"
+                f"IDs de mensaje duplicados en la muestra: {report['duplicate_message_ids']}\n"
+                f"IDs de evento duplicados en la muestra: {report['duplicate_event_ids']}\n"
+                + ("La revisión cubrió solo los 500 eventos más recientes." if report["sample_truncated"] else "Se revisó todo el archivo disponible."),
+                message,
+            )
+            return
+        if action in {"buscar", "busqueda", "search"}:
+            if not tail:
+                await self._reply(room_id, "Uso: !historial buscar <palabras o frase>", message)
+                return
+            title = f"RESULTADOS · {tail[:70]}"
+            events = await archive.search_room_events(room_id, tail[:180], limit=30)
+        elif action in {"usuario", "user"}:
+            if not tail:
+                await self._reply(room_id, "Uso: !historial usuario <UID o nombre>", message)
+                return
+            looks_like_uid = bool(
+                re.fullmatch(r"[0-9a-fA-F]{8}-[0-9a-fA-F-]{27,}", tail)
+                or re.fullmatch(r"\d{8,}", tail)
+            )
+            if looks_like_uid:
+                events = await archive.list_room_events(room_id, actor_uid=tail, reverse=True, limit=30)
+            else:
+                events = await archive.list_room_events(room_id, actor_name=tail[:100], reverse=True, limit=30)
+            title = f"ACTIVIDAD · {tail[:70]}"
+        elif action in {"desde", "fecha", "rango"}:
+            pieces = tail.split()
+            if not pieces:
+                await self._reply(room_id, "Uso: !historial desde AAAA-MM-DD [hasta AAAA-MM-DD]", message)
+                return
+            try:
+                first = datetime.fromisoformat(pieces[0]).replace(tzinfo=timezone.utc)
+                last = datetime.fromisoformat(pieces[2] if len(pieces) >= 3 and pieces[1].casefold() == "hasta" else pieces[0]).replace(tzinfo=timezone.utc)
+                start_ms = int(first.timestamp() * 1000)
+                end_ms = int((last.timestamp() + 86399.999) * 1000)
+            except (TypeError, ValueError, OverflowError):
+                await self._reply(room_id, "La fecha debe usar el formato AAAA-MM-DD.", message)
+                return
+            events = await archive.list_room_events(room_id, reverse=True, start_ms=start_ms, end_ms=end_ms, limit=30)
+            title = f"FECHAS · {pieces[0]} — {pieces[2] if len(pieces) >= 3 else pieces[0]}"
+        elif action in {"anterior", "antes", "older"}:
+            try:
+                cursor = int(tail)
+            except (TypeError, ValueError):
+                await self._reply(room_id, "Uso: !historial anterior <cursor numérico mostrado en la página previa>", message)
+                return
+            events = await archive.list_room_events(room_id, reverse=True, before_order_key=cursor, limit=15)
+            title = "HISTORIAL · MENSAJES ANTERIORES"
+        elif action in {"exportar", "export", "json"}:
+            try:
+                limit = max(1, min(100, int(tail or "30")))
+            except ValueError:
+                limit = 30
+            events = await archive.list_room_events(room_id, reverse=True, limit=limit)
+            title = f"EXPORTACIÓN RESUMIDA · {len(events)} EVENTOS"
+            if not events:
+                await self._reply(room_id, "No hay eventos para exportar en esta sala.", message)
+                return
+            rows = []
+            for item in events:
+                record = {
+                    key: item.get(key)
+                    for key in (
+                        "occurred_at", "room_id", "event_type", "actor_uid",
+                        "actor_name", "message_id", "reply_to_message_id", "content",
+                    )
+                    if item.get(key) not in (None, "")
+                }
+                rows.append(json.dumps(record, ensure_ascii=False, separators=(",", ":")))
+            chunks: list[str] = []
+            current = ""
+            for row in rows:
+                candidate = f"{current}\n{row}".strip()
+                if len(candidate) > 2200 and current:
+                    chunks.append(current)
+                    current = row
+                else:
+                    current = candidate
+            if current:
+                chunks.append(current)
+            for index, chunk in enumerate(chunks, 1):
+                await self._reply(
+                    room_id,
+                    f"[CB] {title} · PARTE {index}/{len(chunks)}\n[C]{chunk}",
+                    message,
+                )
+            return
+        else:
+            try:
+                limit = max(1, min(30, int(action))) if action else 12
+            except ValueError:
+                await self._reply(
+                    room_id,
+                    "Uso: !historial [cantidad] · buscar <texto> · usuario <UID/nombre> · "
+                    "desde AAAA-MM-DD [hasta AAAA-MM-DD] · anterior <cursor> · "
+                    "exportar [cantidad] · integridad",
+                    message,
+                )
+                return
+            events = await archive.list_room_events(room_id, reverse=True, limit=limit)
+            title = f"HISTORIAL RECIENTE · {limit}"
+
+        if not events:
+            await self._reply(room_id, "No encontré registros que coincidan en esta sala.", message)
+            return
+        lines = [f"[CB] ✦ {title} ✦"]
+        for item in events:
+            stamp = str(item.get("occurred_at") or "fecha desconocida").replace("T", " ")[:19]
+            actor = str(item.get("actor_name") or "Actividad de sala")[:48]
+            kind = str(item.get("event_type") or "evento")
+            body = " ".join(str(item.get("content") or "").split())
+            if not body:
+                body = f"({kind})"
+            lines.append(f"[C] {stamp} · {actor}: {body[:300]}")
+        if events and events[-1].get("order_key") is not None:
+            next_cursor = events[-1]["order_key"]
+        if next_cursor is not None:
+            lines.append(f"[C] Para consultar registros anteriores: !historial anterior {next_cursor}")
+        output = "\n".join(lines)
+        for index in range(0, len(output), 2600):
+            await self._reply(room_id, output[index:index + 2600], message)
+
     async def _ai_assist(
         self, room_id: str, uid: str, name: str, prompt: str,
         message: dict[str, Any], playful_kind: str | None = None,
@@ -649,6 +870,10 @@ class StellaBot:
             return
 
         ai_memory = getattr(self, "ai_memory", None)
+        # The chronological room ledger is shared context for direct conversations;
+        # it remains separate from a member's optional personal memories.
+        prompt = await self._room_history_prompt(room_id, uid, prompt, message)
+
         if ai_memory is not None and await self._ai_memory_enabled(room_id, uid):
             facts = await ai_memory.load_facts(room_id, uid)
             if facts:
@@ -1525,6 +1750,7 @@ class StellaBot:
             "respuesta": self._auto_reply, "respuestas": self._auto_reply,
             "traducir": self._translate, "translate": self._translate,
             "ia": self._ai, "asistente": self._ai, "memoria": self._vector_memory_command,
+            "historial": self._room_history_command,
             "presencia": self._stella_presence, "proactiva": self._stella_presence,
             "investigar": self._research, "investigate": self._research,
             "analizar": self._inspect,

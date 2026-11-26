@@ -61,6 +61,7 @@ def _sections(p: str):
         ("6. ADMINISTRACIÓN Y ESTADO", [
             f"▸ {p}estado · {p}fuentes · {p}metricas · {p}autotest · {p}centro.",
             f"▸ {p}admin resumen|actividad|antispam|avisos|historial.",
+            f"▸ {p}historial [cantidad]|buscar <texto>|usuario <UID/nombre>|desde AAAA-MM-DD|anterior <cursor>|exportar [cantidad]|integridad [ADMIN].",
             f"▸ Los controles del DJ favoritos y diagnóstico requieren [ADMIN].",
             f"▸ {p}antispam estado|on|off|limite N|ventana N|repeticiones N|enlaces N|menciones N.",
             f"▸ {p}advertir @usuario [motivo] · {p}advertencias [@usuario] · {p}quitaradvertencia ID.",

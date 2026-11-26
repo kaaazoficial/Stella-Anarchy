@@ -220,6 +220,11 @@ class RoomArchive:
                 "room_id": "keyword",
                 "event_type": "keyword",
                 "order_key": "integer",
+                "occurred_at_ms": "integer",
+                "actor_uid": "keyword",
+                "actor_name": "text",
+                "message_id": "keyword",
+                "content": "text",
             }
             for field, field_type in required.items():
                 existing = schema.get(field)
@@ -389,12 +394,52 @@ class RoomArchive:
         room_id: str,
         *,
         after_order_key: int = 0,
+        before_order_key: int | None = None,
         limit: int = 100,
+        reverse: bool = False,
+        actor_uid: str | None = None,
+        actor_name: str | None = None,
+        event_type: str | None = None,
+        query: str | None = None,
+        start_ms: int | None = None,
+        end_ms: int | None = None,
     ) -> list[dict[str, Any]]:
-        """Read a room's archive in insertion order using Qdrant's indexed payload sort."""
+        """Search and page a room's archive in chronological or reverse order.
+
+        reverse=True returns newest-first. The order_key cursor is stable across
+        restarts and allows the caller to page without relying on Qdrant offsets.
+        """
         room = str(room_id or "").strip()
         if not room or not self.enabled:
             return []
+        must: list[dict[str, Any]] = [
+            {"key": "room_id", "match": {"value": room}}
+        ]
+        if actor_uid:
+            must.append({"key": "actor_uid", "match": {"value": str(actor_uid).strip()}})
+        if actor_name:
+            must.append({"key": "actor_name", "match": {"text": str(actor_name).strip()}})
+        if event_type:
+            must.append({"key": "event_type", "match": {"value": str(event_type).strip()}})
+        if query:
+            must.append({"key": "content", "match": {"text": str(query).strip()}})
+        time_range: dict[str, int] = {}
+        if start_ms is not None:
+            time_range["gte"] = int(start_ms)
+        if end_ms is not None:
+            time_range["lte"] = int(end_ms)
+        if time_range:
+            must.append({"key": "occurred_at_ms", "range": time_range})
+
+        order_by: dict[str, Any] = {
+            "key": "order_key",
+            "direction": "desc" if reverse else "asc",
+        }
+        if reverse and before_order_key is not None:
+            order_by["start_from"] = max(0, int(before_order_key) - 1)
+        elif not reverse and after_order_key:
+            order_by["start_from"] = max(0, int(after_order_key) + 1)
+
         try:
             await self.ensure_collection()
             client = await self._http()
@@ -402,17 +447,11 @@ class RoomArchive:
                 f"{self._collection_url()}/points/scroll",
                 headers=self._headers(),
                 json={
-                    "filter": {
-                        "must": [{"key": "room_id", "match": {"value": room}}]
-                    },
+                    "filter": {"must": must},
                     "limit": max(1, min(500, int(limit))),
                     "with_payload": True,
                     "with_vector": False,
-                    "order_by": {
-                        "key": "order_key",
-                        "direction": "asc",
-                        "start_from": max(0, int(after_order_key) + 1),
-                    },
+                    "order_by": order_by,
                 },
             )
             response.raise_for_status()
@@ -426,6 +465,90 @@ class RoomArchive:
         except Exception as exc:
             self._report_failure("read", exc)
             return []
+
+    async def search_room_events(
+        self,
+        room_id: str,
+        query: str,
+        *,
+        actor_uid: str | None = None,
+        actor_name: str | None = None,
+        start_ms: int | None = None,
+        end_ms: int | None = None,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        """Full-text search within one room, newest matches first."""
+        return await self.list_room_events(
+            room_id,
+            reverse=True,
+            query=query,
+            actor_uid=actor_uid,
+            actor_name=actor_name,
+            start_ms=start_ms,
+            end_ms=end_ms,
+            limit=limit,
+        )
+
+    async def recent_room_context(
+        self, room_id: str, *, limit: int = 24
+    ) -> list[dict[str, Any]]:
+        """Return recent message events newest-first for conversational context."""
+        events = await self.list_room_events(
+            room_id,
+            reverse=True,
+            limit=max(1, min(80, int(limit))),
+        )
+        return [
+            event for event in events
+            if str(event.get("event_type") or "").casefold() in {
+                "chat.message.in", "chat.message.out", "chat.message.edited",
+                "message.created", "message.create", "message.edited",
+            }
+            and str(event.get("content") or "").strip()
+        ]
+
+    async def integrity_check(
+        self, room_id: str, *, sample_limit: int = 500
+    ) -> dict[str, Any]:
+        """Inspect recent archive records for missing IDs, timestamps, and duplicates."""
+        total = await self.count_room_events(room_id)
+        events = await self.list_room_events(
+            room_id, reverse=True, limit=max(1, min(500, int(sample_limit)))
+        )
+        message_ids: set[str] = set()
+        event_ids: set[str] = set()
+        duplicate_messages = 0
+        duplicate_events = 0
+        missing_message_ids = 0
+        missing_timestamps = 0
+        for item in events:
+            kind = str(item.get("event_type") or "")
+            message_id = str(item.get("message_id") or "").strip()
+            source_id = str(item.get("source_event_id") or "").strip()
+            if kind in {"chat.message.in", "chat.message.out"}:
+                if not message_id:
+                    missing_message_ids += 1
+                elif message_id in message_ids:
+                    duplicate_messages += 1
+                else:
+                    message_ids.add(message_id)
+            if source_id:
+                if source_id in event_ids:
+                    duplicate_events += 1
+                else:
+                    event_ids.add(source_id)
+            if not item.get("occurred_at_ms"):
+                missing_timestamps += 1
+        return {
+            "total": total,
+            "sampled": len(events),
+            "sample_limit": max(1, min(500, int(sample_limit))),
+            "sample_truncated": total > len(events),
+            "missing_message_ids": missing_message_ids,
+            "missing_timestamps": missing_timestamps,
+            "duplicate_message_ids": duplicate_messages,
+            "duplicate_event_ids": duplicate_events,
+        }
 
     async def count_room_events(self, room_id: str) -> int:
         room = str(room_id or "").strip()
