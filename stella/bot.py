@@ -570,9 +570,38 @@ class StellaBot:
             return
         await self._reply(room_id, answer[:1200], message)
 
-    async def _ai_assist(self, room_id: str, uid: str, name: str, prompt: str, message: dict[str, Any]) -> None:
+    async def _ai_assist(
+        self, room_id: str, uid: str, name: str, prompt: str,
+        message: dict[str, Any], playful_kind: str | None = None,
+    ) -> None:
         session_key = str(room_id) + ":" + str(uid)
         await self._restore_ai_memory(room_id, uid, session_key)
+        if playful_kind:
+            # The detector only classifies the interaction. Gemini/Groq must write
+            # the actual response; local lines are strictly an outage fallback.
+            try:
+                answer = await self.ai_core.generate_playful_response(
+                    prompt,
+                    session_key=session_key,
+                    request_func=self.services.ai_request,
+                    rate_key=uid,
+                    kind=playful_kind,
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                log.exception(
+                    "AI playful response failed; using the emergency local fallback."
+                )
+                answer = ""
+            if not answer:
+                answer = build_stella_comeback(playful_kind, prompt)
+                self.ai_core._append_history(session_key, "user", prompt[:1500])
+                self.ai_core._append_history(session_key, "assistant", answer[:700])
+            await self._reply(room_id, answer[:700], message)
+            await self._save_ai_memory(room_id, uid, session_key)
+            return
+
         ai_memory = getattr(self, "ai_memory", None)
         if ai_memory is not None and await self._ai_memory_enabled(room_id, uid):
             facts = await ai_memory.load_facts(room_id, uid)
@@ -1059,13 +1088,10 @@ class StellaBot:
             explicitly_addressed=bool(direct_call is not None or mentioned or replied),
         )
         if playful_tone:
-            # A confirmed insult or provocation receives an immediate, variable
-            # comeback. Keep the direct insult route local so the provider cannot
-            # soften it into a polite refusal or generic customer-service answer.
-            await self._reply(
-                room_id,
-                build_stella_comeback(playful_tone, request_text),
-                message,
+            # Detection remains local and deterministic; Gemini/Groq generate the
+            # contextual comeback. The local repertoire is only an outage fallback.
+            await self._ai_assist(
+                room_id, uid, name, request_text, message, playful_tone
             )
             return
         affection = detect_affectionate_expression(request_text)
