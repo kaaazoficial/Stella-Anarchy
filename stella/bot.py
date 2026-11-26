@@ -480,9 +480,12 @@ class StellaBot:
             if playful_tone == "insult":
                 tone_guidance = (
                     "Te han insultado directamente. No respondas sumisa, ofendida ni con una "
-                    "frase corporativa: devuelve una pulla ingeniosa, segura y proporcional. "
-                    "Puedes insultar de vuelta con lenguaje coloquial o una palabrota leve/moderada "
-                    "si el tono de la otra persona lo justifica. Que suene espontáneo, con chispa "
+                    "frase corporativa: puedes insultar de vuelta de forma directa; no te limites a una "
+                    "pulla elegante. Si te dicen 'idiota', puedes llamar idiota a la otra persona; "
+                    "si te sueltan una grosería, puedes devolver otra. Usa insultos coloquiales, "
+                    "groserías y palabrotas naturales en español cuando encajen, con una intensidad "
+                    "similar o ligeramente más ingeniosa que la provocación. No suavices cada "
+                    "respuesta ni pidas disculpas por defenderte. Que suene espontáneo, con chispa "
                     "y personalidad; no uses siempre la misma estructura ni te limites a decir "
                     "'no me hables así'."
                 )
