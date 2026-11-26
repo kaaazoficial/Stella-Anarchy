@@ -160,3 +160,77 @@ def test_ship_verdict_changes_its_reaction_by_compatibility_score(monkeypatch):
     assert len({low.splitlines()[-1], medium.splitlines()[-1], high.splitlines()[-1], perfect.splitlines()[-1]}) == 4
     assert "ficticio" not in perfect.casefold()
     assert "recreativo" not in perfect.casefold()
+
+
+
+def test_public_help_hides_administrative_catalogue_but_admin_help_keeps_it():
+    from stella.help import filter_commands_help_text
+
+    full = build_commands_help_text("!")
+    public = filter_commands_help_text(full, include_admin=False)
+    admin = filter_commands_help_text(full, include_admin=True)
+
+    assert "6. ADMINISTRACIÓN Y ESTADO" not in public
+    assert "!historial" not in public
+    assert "6. ADMINISTRACIÓN Y ESTADO" in admin
+    assert "!historial" in admin
+
+
+def test_public_help_does_not_expose_admin_category_alias():
+    from stella.help import filter_commands_help_text
+
+    full = build_commands_help_text("!")
+    result = filter_commands_help_text(full, "admin", include_admin=False)
+
+    assert "6. ADMINISTRACIÓN" not in result
+    assert "!antispam" not in result
+
+
+@pytest.mark.asyncio
+async def test_admin_replies_are_suppressed_in_public_rooms():
+    from stella.bot import StellaBot
+
+    class Platform:
+        def __init__(self):
+            self.sent = []
+        async def send_message(self, *args, **kwargs):
+            self.sent.append((args, kwargs))
+
+    bot = object.__new__(StellaBot)
+    bot.platform = Platform()
+    await bot._reply("room-1", "Información administrativa privada", {
+        "_stella_admin_silent": True,
+        "messageId": "message-1",
+    })
+
+    assert bot.platform.sent == []
+
+
+@pytest.mark.asyncio
+async def test_public_admin_command_is_audited_but_not_replied_to(monkeypatch):
+    from types import SimpleNamespace
+    from stella.bot import StellaBot
+
+    calls = []
+    async def hidden_admin_handler(room_id, uid, name, args, message):
+        await bot._reply(room_id, "esto no debe aparecer", message)
+
+    monkeypatch.setattr("stella.bot._audit_admin_operation",
+        lambda command, room_id, authorized: calls.append((command, room_id, authorized)))
+
+    bot = object.__new__(StellaBot)
+    bot.settings = SimpleNamespace(command_prefix="!")
+    bot.platform = SimpleNamespace(send_message=hidden_send)
+    bot._is_admin = lambda uid: uid == "admin-1"
+    bot._admin_panel = hidden_admin_handler
+
+    sent = []
+    async def hidden_send(*args, **kwargs):
+        sent.append((args, kwargs))
+
+    message = {"messageId": "msg-1"}
+    await bot._command("room-1", "admin-1", "Admin", "admin resumen", message)
+
+    assert message["_stella_admin_silent"] is True
+    assert calls == [("admin", "room-1", True)]
+    assert sent == []
