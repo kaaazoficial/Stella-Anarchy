@@ -273,3 +273,39 @@ def test_playful_response_rejects_unknown_kind():
         asyncio.run(core.generate_playful_response(
             "Hola", "room:user", object(), kind="unknown",
         ))
+
+
+def test_group_chat_guidance_is_shared_by_every_ai_conversation_mode():
+    from stella.ai import STELLA_SYSTEM
+    from stella.ai_core import STELLA_IDENTITY_GUIDANCE, build_ai_instructions
+    from stella.persona import STELLA_GROUP_CHAT_GUIDANCE
+
+    assert STELLA_GROUP_CHAT_GUIDANCE in STELLA_SYSTEM
+    assert STELLA_GROUP_CHAT_GUIDANCE in STELLA_IDENTITY_GUIDANCE
+    assert "No interrumpas ni respondas a mensajes ajenos" in STELLA_GROUP_CHAT_GUIDANCE
+    assert "sin atribuirle a quien escribe lo que dijo otra persona" in STELLA_GROUP_CHAT_GUIDANCE
+    assert "sin corregirlos" in STELLA_GROUP_CHAT_GUIDANCE
+
+    for intent in ("conversation", "action", "research", "multi_action"):
+        assert STELLA_GROUP_CHAT_GUIDANCE in build_ai_instructions(frozenset(), intent)
+
+
+@pytest.mark.parametrize(
+    "reply",
+    [
+        "Sí, totalmente.",
+        "No, prefiero algo más sencillo.",
+        "Y tú?",
+        "Yo tampoco jajaja.",
+        "La verdad, con algo breve me basta.",
+    ],
+)
+def test_short_group_chat_replies_keep_the_context_of_stellas_last_question(reply):
+    from stella.ai_core import StellaAICore
+
+    history = [
+        {"role": "user", "content": "Quiero probar una actividad nueva."},
+        {"role": "assistant", "content": "¿Qué tipo de actividad te llama más la atención?"},
+    ]
+
+    assert StellaAICore.is_contextual_followup(reply, history)
