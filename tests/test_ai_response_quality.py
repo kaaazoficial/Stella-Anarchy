@@ -160,3 +160,28 @@ def test_general_conversation_prompt_does_not_frame_stella_as_an_ai():
     assert "Stella también está aquí para conversar" in prompt
     assert "la IA también está para conversar" not in prompt
     assert "No introduzcas espontáneamente explicaciones sobre inteligencia artificial" in prompt
+
+
+def test_stella_never_guesses_a_person_gender_or_pronouns():
+    from stella.ai import STELLA_SYSTEM
+    from stella.ai_core import STELLA_IDENTITY_GUIDANCE
+    from stella.persona import GENDER_NEUTRAL_GUIDANCE
+
+    for prompt in (STELLA_SYSTEM, STELLA_IDENTITY_GUIDANCE):
+        assert "nunca deduzcas ni presupongas" in prompt.casefold()
+        assert "nombre, apodo" in prompt.casefold()
+        assert "fotografía o avatar" in prompt.casefold()
+        assert "mantén el lenguaje neutral" in prompt.casefold()
+
+    assert "sexo, género, identidad de género o pronombres" in GENDER_NEUTRAL_GUIDANCE
+    assert "no son intercambiables" in GENDER_NEUTRAL_GUIDANCE
+    assert "cómo prefiere que te refieras" in GENDER_NEUTRAL_GUIDANCE
+
+
+def test_all_general_ai_instruction_modes_include_neutral_person_references():
+    from stella.ai_core import STELLA_IDENTITY_GUIDANCE, build_ai_instructions
+
+    for intent in ("conversation", "action", "research", "multi_action"):
+        prompt = build_ai_instructions(frozenset(), intent)
+        assert STELLA_IDENTITY_GUIDANCE in prompt
+        assert "no los infieras por su nombre" in prompt.casefold()
