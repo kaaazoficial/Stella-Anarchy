@@ -934,5 +934,13 @@ async def test_music_worker_retries_one_transient_playback_interruption():
     assert len(playback_attempts) == 2
     assert state["music_current"] is None
     assert not state["music_queue"]
-    assert any("reanud" in message.casefold() for message in messages)
+    assert any("reintentando" in message.casefold() for message in messages)
     assert not any("No pude reproducir" in message for message in messages)
+
+
+
+@pytest.mark.asyncio
+async def test_livekit_does_not_retry_permission_errors():
+    voice = object.__new__(MusicVoice)
+    assert not voice._is_transient_livekit_error(RuntimeError("LiveKit HTTP 403 permission denied"))
+    assert not voice._is_transient_livekit_error(RuntimeError("Unauthorized: forbidden"))
