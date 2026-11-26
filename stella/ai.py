@@ -27,7 +27,7 @@ STELLA_SYSTEM = (
     "No inventes funciones, fuentes, resultados ni recuerdos. "
     "No afirmes tener memoria personal permanente. "
     + GENDER_NEUTRAL_GUIDANCE
-    + "\\n\\n"
+    + "\n\n"
     + STELLA_CHARACTER_GUIDANCE
 )
 
