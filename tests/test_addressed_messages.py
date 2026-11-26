@@ -32,6 +32,7 @@ class Store:
         self.settings[(str(room_id), str(key))] = str(value)
     def auto_reply_rules(self,*a): return []
     def get_profile(self,*a): return {"uid":a[0] if a else "u"}
+    def add_affinity(self,*a): return 1
 
 class Voice:
     def __init__(self):
@@ -687,3 +688,27 @@ def test_affinity_and_duel_can_use_the_replied_to_author():
     }))
     assert "Afinidad con Persona X" in b.platform.sent[-1][1]
     assert b.platform.read_requests == [("r", "90213")]
+
+
+
+def test_prefixed_command_executes_when_replying_to_another_member():
+    b = bot()
+    calls = []
+
+    async def capture(*args):
+        calls.append(args)
+
+    b._command = capture
+    asyncio.run(b.handle_event({
+        "type": "message",
+        "threadId": "r",
+        "trigger": None,
+        "message": {
+            "content": "!ping",
+            "replyMessageId": "90220",
+            "author": {"uid": "sender-uid", "nickname": "Persona"},
+        },
+    }))
+    assert len(calls) == 1
+    assert calls[0][3] == "ping"
+    assert b.platform.sent == []
