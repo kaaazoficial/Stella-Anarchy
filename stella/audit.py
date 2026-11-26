@@ -11,40 +11,40 @@ log = logging.getLogger("stella.audit")
 
 _SECRET_REPLACEMENTS = (
     (
-        re.compile(r"(?i)\\bauthorization\\s*[:=]\\s*(?:bot|bearer)\\s+[^\\s,;]+"),
+        re.compile(r"(?i)\bauthorization\s*[:=]\s*(?:bot|bearer)\s+[^\s,;]+"),
         "Authorization=[REDACTED]",
     ),
     (
-        re.compile(r"(?i)\\b(api[_ -]?key|access[_ -]?token|refresh[_ -]?token|password|contraseña|authorization|client_secret|webhook_secret)\\s*[:=]\\s*([^\\s,;]+)"),
-        r"\\1=[REDACTED]",
+        re.compile(r"(?i)\b(api[_ -]?key|access[_ -]?token|refresh[_ -]?token|password|contraseña|authorization|client_secret|webhook_secret)\s*[:=]\s*([^\s,;]+)"),
+        r"\1=[REDACTED]",
     ),
     (
-        re.compile(r"(?i)([?&](?:access_token|api_key|token|secret|password)=)[^&#\\s]+"),
-        r"\\1[REDACTED]",
+        re.compile(r"(?i)([?&](?:access_token|api_key|token|secret|password)=)[^&#\s]+"),
+        r"\1[REDACTED]",
     ),
     (
         re.compile(
-            r"\\b(?:anb_[A-Za-z0-9_-]{12,}|gsk_[A-Za-z0-9_-]{12,}|"
+            r"\b(?:anb_[A-Za-z0-9_-]{12,}|gsk_[A-Za-z0-9_-]{12,}|"
             r"ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|"
             r"xox[baprs]-[A-Za-z0-9-]{10,}|sk-[A-Za-z0-9_-]{16,}|"
-            r"AQ\\.[A-Za-z0-9_-]{20,})\\b"
+            r"AQ\.[A-Za-z0-9_-]{20,})\b"
         ),
         "[REDACTED_SECRET]",
     ),
     (
-        re.compile(r"\\beyJ[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}\\b"),
+        re.compile(r"\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b"),
         "[REDACTED_SECRET]",
     ),
     (
-        re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----[\\s\\S]*?-----END (?:RSA |EC |OPENSSH )?PRIVATE KEY-----"),
+        re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----[\s\S]*?-----END (?:RSA |EC |OPENSSH )?PRIVATE KEY-----"),
         "[REDACTED_PRIVATE_KEY]",
     ),
     (
-        re.compile(r"(?i)\\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,}\\b"),
+        re.compile(r"(?i)\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b"),
         "[EMAIL_OMITIDO]",
     ),
     (
-        re.compile(r"(?<!\\w)\\+?\\d[\\d ()-]{7,}\\d(?!\\w)"),
+        re.compile(r"(?<!\w)\+?\d[\d ()-]{7,}\d(?!\w)"),
         "[TELEFONO_OMITIDO]",
     ),
 )
