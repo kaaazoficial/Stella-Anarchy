@@ -607,6 +607,9 @@ class StellaBot:
             # Buttons can trigger replies or voice actions too; honor the same
             # shared global mute as ordinary messages.
             if await self._global_chat_silenced():
+                stop_speech = getattr(self.voice, "stop_all_speech", None)
+                if callable(stop_speech):
+                    await stop_speech()
                 return
             user = event.get("user") or {}
             if not isinstance(user, dict):
@@ -755,6 +758,9 @@ class StellaBot:
         # Global silence suppresses chat replies, automatic replies and voice reading.
         # Only the configured owner can use the explicit wake-up command while muted.
         if await self._global_chat_silenced():
+            stop_speech = getattr(self.voice, "stop_all_speech", None)
+            if callable(stop_speech):
+                await stop_speech()
             if addressed and self._is_owner(uid):
                 restore_command = ""
                 if prefix:
