@@ -611,6 +611,10 @@ class StellaBot:
             self.voice.notify_room_ready(room_id)
             return
         if event_type == "interaction":
+            # Buttons can trigger replies or voice actions too; honor the same
+            # shared global mute as ordinary messages.
+            if await self._global_chat_silenced():
+                return
             user = event.get("user") or {}
             if not isinstance(user, dict):
                 user = {}
