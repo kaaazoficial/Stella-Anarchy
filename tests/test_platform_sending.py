@@ -178,3 +178,27 @@ def test_rate_limit_cooldown_is_shared_with_following_messages(monkeypatch):
         return {"ok": True, "status": 200, "data": {}}
 
     asyncio.run(scenario())
+
+
+
+def test_send_message_passes_only_valid_user_mentions_in_api_payload(monkeypatch):
+    async def scenario():
+        async def fake_sleep(_delay):
+            return None
+
+        monkeypatch.setattr("stella.platform.asyncio.sleep", fake_sleep)
+        client, calls = _client_with_responses([
+            {"ok": True, "status": 200, "data": {}},
+        ])
+        sent = await client.send_message(
+            "room", "@Persona mira esto",
+            mentions=[
+                {"uid": "user-1", "name": "Persona"},
+                {"uid": "user-1", "name": "Duplicate"},
+                {"uid": "", "name": "Invalid"},
+            ],
+        )
+        assert sent is True
+        assert calls[0][2]["mentions"] == [{"uid": "user-1", "name": "Persona"}]
+
+    asyncio.run(scenario())
