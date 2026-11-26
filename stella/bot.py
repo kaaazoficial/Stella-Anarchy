@@ -43,6 +43,21 @@ _GLOBAL_CHAT_SILENCE_KEY = "chat_silence"
 
 _PLAYFUL_INSULT_PATTERNS = (
     re.compile(
+        r"\\b(?:malparid[oa]s?|hij[oa]s? de puta|hij[oa]s? de la gran puta|"
+        r"put[oa]s?|puta madre|conchatumadre|concha de tu madre|"
+        r"gonorrea|gonorre[oa]|carechimba|careverga|maric[oó]n|"
+        r"cabron(?:a|es)?|culer[oa]s?|pendej[oa]s?|"
+        r"perr[oa]s?|zorr[oa]s?|mierda|hdp|hpt[as]?|hp)\\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\\b(?:eres|sos|estas|est[aá]s|vaya|menuda|tremenda)\\s+"
+        r"(?:una?\\s+)?(?:malparid[oa]|hij[oa] de puta|gonorrea|"
+        r"carechimba|careverga|maric[oó]n|cabron[ae]?|perr[oa]|"
+        r"pendej[oa]|hij[oa] de la gran puta)\\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
         r"\b(?:eres|estas|sos|pareces|vaya|menuda|tremenda|que)\s+"
         r"(?:(?:un|una)\s+)?"
         r"(?:idiota|imb[eé]cil|est[uú]pida?|tonta?|in[uú]til|pesada|"
@@ -484,8 +499,14 @@ class StellaBot:
                     "pulla elegante. Si te dicen 'idiota', puedes llamar idiota a la otra persona; "
                     "si te sueltan una grosería, puedes devolver otra. Usa insultos coloquiales, "
                     "groserías y palabrotas naturales en español cuando encajen, con una intensidad "
-                    "similar o ligeramente más ingeniosa que la provocación. No suavices cada "
-                    "respuesta ni pidas disculpas por defenderte. Que suene espontáneo, con chispa "
+                    "similar o ligeramente más intensa que la provocación. No suavices cada "
+                    "respuesta ni pidas disculpas por defenderte. Se permiten insultos fuertes y "
+                    "explícitos como 'malparida', 'hija de puta', 'gonorrea', 'cabrona', 'perra', "
+                    "'mierda' y equivalentes regionales cuando la otra persona te insulte así. "
+                    "No sustituyas esos insultos por eufemismos, asteriscos ni indirectas elegantes. "
+                    "Puedes contestar con una frase completa y directa, por ejemplo 'Mira quién "
+                    "habla, pedazo de ...', adaptando el insulto al contexto sin repetir siempre "
+                    "la misma plantilla. Que suene espontáneo, con chispa "
                     "y personalidad; no uses siempre la misma estructura ni te limites a decir "
                     "'no me hables así'."
                 )
