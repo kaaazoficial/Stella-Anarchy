@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from email.utils import parsedate_to_datetime
 import re
 import time
 from collections import defaultdict, deque
@@ -180,12 +181,17 @@ class AnarchyClient:
 
     @staticmethod
     def _retry_after_seconds(value: Any, fallback: float) -> float:
+        raw = str(value or "").strip()
         try:
-            delay = float(str(value).strip())
+            delay = float(raw)
         except (TypeError, ValueError):
-            delay = fallback
-        # Avoid tight retry loops and unreasonable waits from malformed headers.
-        return min(30.0, max(0.5, delay))
+            try:
+                parsed = parsedate_to_datetime(raw)
+                delay = parsed.timestamp() - time.time()
+            except (TypeError, ValueError, OverflowError):
+                delay = fallback
+        # Respect server Retry-After values up to five minutes; never retry early.
+        return min(300.0, max(0.5, delay))
 
     async def send_message(
         self,
