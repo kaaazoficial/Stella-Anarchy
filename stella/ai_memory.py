@@ -153,7 +153,7 @@ class QdrantConversationMemory:
     async def _cleanup_expired_if_due(self) -> None:
         """Physically remove expired payloads periodically, not only hide them on read."""
         now = time.monotonic()
-        if now - self._last_cleanup < self.cleanup_interval_seconds:
+        if self._last_cleanup and now - self._last_cleanup < self.cleanup_interval_seconds:
             return
         try:
             client = await self._http()
