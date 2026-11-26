@@ -890,3 +890,79 @@ def test_local_opt_out_blocks_persistent_memory_when_remote_storage_is_still_ena
 
     b.store.set_setting("room-a", "ai_memory_opt_out:member", "0")
     assert asyncio.run(b._ai_memory_enabled("room-a", "member")) is True
+
+
+
+@pytest.mark.parametrize("content, expected", [
+    ("Necesito ayuda, Stella", "Necesito ayuda"),
+    ("Oye, Stella, mira esto", "mira esto"),
+    ("Tengo una duda, Stella: ¿puedes revisarla?", "Tengo una duda ¿puedes revisarla?"),
+    ("¿Puedes ayudarme, Stella?", "¿Puedes ayudarme"),
+    ("Mira esto, Stella", "Mira esto"),
+])
+def test_stella_call_is_recognized_at_the_start_middle_and_end(content, expected):
+    from stella.identity import extract_stella_call
+
+    assert extract_stella_call(content) == expected
+
+
+def test_plain_name_reference_is_not_a_stella_call():
+    from stella.identity import extract_stella_call
+
+    assert extract_stella_call("Hoy hablé con Stella en el chat") is None
+    assert extract_stella_call("¿Qué opinas de Stella?") is None
+
+
+def test_bare_help_in_reply_to_stella_is_not_the_help_command(monkeypatch):
+    import stella.bot as bot_module
+
+    b = bot()
+    ai_calls = []
+    command_calls = []
+
+    async def capture_ai(*args):
+        ai_calls.append(args)
+
+    async def capture_command(*args):
+        command_calls.append(args)
+
+    b._ai_assist = capture_ai
+    b._command = capture_command
+    monkeypatch.setattr(bot_module, "interpret_natural_request", lambda _value: None)
+
+    asyncio.run(b.handle_event({
+        "type": "message",
+        "threadId": "r",
+        "message": {
+            "content": "Ayuda",
+            "replyMessageId": "stella-msg",
+            "author": {"uid": "u", "nickname": "Persona"},
+        },
+    }))
+
+    assert ai_calls == []
+    assert command_calls == []
+    assert len(b.platform.sent) == 1
+    assert "¿Con qué necesitas ayuda?" in b.platform.sent[0][1]
+
+
+def test_explicit_help_command_still_works_when_replying_to_stella():
+    b = bot()
+    calls = []
+
+    async def capture_command(*args):
+        calls.append(args)
+
+    b._command = capture_command
+    asyncio.run(b.handle_event({
+        "type": "message",
+        "threadId": "r",
+        "message": {
+            "content": "!ayuda",
+            "replyMessageId": "stella-msg",
+            "author": {"uid": "u", "nickname": "Persona"},
+        },
+    }))
+
+    assert len(calls) == 1
+    assert calls[0][3] == "ayuda"
