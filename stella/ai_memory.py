@@ -94,7 +94,9 @@ class QdrantConversationMemory:
     @staticmethod
     def _clean_turns(turns: list[dict[str, Any]], limit: int = 10) -> list[dict[str, str]]:
         cleaned: list[dict[str, str]] = []
-        for item in turns[-limit:]:
+        safe_limit = max(1, min(20, int(limit)))
+        source = turns if isinstance(turns, list) else []
+        for item in source[-safe_limit:]:
             if not isinstance(item, dict):
                 continue
             role = str(item.get("role") or "")
@@ -103,9 +105,16 @@ class QdrantConversationMemory:
             content = " ".join(str(item.get("content") or "").split())
             if not content:
                 continue
+            # Never preserve obvious credentials or secrets in long-term context.
+            content = re.sub(
+                r"(?i)\\b(api[_ -]?key|access[_ -]?token|password|contraseña|clave|secret)\\s*[:=]\\s*([^\\s,;]+)",
+                r"\\1=[REDACTED]",
+                content,
+            )
+            content = re.sub(r"(?i)\\bBearer\\s+[^\\s,;]+", "Bearer [REDACTED]", content)
             maximum = 1400 if role == "user" else 1200
             cleaned.append({"role": role, "content": content[:maximum]})
-        return cleaned[-limit:]
+        return cleaned[-safe_limit:]
 
     async def load(self, room_id: str, uid: str) -> list[dict[str, str]]:
         if not self.enabled or not room_id or not uid:
@@ -195,10 +204,45 @@ class QdrantConversationMemory:
     async def set_enabled(self, room_id: str, uid: str, enabled: bool) -> bool:
         if not enabled:
             return await self.forget(room_id, uid)
-        # Persist the opt-in in Qdrant itself; local SQLite settings are ephemeral
-        # on free hosting and must not be the source of truth after a restart.
-        turns = await self.load(room_id, uid)
-        return await self.save(room_id, uid, turns)
+        if not self.enabled or not room_id or not uid:
+            return False
+        # Persist consent in Qdrant itself, not ephemeral local settings.
+        # Preserve existing turns if a record is already present.
+        try:
+            await self.ensure_collection()
+            digest, point_id = self._identity(room_id, uid)
+            client = await self._http()
+            response = await client.get(
+                f"{self._collection_url()}/points/{point_id}",
+                headers=self._headers(),
+                params={"with_payload": "true", "with_vector": "false"},
+            )
+            if response.status_code == 404:
+                return await self.save(room_id, uid, [])
+            response.raise_for_status()
+            result = response.json().get("result")
+            payload = result.get("payload", {}) if isinstance(result, dict) else {}
+            if payload.get("identity") != digest:
+                return False
+            if int(payload.get("expires_at", 0)) <= int(time.time()):
+                return await self.save(room_id, uid, [])
+            payload["enabled"] = True
+            payload["updated_at"] = int(time.time())
+            payload["expires_at"] = int(time.time()) + self.retention_days * 86400
+            written = await client.put(
+                f"{self._collection_url()}/points?wait=true",
+                headers=self._headers(),
+                json={"points": [{
+                    "id": point_id,
+                    "vector": [0.0],
+                    "payload": payload,
+                }]},
+            )
+            written.raise_for_status()
+            return True
+        except Exception as exc:
+            log.warning("Persistent AI memory opt-in failed (%s).", type(exc).__name__)
+            return False
 
     async def clear(self, room_id: str, uid: str) -> bool:
         """Erase conversation turns while keeping the explicit opt-in enabled."""
