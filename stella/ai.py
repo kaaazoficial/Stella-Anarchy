@@ -33,7 +33,7 @@ STELLA_SYSTEM = (
 
 
 class StellaAI:
-    """Gemini-first AI with Groq fallback; prompts and answers are never persisted."""
+    """Gemini-first provider client; durable conversation context is managed separately."""
 
     def __init__(self) -> None:
         self.gemini_key = get_gemini_api_key()
