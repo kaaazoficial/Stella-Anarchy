@@ -29,10 +29,12 @@ def test_banter_and_jokes_are_classified_for_playful_replies():
         "Jajaja, era broma",
         "No te piques, Stella",
         "Te estoy tomando el pelo",
-        "XD",
     ]
     for message in samples:
         assert classify_playful_stella_message(message) == "teasing"
+
+    assert classify_playful_stella_message("XD") is None
+    assert classify_playful_stella_message("XD", explicitly_addressed=True) == "teasing"
 
 
 def test_real_complaints_and_distress_are_not_roasted():
