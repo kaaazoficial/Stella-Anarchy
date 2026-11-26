@@ -29,7 +29,7 @@ Stella is an independent Python bot for Anarchy Apps. It has its own codebase, c
 - Profiles and social economy: `!perfil`, `!bio`, `!miestado`, `!puntos`, `!ranking` (`!top`), `!diario` (`!daily`), `!trabajar`, `!pagar` (`!transferir`), `!regalo`, `!muro`, `!afinidad` (`!amistad`, `!reputacion`) and `!duelo`.
 - High-confidence command typo suggestions; suggestions are never executed automatically.
 - User references: reply to a member's message with `!mencionar [texto]` to put their visible `@nickname` in Stella's reply. The documented Anarchy bot-send API does not currently provide an outbound mention/notification field, so this is visible text and not a guaranteed notification.
-- Commands are also parsed when the user's reply begins with an explicit command after a leading @-mention of the replied-to member. Render logs each text message delivered by Anarchy, including edits and Stella's successful outgoing messages; recognizable credentials are redacted. A community bot needs the Agent's read-all-messages permission to receive ordinary chat text.
+- Commands are also parsed when the user's reply begins with an explicit command after a leading @-mention of the replied-to member. Stella archives every authenticated room event delivered by Anarchy, including messages, edits, deletions, interactions and room activity, plus successful outgoing messages. The archive is stored chronologically in its own Qdrant collection, with no automatic expiry; recognizable credentials are redacted. A community bot needs the Agent's read-all-messages permission to receive ordinary chat text.
 - Reversible global chat silence, controlled only by the exact owner UID in `SINNER_UID`: say "No le hables a nadie" or use `!silenciarchat`; restore with "Ya puedes hablar", `!hablarchat` or `!despertar`. While silenced, Stella ignores messages, commands and voice reading; pending TTS is cancelled. The wake-up path remains available to the owner.
 - Exact UID-based administrator permissions. Admin aliases include `!admin`, `!centro`, `!nexus`, `!paneladmin`, `!sistema`, `!diagnostico`, `!rendimiento`, `!laboratorio`, `!fuentes`, `!saludfuentes`, `!metricas` and `!autotest`. Admins can update Stella's name/status with `!perfilbot` and set its avatar with `!avatarbot`; avatar uploads are restricted to direct HTTPS images from Wikimedia Commons, Imgur, Unsplash or Pexels, validated for real image format, dimensions and a 512 KB cap.
 - `/metrics` exposes aggregate Prometheus counters and can be protected with `PROMETHEUS_METRICS_TOKEN`; `/health` reports privacy-safe component readiness and uptime, while `/ready` checks the required Anarchy credentials and SQLite before traffic is accepted.
@@ -37,6 +37,8 @@ Stella is an independent Python bot for Anarchy Apps. It has its own codebase, c
 ## Privacy, data and retention
 
 Stella's personal memory is automatic by default; no activation or save command is required. On messages delivered to the bot, it captures only clear, useful first-person facts such as projects, goals, study/work context and preferences, and it saves recent conversation turns from direct AI interactions. It keeps up to ten recent user/assistant turns and up to twenty durable facts per person and room in a dedicated Qdrant collection, with a 30-day default expiry. Facts are injected as reference data, not instructions; newer corrections take priority. Credentials, contact details, links and clearly sensitive personal data are excluded from durable fact storage, and obvious secrets are redacted from recent turns. The same privacy boundaries, retention and deletion controls apply across both layers. A background maintenance task runs every 15 minutes (configurable) and independently checks expiry; Qdrant removes expired records every six hours by default, even when no one is messaging Stella. Members can inspect their saved facts with `!memoria recuerdos`, delete one with `!memoria borrar <ID>`, clear recent turns with `!ia olvidar`, or request that Stella forget all memory with `!memoria olvidar`. `!memoria desactivar` (or `!memoria conversacion desactivar`) creates a durable opt-out tombstone and erases stored turns and facts. New members are automatically covered unless they explicitly opt out. If Qdrant is unavailable, Stella continues without persistent memory and does not claim that a save succeeded. Prompts sent to Gemini or Groq are processed by the selected provider; that provider's own retention policy still applies.
+
+The room archive is separate from personal AI memory and is not subject to member opt-outs or the 30-day personal-memory expiry. It preserves the full event snapshot needed for later administrative review; credentials and recognizable tokens are redacted. Administrators can query a room with `!historial`, `!historial buscar <texto>`, `!historial usuario <UID/nombre>`, `!historial desde AAAA-MM-DD`, `!historial anterior <cursor>`, `!historial exportar [cantidad]` and `!historial integridad`. Stella may use a short, recent same-room transcript as context when directly addressed, but it is passed as untrusted reference context and never overrides the current request or personal-memory rules.
 
 SQLite stores only data required by existing community features:
 - Account operations: UID, nickname, points and last-seen timestamp. Accounts and their associated points/reward state are deleted after 90 days of inactivity.
@@ -71,6 +73,7 @@ Set these variables in the hosting provider. Never commit real credentials.
 | `GEMINI_MODEL` | No | Defaults to `gemini-3.5-flash-lite` |
 | `QDRANT_URL` | No | Qdrant Cloud endpoint |
 | `QDRANT_API_KEY` | No | Qdrant API key; keep secret |
+| `QDRANT_ROOM_ARCHIVE_COLLECTION` | No | Defaults to `stella_room_archive`; permanent chronological room event archive |
 | `QDRANT_COLLECTION` | No | Defaults to `stella_messages` |
 | `QDRANT_AI_MEMORY_COLLECTION` | No | Defaults to `stella_ai_memory`; separate durable conversation history |
 | `AI_MEMORY_RETENTION_DAYS` | No | Durable conversation-memory expiry; defaults to 30 days |
@@ -122,6 +125,30 @@ Use the matching webhook secret configured for the bot in Anarchy. Stella valida
 ## Render deployment
 
 The included `render.yaml` targets the `stella-anarchy` Free web service in Ohio. Free Render web services can sleep when idle and have ephemeral local filesystems; SQLite data can be lost during restarts or deploys. This build intentionally avoids requiring paid persistent storage. If durable moderation/configuration data is required later, move the store to a managed PostgreSQL database.
+
+## Room archive recovery and export
+
+The archive itself starts recording events as authenticated Anarchy webhooks arrive. To import older audit entries still retained by Render, run the backfill utility locally with the Render and Qdrant credentials in environment variables (never commit them):
+
+```bash
+export RENDER_API_KEY="..."
+export RENDER_WORKSPACE_ID="..."
+export RENDER_SERVICE_ID="..."
+export QDRANT_URL="..."
+export QDRANT_API_KEY="..."
+python scripts/backfill_render_logs.py --since 2026-11-24T22:20:36Z --dry-run
+python scripts/backfill_render_logs.py --since 2026-11-24T22:20:36Z
+```
+
+The script paginates through Render's log API, imports only structured `stella.audit` records, redacts recognizable credentials through the archive writer, and uses stable IDs so rerunning the import does not create duplicate events. Render's API only exposes logs within its supported retention window; entries already expired or not written to audit logs cannot be reconstructed from this source. Run the dry-run first.
+
+Export the complete room archive, including event snapshots, to a local JSON Lines file:
+
+```bash
+python scripts/export_room_archive.py --room-id 191 --output room-191.jsonl
+```
+
+The export is sensitive because it contains room conversation data and actor identifiers. Store it securely and do not commit it to the repository.
 
 ## Development
 
