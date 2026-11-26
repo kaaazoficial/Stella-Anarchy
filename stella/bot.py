@@ -2790,11 +2790,17 @@ class StellaBot:
                 await self._reply(room_id, self.voice.youtube_search_message(rest), message)
                 return
             if action.casefold() in {"buscar", "search"}:
+                if not rest.strip():
+                    await self._reply(room_id, "Indica qué quieres escuchar. Ejemplo: !dj buscar música ambiental.", message)
+                    return
                 await self.voice.search_music_interactive(
                     room_id, rest, reply_id=str(message.get("messageId") or message.get("id") or "") or None
                 )
                 return
             if action.casefold() in {"ambiente", "mood"}:
+                if not rest.strip():
+                    await self._reply(room_id, "Indica el ambiente que buscas. Ejemplo: !dj ambiente concentración.", message)
+                    return
                 from stella.astra import resolve_music_mood
                 await self.voice.search_music_interactive(
                     room_id, resolve_music_mood(rest),
