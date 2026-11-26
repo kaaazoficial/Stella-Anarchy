@@ -45,12 +45,27 @@ class Voice:
         self.speech_stopped=True
     async def leave_room(self,*a,**k): pass
 
+class SharedState:
+    def __init__(self):
+        self.values = {}
+
+    async def get_setting(self, key):
+        return self.values.get(key)
+
+    async def set_setting(self, key, value):
+        self.values[key] = str(value)
+
+    async def close(self):
+        return None
+
+
 def bot():
     value=object.__new__(StellaBot)
     value.settings=SimpleNamespace(command_prefix="!", sinner_uid="owner", admin_uids="")
     value.platform=Platform()
     value.store=Store()
     value.voice=Voice()
+    value.shared_state=SharedState()
     value._check_antispam=lambda *a,**k:(False,None)
     return value
 
@@ -258,9 +273,11 @@ def test_owner_can_toggle_silence_with_commands():
     b=bot()
 
     asyncio.run(b.handle_event(_message("!silenciarchat", "owner")))
+    assert b.shared_state.values["chat_silence"] == "1"
     assert b.store.get_setting("__stella_global__", "chat_silence", "0") == "1"
 
     asyncio.run(b.handle_event(_message("!despertar", "owner")))
+    assert b.shared_state.values["chat_silence"] == "0"
     assert b.store.get_setting("__stella_global__", "chat_silence", "1") == "0"
 
 
