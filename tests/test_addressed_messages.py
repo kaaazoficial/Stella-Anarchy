@@ -39,10 +39,13 @@ class Voice:
         self.speech=[]
         self.enabled=False
         self.speech_stopped=False
+        self.interactions=[]
     async def enqueue_speech(self,*a):
         if self.enabled: self.speech.append(a)
     async def stop_all_speech(self):
         self.speech_stopped=True
+    async def handle_interaction(self,event):
+        self.interactions.append(event)
     async def leave_room(self,*a,**k): pass
 
 class SharedState:
@@ -752,3 +755,20 @@ def test_owner_can_activate_and_resume_global_silence_with_natural_language():
         )
     )
     assert b.shared_state.values["chat_silence"] == "0"
+
+
+
+def test_global_silence_blocks_voice_button_interactions():
+    b = bot()
+    b.shared_state.values["chat_silence"] = "1"
+
+    asyncio.run(
+        b.handle_event({
+            "type": "interaction",
+            "threadId": "room-a",
+            "user": {"uid": "member"},
+            "buttonId": "voice-action",
+        })
+    )
+
+    assert b.voice.interactions == []
