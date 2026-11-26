@@ -371,8 +371,8 @@ class QdrantConversationMemory:
         try:
             await self.ensure_collection()
             await self._cleanup_expired_if_due()
-            payload = await self._read_payload(room_id, uid) or {}
-            if payload.get("enabled") is False:
+            payload = await self._read_payload(room_id, uid)
+            if not payload or payload.get("enabled") is not True:
                 return False
             payload["turns"] = json.dumps(
                 self._clean_turns(turns, self.max_turns),
@@ -501,7 +501,6 @@ class QdrantConversationMemory:
             if not payload or payload.get("enabled") is not True:
                 return False
             payload["turns"] = "[]"
-            payload["facts"] = "[]"
             return await self._write_payload(room_id, uid, payload, enabled=True)
         except Exception as exc:
             log.warning("Persistent AI memory clear failed (%s).", type(exc).__name__)
