@@ -40,6 +40,7 @@ def test_health_reports_component_status_without_exposing_secrets(monkeypatch):
                 "failovers": 0,
             }),
         ),
+    )
     monkeypatch.setenv("GEMINI_API_KEY", "private-ai-key")
     monkeypatch.delenv("GROQ_API_KEY", raising=False)
 
