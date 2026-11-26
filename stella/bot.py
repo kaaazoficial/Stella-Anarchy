@@ -178,8 +178,8 @@ _INSULT_MEANING_QUESTION = re.compile(
 )
 _NON_PLAYFUL_BOUNDARY = re.compile(
     r"(?:\b(?:stop it|leave me alone|don't talk to me|do not talk to me|"
-    r"please stop|back off|necesito que pares|déjame en paz|dejame en paz|"
-    r"arrête|arrete|laisse[- ]moi tranquille|sai da me|me deixa em paz|"
+    r"please stop|back off|necesito que pares|deja de hablarme así|deja de hablarme asi|déjame en paz|dejame en paz|"
+    r"arrête|arrete|laisse[- ]moi tranquille|sai da me|me deixa em paz|translate the word|"
     r"para por favor|para ya)\b|"
     r"(?:やめて|もうやめて|그만해|그만하세요|请停止|請停止|别再说了|別再說了))",
     re.IGNORECASE,
