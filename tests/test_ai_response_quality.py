@@ -259,6 +259,7 @@ def test_playful_response_uses_ai_provider_router_and_recent_context(monkeypatch
     assert kwargs["rate_key"] == "user-uid"
     assert kwargs["response_mode"] == "answer"
     assert kwargs["max_output_tokens"] == 180
+    assert kwargs["provider_order"] == "gemini_first"
     history = core._history(session_key)
     assert history[-2]["content"] == "Stella, eres una idiota"
     assert history[-1]["content"] == answer
