@@ -14,6 +14,7 @@ from typing import Any
 
 from stella.ai import StellaAI
 from stella.vector_memory import VectorMemory
+from stella.room_archive import RoomArchive
 from stella.ai_memory import QdrantConversationMemory
 from stella.ai_core import AI_ADMIN_COMMANDS, AI_PUBLIC_COMMANDS, StellaAICore
 from stella.config import Settings, _uid_set
@@ -441,6 +442,8 @@ class StellaBot:
         self.settings = settings
         self.store = store
         self.platform = platform
+        self.room_archive = RoomArchive()
+        self.platform.room_archive = self.room_archive
         self.shared_state = QdrantSharedState()
         self.services = StellaServices()
         self.ai = StellaAI()
@@ -456,6 +459,7 @@ class StellaBot:
             else platform
         )
         self.voice = MusicVoice(self.voice_platform)
+        self.voice_platform.room_archive = self.room_archive
         self.voice.ai = self.ai
         self.voice.store = store
         # Only hashes and timestamps are held here. Message text is not retained.
@@ -867,6 +871,94 @@ class StellaBot:
         room_id = str(event.get("threadId") or event.get("thread_id") or "").strip()
         if not room_id:
             return
+
+        # Archive every authenticated Anarchy event before any early return,
+        # command routing, anti-spam decision, or global-silence check.
+        message_data = event.get("message") or {}
+        if not isinstance(message_data, dict):
+            message_data = {}
+        archive_author = (
+            message_data.get("author")
+            or message_data.get("sender")
+            or event.get("user")
+            or event.get("member")
+            or event.get("author")
+            or {}
+        )
+        if not isinstance(archive_author, dict):
+            archive_author = {}
+        archive_uid = (
+            archive_author.get("uid")
+            or archive_author.get("userId")
+            or archive_author.get("user_id")
+            or archive_author.get("id")
+        )
+        archive_name = (
+            archive_author.get("nickname")
+            or archive_author.get("displayName")
+            or archive_author.get("username")
+            or archive_author.get("name")
+        )
+        archive_content = (
+            message_data.get("content")
+            or message_data.get("text")
+            or message_data.get("body")
+            or event.get("content")
+            or event.get("text")
+        )
+        archive_message_id = (
+            event.get("messageId")
+            or event.get("message_id")
+            or message_data.get("messageId")
+            or message_data.get("message_id")
+            or message_data.get("id")
+        )
+        archive_reply_id = (
+            message_data.get("replyMessageId")
+            or message_data.get("reply_message_id")
+            or message_data.get("replyToMessageId")
+            or message_data.get("reply_to_message_id")
+            or event.get("replyMessageId")
+            or event.get("reply_message_id")
+        )
+        archive_type = {
+            "message": "chat.message.in",
+            "message.created": "chat.message.in",
+            "message_create": "chat.message.in",
+            "message.edited": "chat.message.edited",
+            "message.deleted": "chat.message.deleted",
+            "message_delete": "chat.message.deleted",
+            "interaction": "chat.interaction",
+            "room.ready": "chat.room.ready",
+            "room.end": "chat.room.ended",
+            "room.kicked": "chat.room.kicked",
+            "thread.removed": "chat.room.removed",
+            "room.join": "chat.room.join",
+            "room.leave": "chat.room.leave",
+            "room.speaker": "chat.room.speaker",
+        }.get(event_type, f"anarchy.{event_type or 'unknown'}")
+        archive = getattr(self, "room_archive", None)
+        record_archive_event = getattr(archive, "record_event", None)
+        if callable(record_archive_event):
+            await record_archive_event(
+                room_id,
+                archive_type,
+                event_time=(
+                    event.get("eventTime")
+                    or event.get("timestamp")
+                    or message_data.get("createdAt")
+                    or message_data.get("created_at")
+                    or message_data.get("editedTime")
+                    or message_data.get("deletedAt")
+                ),
+                source_event_id=event.get("eventId") or event.get("event_id"),
+                actor_uid=str(archive_uid) if archive_uid is not None else None,
+                actor_name=str(archive_name) if archive_name is not None else None,
+                message_id=str(archive_message_id) if archive_message_id is not None else None,
+                reply_to_message_id=str(archive_reply_id) if archive_reply_id is not None else None,
+                content=str(archive_content) if archive_content is not None else None,
+                metadata={"webhook_event": event},
+            )
         if event_type == "room.ready":
             audit_event("chat.room.ready", room_id=room_id)
             self.voice.notify_room_ready(room_id)
@@ -2955,6 +3047,10 @@ class StellaBot:
         if self.voice_platform is not self.platform:
             await self.voice_platform.close()
         await self.platform.close()
+        archive = getattr(self, "room_archive", None)
+        close_archive = getattr(archive, "close", None)
+        if callable(close_archive):
+            await close_archive()
 
     async def _research(self, room_id, uid, name, args, message):
         mode, separator, query = args.partition(" ")
