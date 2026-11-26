@@ -451,7 +451,7 @@ def test_unaddressed_messages_are_not_read_aloud_even_when_voice_reading_is_enab
     "Stella, cállate payasa",
     "Stella, no sirves para nada XD",
 ])
-def test_playful_insults_receive_local_comebacks_without_ai(content):
+def test_playful_insults_are_routed_to_ai_generation(content):
     b = bot()
     calls = []
 
@@ -465,10 +465,10 @@ def test_playful_insults_receive_local_comebacks_without_ai(content):
         "message": {"content": content, "author": {"uid": "u", "nickname": "Persona"}},
     }))
 
-    assert calls == []
-    assert len(b.platform.sent) == 1
-    reply = b.platform.sent[0][1].casefold()
-    assert any(word in reply for word in ("imbécil", "mierda", "estupidez", "idiotez"))
+    assert len(calls) == 1
+    assert calls[0][3] == content.removeprefix("Stella, ")
+    assert calls[0][5] == "insult"
+    assert b.platform.sent == []
 
 
 @pytest.mark.parametrize("content", [
@@ -476,7 +476,7 @@ def test_playful_insults_receive_local_comebacks_without_ai(content):
     "Stella, te gané XD",
     "Stella, no te piques, te estoy molestando",
 ])
-def test_teasing_receives_local_playful_comeback_without_ai(content):
+def test_teasing_is_routed_to_ai_generated_playful_reply(content):
     b = bot()
     calls = []
 
@@ -490,9 +490,10 @@ def test_teasing_receives_local_playful_comeback_without_ai(content):
         "message": {"content": content, "author": {"uid": "u", "nickname": "Persona"}},
     }))
 
-    assert calls == []
-    assert len(b.platform.sent) == 1
-    assert b.platform.sent[0][1].strip()
+    assert len(calls) == 1
+    assert calls[0][3] == content.removeprefix("Stella, ")
+    assert calls[0][5] == "teasing"
+    assert b.platform.sent == []
 
 
 @pytest.mark.parametrize("content", [
@@ -966,7 +967,7 @@ def test_explicit_help_command_still_works_when_replying_to_stella():
     assert calls[0][3] == "ayuda"
 
 
-def test_single_word_insult_in_reply_to_stella_gets_local_comeback(monkeypatch):
+def test_single_word_insult_in_reply_to_stella_uses_ai_generation(monkeypatch):
     b = bot()
     calls = []
 
@@ -984,12 +985,10 @@ def test_single_word_insult_in_reply_to_stella_gets_local_comeback(monkeypatch):
         },
     }))
 
-    assert calls == []
-    assert len(b.platform.sent) == 1
-    assert any(
-        word in b.platform.sent[0][1].casefold()
-        for word in ("imbécil", "mierda", "estupidez", "idiotez")
-    )
+    assert len(calls) == 1
+    assert calls[0][3] == "putita"
+    assert calls[0][5] == "insult"
+    assert b.platform.sent == []
 
 
 
@@ -1018,7 +1017,7 @@ def test_reply_to_another_member_is_not_confirmed_as_stella():
     )) is False
 
 
-def test_direct_insult_gets_local_comeback_without_calling_ai():
+def test_direct_insult_is_forwarded_to_ai_instead_of_local_phrase_bank():
     b = bot()
     ai_calls = []
 
@@ -1035,13 +1034,12 @@ def test_direct_insult_gets_local_comeback_without_calling_ai():
         },
     }))
 
-    assert len(b.platform.sent) == 1
-    response = b.platform.sent[0][1].casefold()
-    assert any(word in response for word in ("imbécil", "mierda", "estupidez", "idiotez"))
-    assert ai_calls == []
+    assert len(ai_calls) == 1
+    assert ai_calls[0][5] == "insult"
+    assert b.platform.sent == []
 
 
-def test_insult_reply_to_stella_gets_local_comeback_even_without_cached_id():
+def test_insult_reply_to_stella_uses_ai_even_without_cached_id():
     b = bot()
     b.platform.ids.clear()
     b.platform.read_messages["123458"] = {
@@ -1064,7 +1062,79 @@ def test_insult_reply_to_stella_gets_local_comeback_even_without_cached_id():
         },
     }))
 
+    assert len(ai_calls) == 1
+    assert ai_calls[0][5] == "insult"
+    assert b.platform.sent == []
+
+
+def test_ai_generated_playful_reply_is_sent_and_saved_to_short_term_history():
+    b = bot()
+
+    class FakeAI:
+        def __init__(self, answer=None, error=None):
+            self.answer = answer
+            self.error = error
+            self.saved = []
+            self.calls = []
+
+        def _history(self, key):
+            return []
+
+        def _append_history(self, key, role, content):
+            self.saved.append((key, role, content))
+
+        async def generate_playful_response(self, prompt, **kwargs):
+            self.calls.append((prompt, kwargs))
+            if self.error:
+                raise self.error
+            return self.answer
+
+    fake = FakeAI(answer="Tu intento de insulto fue bastante triste, imbécil.")
+    b.ai_core = fake
+    b.ai_memory = None
+    b.services = SimpleNamespace(ai_request=object())
+
+    asyncio.run(b._ai_assist(
+        "r", "u", "Persona", "Stella, eres una idiota",
+        {"messageId": "original"}, "insult",
+    ))
+
     assert len(b.platform.sent) == 1
-    response = b.platform.sent[0][1].casefold()
-    assert any(word in response for word in ("imbécil", "mierda", "estupidez", "idiotez"))
-    assert ai_calls == []
+    assert b.platform.sent[0][1].removeprefix("[C] ") == "Tu intento de insulto fue bastante triste, imbécil."
+    assert fake.calls[0][1]["kind"] == "insult"
+    assert fake.calls[0][1]["rate_key"] == "u"
+    assert fake.saved == []
+
+
+def test_local_comeback_is_used_only_when_ai_generation_fails():
+    from stella.bot import _STELLA_INSULT_COMEBACKS
+
+    b = bot()
+
+    class FailedAI:
+        def __init__(self):
+            self.saved = []
+
+        def _history(self, key):
+            return []
+
+        def _append_history(self, key, role, content):
+            self.saved.append((role, content))
+
+        async def generate_playful_response(self, *args, **kwargs):
+            raise RuntimeError("Gemini y Groq no están disponibles")
+
+    fake = FailedAI()
+    b.ai_core = fake
+    b.ai_memory = None
+    b.services = SimpleNamespace(ai_request=object())
+
+    asyncio.run(b._ai_assist(
+        "r", "u", "Persona", "Stella, putita",
+        {"messageId": "original"}, "insult",
+    ))
+
+    assert len(b.platform.sent) == 1
+    assert b.platform.sent[0][1].removeprefix("[C] ") in _STELLA_INSULT_COMEBACKS
+    assert fake.saved[0] == ("user", "Stella, putita")
+    assert fake.saved[1][0] == "assistant"

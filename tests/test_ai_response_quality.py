@@ -1,3 +1,5 @@
+import asyncio
+
 import pytest
 
 from stella.ai_core import (
@@ -222,3 +224,52 @@ def test_shared_response_quality_guidance_is_used_by_all_ai_providers():
     assert STELLA_RESPONSE_QUALITY_GUIDANCE in STELLA_IDENTITY_GUIDANCE
     assert "sin convertir cada turno en un cuestionario" in STELLA_RESPONSE_QUALITY_GUIDANCE
     assert "ninguna palabra, pronombre, adjetivo" in STELLA_RESPONSE_QUALITY_GUIDANCE
+
+
+def test_playful_response_uses_ai_provider_router_and_recent_context(monkeypatch):
+    from stella.ai_core import StellaAICore
+
+    core = StellaAICore()
+    session_key = "room:user"
+    core._append_history(session_key, "user", "Tu último chiste fue malísimo.")
+    core._append_history(session_key, "assistant", "Al menos lo intenté.")
+    request_calls = []
+    request_func = object()
+
+    async def capture_request(instructions, messages, actual_request_func, **kwargs):
+        request_calls.append((instructions, messages, actual_request_func, kwargs))
+        return {"kind": "answer", "answer": "Tu insulto tiene menos gracia que una piedra, imbécil."}
+
+    monkeypatch.setattr(core, "_request_json", capture_request)
+
+    answer = asyncio.run(core.generate_playful_response(
+        "Stella, eres una idiota", session_key, request_func,
+        rate_key="user-uid", kind="insult",
+    ))
+
+    assert answer == "Tu insulto tiene menos gracia que una piedra, imbécil."
+    assert len(request_calls) == 1
+    instructions, messages, actual_request_func, kwargs = request_calls[0]
+    assert actual_request_func is request_func
+    assert "al menos una grosería" in instructions
+    assert "no uses insultos discriminatorios" in instructions.casefold()
+    assert "no atribuyas género" in instructions.casefold()
+    assert any("Tu último chiste fue malísimo." in item["content"] for item in messages)
+    assert any("Stella, eres una idiota" in item["content"] for item in messages)
+    assert kwargs["rate_key"] == "user-uid"
+    assert kwargs["response_mode"] == "answer"
+    assert kwargs["max_output_tokens"] == 180
+    assert kwargs["provider_order"] == "gemini_first"
+    history = core._history(session_key)
+    assert history[-2]["content"] == "Stella, eres una idiota"
+    assert history[-1]["content"] == answer
+
+
+def test_playful_response_rejects_unknown_kind():
+    from stella.ai_core import StellaAICore
+
+    core = StellaAICore()
+    with pytest.raises(ValueError, match="Tipo de interacción"):
+        asyncio.run(core.generate_playful_response(
+            "Hola", "room:user", object(), kind="unknown",
+        ))
