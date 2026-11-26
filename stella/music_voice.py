@@ -281,6 +281,52 @@ class MusicVoice:
                 pass
         return bool(state and state.get("connected"))
 
+    async def _wait_livekit_connected(
+        self, room_id: str, room: Any, state: dict[str, Any], *, timeout: float = 12.0
+    ) -> None:
+        ready = state.get("connection_ready")
+        if ready is not None:
+            await asyncio.wait_for(ready.wait(), timeout=timeout)
+        if self.rooms.get(room_id) is not state or not self._room_is_connected(room, state):
+            raise RuntimeError("LiveKit no está conectado para publicar o enviar audio.")
+
+    @staticmethod
+    def _is_transient_livekit_error(exc: Exception) -> bool:
+        detail = f"{type(exc).__name__} {exc}".casefold()
+        # Permission/authentication errors are deterministic, not reconnectable.
+        if any(marker in detail for marker in (
+            "http 401", "http 403", "status 401", "status 403",
+            "permission denied", "not authorized", "unauthorized", "forbidden",
+        )):
+            return False
+        if isinstance(exc, (asyncio.TimeoutError, TimeoutError)):
+            return True
+        return any(marker in detail for marker in (
+            "publishtrackerror", "temporar", "not connected", "connection",
+            "reconnect", "interrupted", "unavailable", "closed", "timeout",
+            "deadline", "signal", "transport",
+        ))
+
+    async def _publish_track_with_retry(
+        self, room_id: str, room: Any, state: dict[str, Any], track: Any,
+        options: Any, *, stage: str,
+    ) -> Any:
+        for attempt in range(2):
+            await self._wait_livekit_connected(room_id, room, state)
+            try:
+                return await room.local_participant.publish_track(track, options)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                if attempt or not self._is_transient_livekit_error(exc):
+                    raise
+                log.warning(
+                    "LiveKit publication had a transient error at %s for room %s; retrying once (%s).",
+                    stage, room_id[:80], type(exc).__name__,
+                )
+                await asyncio.sleep(0.6)
+        raise RuntimeError(f"LiveKit no pudo publicar el canal {stage}.")
+
     async def _close_audio_sources(self, state: dict[str, Any] | None) -> None:
         if not isinstance(state, dict) or state.get("_audio_resources_closed"):
             return
@@ -389,6 +435,7 @@ class MusicVoice:
                         "speech_done": asyncio.Event(),
                         "connected": False,
                         "connection_state": "connecting",
+                        "connection_ready": asyncio.Event(),
                         "connection_error": None,
                         "music_queue": deque(),
                         "music_task": None,
@@ -423,6 +470,8 @@ class MusicVoice:
                         reason = args[0] if args else None
                         state["connected"] = False
                         state["connection_state"] = "disconnected"
+                        state["connection_ready"].clear()
+                        state["music_paused"].clear()
                         log.warning(
                             "LiveKit disconnected for room %s (reason=%s).",
                             thread_id[:80],
@@ -437,6 +486,7 @@ class MusicVoice:
                     def on_reconnecting(*_args):
                         if self.rooms.get(thread_id) is state:
                             state["connection_state"] = "reconnecting"
+                            state["connection_ready"].clear()
                             state["music_paused"].clear()
                             log.warning("LiveKit is reconnecting for room %s.", thread_id[:80])
 
@@ -444,6 +494,7 @@ class MusicVoice:
                         if self.rooms.get(thread_id) is state:
                             state["connection_state"] = "connected"
                             state["connected"] = True
+                            state["connection_ready"].set()
                             state["music_paused"].set()
                             log.info("LiveKit reconnected for room %s.", thread_id[:80])
 
@@ -454,9 +505,11 @@ class MusicVoice:
                         normalized = str(raw_state).casefold()
                         state["connection_state"] = normalized
                         if "reconnect" in normalized or "connecting" in normalized:
+                            state["connection_ready"].clear()
                             state["music_paused"].clear()
                         elif "connected" in normalized and "disconnected" not in normalized:
                             state["connected"] = True
+                            state["connection_ready"].set()
                             state["music_paused"].set()
 
                     room.on("disconnected", on_disconnected)
@@ -488,6 +541,7 @@ class MusicVoice:
 
                     state["connection_state"] = "connected"
                     state["connected"] = True
+                    state["connection_ready"].set()
                     stage = "create_audio_sources"
                     music_source = self._rtc.AudioSource(
                         SAMPLE_RATE, CHANNELS, queue_size_ms=1000
@@ -508,20 +562,22 @@ class MusicVoice:
                     state["speech_audio_track"] = speech_track
 
                     stage = "publish_music"
-                    music_publication = await room.local_participant.publish_track(
-                        music_track,
+                    music_publication = await self._publish_track_with_retry(
+                        thread_id, room, state, music_track,
                         self._rtc.TrackPublishOptions(
                             source=self._rtc.TrackSource.SOURCE_MICROPHONE
                         ),
+                        stage="música",
                     )
                     state["audio_publication_sid"] = getattr(music_publication, "sid", None)
 
                     stage = "publish_speech"
-                    speech_publication = await room.local_participant.publish_track(
-                        speech_track,
+                    speech_publication = await self._publish_track_with_retry(
+                        thread_id, room, state, speech_track,
                         self._rtc.TrackPublishOptions(
                             source=self._rtc.TrackSource.SOURCE_MICROPHONE
                         ),
+                        stage="lectura",
                     )
                     state["speech_publication_sid"] = getattr(speech_publication, "sid", None)
                     if self.rooms.get(thread_id) is not state or not self._room_is_connected(room, state):
@@ -1569,6 +1625,46 @@ class MusicVoice:
             if (paused is None or paused.is_set()) and (speech_done is None or speech_done.is_set()):
                 return
 
+    async def _play_audio_with_recovery(
+        self, room_id: str, state: dict[str, Any], data: bytes, track: dict[str, Any]
+    ) -> None:
+        for attempt in range(2):
+            if attempt:
+                ready = state.get("connection_ready")
+                if ready is not None:
+                    await asyncio.wait_for(ready.wait(), timeout=12.0)
+                if self.rooms.get(room_id) is not state or not state.get("connected"):
+                    raise RuntimeError("La llamada terminó durante la recuperación del audio.")
+                await asyncio.sleep(0.5)
+            try:
+                await self._play_audio_bytes(
+                    state["music_source"], data, state["music_volume"],
+                    room_id=room_id, skip_event=state["music_skip"],
+                    pause_event=lambda: self._wait_music_gate(state),
+                    fade_ms=int(state.get("transition_ms", 500)),
+                    duck_state=state,
+                    capture_lock=state.get("capture_lock"),
+                )
+                return
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                if (
+                    attempt
+                    or state["music_skip"].is_set()
+                    or not self._is_transient_livekit_error(exc)
+                ):
+                    raise
+                log.warning(
+                    "LiveKit playback interrupted for room %s; retrying track once (%s).",
+                    room_id[:80], type(exc).__name__,
+                )
+                await self._send(
+                    room_id,
+                    f"🔄 Se interrumpió el audio de «{_clean(track.get('title') or 'la pista')}»; "
+                    "estoy reintentando la pista desde el principio una vez.",
+                )
+
     async def _music_worker(self, room_id: str, state: dict[str, Any]) -> None:
         while self.rooms.get(room_id) is state and state.get("connected"):
             if not state["music_queue"]:
@@ -1592,14 +1688,7 @@ class MusicVoice:
                     f"🎧 Ahora suena: {_clean(track.get('title') or 'Pista')} — "
                     f"{_clean(track.get('creator') or 'Autor no indicado')}\n" + details,
                 )
-                await self._play_audio_bytes(
-                    state["music_source"], data, state["music_volume"],
-                    room_id=room_id, skip_event=state["music_skip"],
-                    pause_event=lambda: self._wait_music_gate(state),
-                    fade_ms=int(state.get("transition_ms", 500)),
-                    duck_state=state,
-                    capture_lock=state.get("capture_lock"),
-                )
+                await self._play_audio_with_recovery(room_id, state, data, track)
                 playback_succeeded = not state["music_skip"].is_set()
             except asyncio.CancelledError:
                 raise

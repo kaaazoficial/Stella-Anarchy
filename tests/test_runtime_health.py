@@ -26,7 +26,20 @@ def test_health_reports_component_status_without_exposing_secrets(monkeypatch):
     monkeypatch.setattr(
         main,
         "bot",
-        SimpleNamespace(vector_memory=SimpleNamespace(status="conectada")),
+        SimpleNamespace(
+            vector_memory=SimpleNamespace(status="conectada"),
+            ai_core=SimpleNamespace(provider_diagnostics=lambda: {
+                "primary": "Google Gemini",
+                "gemini_configured": True,
+                "groq_configured": True,
+                "last_successful_provider": "Google Gemini",
+                "gemini_successes": 4,
+                "gemini_failures": 0,
+                "groq_successes": 0,
+                "groq_failures": 0,
+                "failovers": 0,
+            }),
+        ),
     )
     monkeypatch.setenv("GEMINI_API_KEY", "private-ai-key")
     monkeypatch.delenv("GROQ_API_KEY", raising=False)
@@ -41,6 +54,8 @@ def test_health_reports_component_status_without_exposing_secrets(monkeypatch):
     assert result["checks"]["anarchy_token_configured"] is True
     assert result["checks"]["webhook_secret_configured"] is True
     assert result["checks"]["ai_provider_configured"] is True
+    assert result["checks"]["ai_providers"]["primary"] == "Google Gemini"
+    assert result["checks"]["ai_providers"]["last_successful_provider"] == "Google Gemini"
     assert result["checks"]["vector_memory"] == "conectada"
     rendered = repr(result)
     assert "private-token" not in rendered

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from types import SimpleNamespace
 
 import pytest
 
@@ -856,3 +857,90 @@ async def test_dj_youtube_action_returns_external_search_not_livekit_audio():
 
     assert "https://www.youtube.com/results?search_query=lofi%20chill" in message
     assert "retransmite" in message
+
+
+
+@pytest.mark.asyncio
+async def test_livekit_retries_one_transient_track_publication():
+    voice = object.__new__(MusicVoice)
+    voice.rooms = {}
+    state = {"connected": True, "connection_ready": asyncio.Event()}
+    state["connection_ready"].set()
+    room = SimpleNamespace(isconnected=lambda: True)
+    attempts = []
+
+    class Participant:
+        async def publish_track(self, track, options):
+            attempts.append(track)
+            if len(attempts) == 1:
+                raise RuntimeError("temporary LiveKit publish transport error")
+            return SimpleNamespace(sid="published")
+
+    room.local_participant = Participant()
+    voice.rooms["room"] = state
+
+    publication = await voice._publish_track_with_retry(
+        "room", room, state, "track", {}, stage="música"
+    )
+
+    assert publication.sid == "published"
+    assert attempts == ["track"] * 2
+
+
+@pytest.mark.asyncio
+async def test_music_worker_retries_one_transient_playback_interruption():
+    from collections import deque
+
+    voice = object.__new__(MusicVoice)
+    track = {
+        "title": "Open track",
+        "creator": "Artist",
+        "source": "Archive",
+        "license": "CC0",
+        "url": "https://archive.org/audio.mp3",
+    }
+    state = {
+        "connected": True,
+        "music_queue": deque([track]),
+        "music_current": None,
+        "music_skip": asyncio.Event(),
+        "music_paused": asyncio.Event(),
+        "music_volume": 0.75,
+        "repeat_mode": "off",
+        "music_source": object(),
+    }
+    state["music_paused"].set()
+    voice.rooms = {"room": state}
+    messages = []
+    playback_attempts = []
+
+    async def download(url):
+        return b"audio"
+
+    async def play(*args, **kwargs):
+        playback_attempts.append(1)
+        if len(playback_attempts) == 1:
+            raise RuntimeError("LiveKit connection temporarily closed")
+
+    async def send(room_id, content, reply_id=None):
+        messages.append(content)
+
+    voice._download_audio = download
+    voice._play_audio_bytes = play
+    voice._send = send
+
+    await voice._music_worker("room", state)
+
+    assert len(playback_attempts) == 2
+    assert state["music_current"] is None
+    assert not state["music_queue"]
+    assert any("reintentando" in message.casefold() for message in messages)
+    assert not any("No pude reproducir" in message for message in messages)
+
+
+
+@pytest.mark.asyncio
+async def test_livekit_does_not_retry_permission_errors():
+    voice = object.__new__(MusicVoice)
+    assert not voice._is_transient_livekit_error(RuntimeError("LiveKit HTTP 403 permission denied"))
+    assert not voice._is_transient_livekit_error(RuntimeError("Unauthorized: forbidden"))
