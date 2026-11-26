@@ -76,3 +76,25 @@ async def test_shared_state_fails_clearly_without_qdrant_credentials():
     state = QdrantSharedState(url="", api_key="")
     with pytest.raises(RuntimeError, match="Qdrant is not configured"):
         await state.get_setting("chat_silence")
+
+
+def test_global_silence_commands_recognize_natural_activation_and_resume_phrases():
+    from stella.bot import StellaBot
+
+    activation_phrases = (
+        "Stella, activa el silencio global.",
+        "activa silencio global",
+        "silencia todos los chats",
+        "no hables en ningún chat",
+        "no respondas en ningún chat",
+    )
+    resume_phrases = (
+        "desactiva el silencio global",
+        "desactiva silencio global",
+        "reactiva el chat global",
+        "vuelve a hablar en todos los chats",
+        "ya puedes hablar en todos los chats",
+    )
+
+    assert all(StellaBot._is_silence_request(phrase) for phrase in activation_phrases)
+    assert all(StellaBot._is_resume_request(phrase) for phrase in resume_phrases)
