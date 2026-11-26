@@ -95,6 +95,8 @@ _PLAYFUL_HUMILIATION_PATTERNS = (
     ),
     re.compile(
         r"\b(?:pobrecit[oa].{0,70}(?:parece|pareces|act[uú]a|peleando|discutiendo)|"
+        r"(?:pareces?|act[uú]as como|te comportas como)\s+(?:un|una)\s+"
+        r"(?:nene|niñ[oa]|criatur[oa]|payas[oa]|idiota|imb[eé]cil|desastre|chiste)|"
         r"eres un chiste|no das risa|tu (?:humor|chiste|respuesta) "
         r"(?:es|da) (?:pena|asco)|hasta un bot sabe m[aá]s|"
         r"ni para eso sirves|te falta calle)\b",
@@ -175,6 +177,26 @@ _MULTI_STANDALONE_INSULT = re.compile(
     r"バカ|馬鹿|アホ|クズ|바보|병신|개새끼)[.!?！。？]*$",
     re.IGNORECASE,
 )
+_STELLA_NAMED_ATTACK_PATTERNS = (
+    re.compile(
+        r"\bstella\b.{0,120}\b(?:parece|pareces|es|act[uú]a como|se comporta como)\b"
+        r".{0,100}\b(?:idiota|imb[eé]cil|payas[oa]|nene|niñ[oa]|desastre|"
+        r"put[oa]|verga|mierda|desgraciad[oa]|pat[eé]tic[oa])\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\b(?:verga|pene|leche|put[oa]|putit[oa]|desgraciad[oa]|"
+        r"perr[oa]|zorr[oa]|imb[eé]cil|idiota|mierda)\b.{0,120}\b(?:a|con|para)\s+stella\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\b(?:a|con|para)\s+stella\b.{0,120}\b(?:verga|pene|leche|"
+        r"put[oa]|putit[oa]|desgraciad[oa]|perr[oa]|zorr[oa]|imb[eé]cil|"
+        r"idiota|mierda|babos[oa])\b",
+        re.IGNORECASE,
+    ),
+)
+
 _INSULT_MEANING_QUESTION = re.compile(
     r"(?:\bwhat\s+(?:does|do)\s+.+\s+mean\b|\bmeaning\s+of\b|"
     r"\bque\s+significa\b|\bqué\s+significa\b|\bqué\s+quiere\s+decir\b|"
@@ -207,6 +229,8 @@ def classify_playful_stella_message(
         return None
     if _INSULT_MEANING_QUESTION.search(text) or _NON_PLAYFUL_BOUNDARY.search(text):
         return None
+    if any(pattern.search(text) for pattern in _STELLA_NAMED_ATTACK_PATTERNS):
+        return "teasing"
 
     # A name vocative or a verified platform mention/reply allows a short insult
     # with no pronoun. Without that evidence, generic profanity about a situation
@@ -952,7 +976,9 @@ class StellaBot:
                     "puedes añadir un insulto coloquial no discriminatorio, sin quedarte en una "
                     "pulla elegante ni en una frase corporativa. Usa el detalle concreto de la "
                     "burla para darle la vuelta y dejar al provocador en evidencia. No respondas "
-                    "como si fuera una consulta seria ni repitas remates prefabricados."
+                    "como si fuera una consulta seria ni repitas remates prefabricados. "
+                    "Si la provocación tiene contenido sexual, no continúes ni erotices "
+                    "ese contenido: conviértelo en una respuesta verbal ingeniosa."
                 )
             playful_prompt = (
                 "CONTEXTO DE CONVERSACIÓN INFORMAL. " + tone_guidance + " "
