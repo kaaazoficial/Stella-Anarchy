@@ -124,7 +124,7 @@ class QdrantConversationMemory:
             response.raise_for_status()
             result = response.json().get("result")
             payload = result.get("payload", {}) if isinstance(result, dict) else {}
-            if payload.get("identity") != digest:
+            if payload.get("identity") != digest or payload.get("enabled") is not True:
                 return []
             if int(payload.get("expires_at", 0)) <= int(time.time()):
                 await self.forget(room_id, uid)
@@ -140,8 +140,6 @@ class QdrantConversationMemory:
         if not self.enabled or not room_id or not uid:
             return False
         cleaned = self._clean_turns(turns, self.max_turns)
-        if not cleaned:
-            return await self.forget(room_id, uid)
         try:
             await self.ensure_collection()
             digest, point_id = self._identity(room_id, uid)
@@ -156,6 +154,7 @@ class QdrantConversationMemory:
                         "vector": [0.0],
                         "payload": {
                             "identity": digest,
+                            "enabled": True,
                             "turns": json.dumps(cleaned, ensure_ascii=False, separators=(",", ":")),
                             "updated_at": now,
                             "expires_at": now + self.retention_days * 86400,
@@ -168,6 +167,42 @@ class QdrantConversationMemory:
         except Exception as exc:
             log.warning("Persistent AI memory save failed (%s).", type(exc).__name__)
             return False
+
+    async def is_enabled(self, room_id: str, uid: str) -> bool:
+        if not self.enabled or not room_id or not uid:
+            return False
+        try:
+            await self.ensure_collection()
+            digest, point_id = self._identity(room_id, uid)
+            client = await self._http()
+            response = await client.get(
+                f"{self._collection_url()}/points/{point_id}",
+                headers=self._headers(),
+                params={"with_payload": "true", "with_vector": "false"},
+            )
+            if response.status_code == 404:
+                return False
+            response.raise_for_status()
+            result = response.json().get("result")
+            payload = result.get("payload", {}) if isinstance(result, dict) else {}
+            if payload.get("identity") != digest or payload.get("enabled") is not True:
+                return False
+            return int(payload.get("expires_at", 0)) > int(time.time())
+        except Exception as exc:
+            log.warning("Persistent AI memory preference read failed (%s).", type(exc).__name__)
+            return False
+
+    async def set_enabled(self, room_id: str, uid: str, enabled: bool) -> bool:
+        if not enabled:
+            return await self.forget(room_id, uid)
+        # Persist the opt-in in Qdrant itself; local SQLite settings are ephemeral
+        # on free hosting and must not be the source of truth after a restart.
+        turns = await self.load(room_id, uid)
+        return await self.save(room_id, uid, turns)
+
+    async def clear(self, room_id: str, uid: str) -> bool:
+        """Erase conversation turns while keeping the explicit opt-in enabled."""
+        return await self.save(room_id, uid, [])
 
     async def forget(self, room_id: str, uid: str) -> bool:
         if not self.enabled or not room_id or not uid:
