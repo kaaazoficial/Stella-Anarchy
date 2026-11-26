@@ -58,19 +58,13 @@ def _sections(p: str):
             f"▸ {p}multimedia imagen|video|audio <búsqueda> · {p}imagen <búsqueda> · {p}video <búsqueda> · {p}audio <búsqueda>.",
             f"▸ {p}ping · {p}miuid · {p}idbot [ADMIN].",
         ]),
-        ("6. ADMINISTRACIÓN Y ESTADO", [
-            f"▸ {p}estado · {p}fuentes · {p}metricas · {p}autotest · {p}centro.",
-            f"▸ {p}admin resumen|actividad|antispam|avisos|historial.",
-            f"▸ {p}historial [cantidad]|buscar <texto>|usuario <UID/nombre>|desde AAAA-MM-DD|anterior <cursor>|exportar [cantidad]|integridad [ADMIN].",
-            f"▸ Los controles del DJ favoritos y diagnóstico requieren [ADMIN].",
-            f"▸ {p}antispam estado|on|off|limite N|ventana N|repeticiones N|enlaces N|menciones N.",
-            f"▸ {p}advertir @usuario [motivo] · {p}advertencias [@usuario] · {p}quitaradvertencia ID.",
-            f"▸ {p}respuestas estado|on|off · {p}respuesta añadir|lista|eliminar ID.",
-            f"▸ {p}perfilbot <nombre> | <estado> · {p}avatarbot <URL HTTPS>.",
-            f"▸ {p}silenciarchat · {p}hablarchat · {p}despertar — Silencio global reversible [OWNER].",
-            f"▸ También puedes decir «No le hables a nadie» y luego «Ya puedes hablar».",
-            f"▸ {p}eliminarmensajes — Solo mensajes propios identificados [ADMIN].",
-            "Los controles [ADMIN] requieren UID autorizado en ADMIN_UIDS o SINNER_UID; [OWNER] requiere el UID exacto de SINNER_UID.",
+        ("6. MEMORIA, CONTEXTO Y PRIVACIDAD", [
+            f"▸ {p}memoria recuerdos — Consulta tus recuerdos personales disponibles.",
+            f"▸ {p}memoria borrar <ID> — Elimina un recuerdo guardado.",
+            f"▸ {p}memoria desactivar|activar — Controla tu memoria personal en esta sala.",
+            "▸ La memoria personal es independiente del archivo cronológico de actividad de la sala.",
+            "▸ Stella puede recuperar mensajes recientes de esta misma sala cuando le hablan o responden.",
+            "▸ Stella no responde a cada mensaje: interviene cuando la llaman, le responden o se usa un comando.",
         ]),
     ]
 
@@ -112,7 +106,7 @@ ALIASES = {
     "juegos":2,"economia":2,"comunidad":2,"entretenimiento":2,
     "musica":3,"voz":3,"dj":3,"tts":3,
     "multimedia":4,"utilidades":4,
-    "admin":5,"administracion":5,"moderacion":5,"estado":5,
+    "memoria":5,"contexto":5,"privacidad":5,
 }
 
 @lru_cache(maxsize=64)
@@ -122,15 +116,13 @@ def filter_commands_help_text(
     *,
     include_admin: bool = True,
 ) -> str:
+    """Filter the six public help categories; the admin catalogue is not a chat feature."""
     key = _normalize(topic or "")
     if not key or key in {"todo", "todos", "completo", "all", "menu"}:
-        if include_admin:
-            return str(help_text)
-        admin_heading = "[CB] ✦ 6. ADMINISTRACIÓN Y ESTADO ✦"
-        return str(help_text).split(admin_heading, 1)[0].rstrip()
+        return str(help_text)
     index = ALIASES.get(key)
-    if index is None or (index == 5 and not include_admin):
-        return "[CB] ✦ STELLA · GUÍA DE COMANDOS ✦\n[C] No hay una categoría disponible con ese nombre."
+    if index is None:
+        return "[CB] ✦ STELLA · GUÍA DE COMANDOS ✦\\n[C] Categorías: ia, social, juegos, musica, multimedia, memoria."
     p = "!"
     for line in str(help_text).splitlines():
         if line.startswith("[C] Prefijos aceptados: "):
