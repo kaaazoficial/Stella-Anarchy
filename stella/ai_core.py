@@ -1797,10 +1797,15 @@ class StellaAICore:
         max_output_tokens: int | None = None,
         difficulty: str = "standard",
         response_mode: str = "action",
+        provider_order: str | None = None,
     ) -> dict[str, str]:
         self._enforce_user_rate_limit(rate_key)
-        primary = self._primary_provider_config()
-        fallback = self._fallback_provider_config()
+        if str(provider_order or "").casefold() == "gemini_first":
+            primary = self._gemini_provider_config()
+            fallback = self._groq_provider_config()
+        else:
+            primary = self._primary_provider_config()
+            fallback = self._fallback_provider_config()
         tier = str(difficulty or "standard").upper()
         prefixes = {"Google Gemini": "GEMINI", "Groq": "GROQ"}
         for config in (primary, fallback):
@@ -2394,6 +2399,7 @@ class StellaAICore:
             max_output_tokens=180,
             difficulty="simple",
             response_mode="answer",
+            provider_order="gemini_first",
         )
         if result.get("kind") != "answer":
             raise RuntimeError("El proveedor no devolvió una respuesta conversacional.")
