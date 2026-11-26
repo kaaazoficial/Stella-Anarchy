@@ -587,8 +587,6 @@ class StellaBot:
                     rate_key=uid,
                     kind=playful_kind,
                 )
-            except asyncio.CancelledError:
-                raise
             except Exception:
                 log.exception(
                     "AI playful response failed; using the emergency local fallback."
