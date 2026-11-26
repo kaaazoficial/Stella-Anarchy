@@ -43,43 +43,87 @@ _GLOBAL_CHAT_SILENCE_KEY = "chat_silence"
 
 _PLAYFUL_INSULT_PATTERNS = (
     re.compile(
-        r"\b(?:eres|estas|sos|pareces)\s+(?:(?:un|una)\s+)?"
+        r"\\b(?:eres|estas|sos|pareces|vaya|menuda|tremenda|que)\\s+"
+        r"(?:(?:un|una)\\s+)?"
         r"(?:idiota|imb[eé]cil|est[uú]pida?|tonta?|in[uú]til|pesada|"
-        r"tarada|boba|payasa|rid[ií]cula|basura|mierda)\b",
+        r"tarada|boba|payasa|rid[ií]cula|basura|mierda|pat[eé]tica|"
+        r"miserable|incompetente|desgraciada|pendeja|weona|hueona|"
+        r"wn|saco de wea|chiste)\\b",
         re.IGNORECASE,
     ),
     re.compile(
-        r"\b(?:c[aá]llate|no sirves para nada|no vales nada|eres un desastre)\b"
-        r"|\b(?:qu[eé]|vaya)\s+(?:idiota|imb[eé]cil|est[uú]pida?|tonta?|in[uú]til|"
-        r"pesada|tarada|boba|payasa|rid[ií]cula)\s+eres\b"
-        r"|\b(?:idiota|imb[eé]cil|est[uú]pida?|tonta?|in[uú]til|pesada|"
-        r"tarada|boba|payasa|rid[ií]cula)\s*[.!?]*$",
+        r"\\b(?:c[aá]llate|no sirves(?: para nada)?|no vales nada|"
+        r"eres un desastre|das pena|no das ni una|no tienes cerebro|"
+        r"no sabes ni pensar|hasta un bot de juguete|"
+        r"te falta cerebro|te falta neuronas)\\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\\b(?:que|vaya)\\s+(?:idiota|imb[eé]cil|est[uú]pida?|tonta?|"
+        r"in[uú]til|pesada|tarada|boba|payasa|rid[ií]cula|pat[eé]tica)\\s+eres\\b"
+        r"|\\b(?:idiota|imb[eé]cil|est[uú]pida?|tonta?|in[uú]til|pesada|"
+        r"tarada|boba|payasa|rid[ií]cula|pat[eé]tica|weona|hueona)\\s*[.!?]*$",
+        re.IGNORECASE,
+    ),
+)
+_PLAYFUL_HUMILIATION_PATTERNS = (
+    re.compile(
+        r"\\b(?:te (?:humill[eé]|gan[eé]|destru[ií]|dej[eé] en rid[ií]culo|"
+        r"cerr[eé] la boca|call[eé])|acabo de humillarte|"
+        r"quedaste en rid[ií]culo|te quedaste sin palabras)\\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\\b(?:eres un chiste|no das risa|tu (?:humor|chiste|respuesta) "
+        r"(?:es|da) (?:pena|asco)|hasta un bot sabe m[aá]s|"
+        r"ni para eso sirves|te falta calle)\\b",
         re.IGNORECASE,
     ),
 )
 _PLAYFUL_JOKE_PATTERNS = (
-    re.compile(r"\b(?:era broma|es broma|te estoy molestando|no te enojes|no te piques|jaj+a+|xd+|lmao)\b", re.IGNORECASE),
-    re.compile(r"\b(?:te gan[eé]|te humill[eé]|te destru[ií]|te dej[eé] en rid[ií]culo)\b", re.IGNORECASE),
+    re.compile(
+        r"\\b(?:era broma|es broma|te estoy molestando|no te enojes|"
+        r"no te piques|jaj+a+|xd+|lmao|roast|te estoy tomando el pelo)\\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\\b(?:te gan[eé]|te humill[eé]|te destru[ií]|"
+        r"te dej[eé] en rid[ií]culo|te cerr[eé] la boca|"
+        r"te call[eé]|te quedaste sin palabras)\\b",
+        re.IGNORECASE,
+    ),
 )
 _SERIOUS_DISTRESS_PATTERNS = (
-    re.compile(r"\b(?:estoy sufriendo|me quiero morir|quiero hacerme daño|me voy a suicidar|me siento fatal|estoy llorando|necesito ayuda)\b", re.IGNORECASE),
-    re.compile(r"\b(?:me est[aá]s haciendo sentir mal|eso me doli[oó]|no es gracioso|para de bromear)\b", re.IGNORECASE),
+    re.compile(
+        r"\\b(?:estoy sufriendo|me quiero morir|quiero hacerme daño|"
+        r"me voy a suicidar|me siento fatal|estoy llorando|necesito ayuda|"
+        r"me siento inc[oó]modo|me siento humillad[oa]|"
+        r"me est[aá]s haciendo sentir mal)\\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\\b(?:eso me doli[oó]|no es gracioso|para de bromear|"
+        r"deja de bromear|no sigas|para ya|habla en serio|"
+        r"me est[aá]s molestando|no quiero que me hables as[ií])\\b",
+        re.IGNORECASE,
+    ),
 )
 
 
 def classify_playful_stella_message(value: str) -> str | None:
-    """Classify light insults or teasing aimed at Stella, not general profanity."""
-    text = re.sub(r"\s+", " ", str(value or "")).strip()
+    """Detect direct banter aimed at Stella without mistaking real distress for a joke."""
+    text = re.sub(r"\\s+", " ", str(value or "")).strip()
     if not text:
         return None
     if any(pattern.search(text) for pattern in _SERIOUS_DISTRESS_PATTERNS):
         return None
     if any(pattern.search(text) for pattern in _PLAYFUL_INSULT_PATTERNS):
         return "insult"
+    if any(pattern.search(text) for pattern in _PLAYFUL_HUMILIATION_PATTERNS):
+        return "teasing"
     if any(pattern.search(text) for pattern in _PLAYFUL_JOKE_PATTERNS):
         return "teasing"
     return None
-
 
 
 _SILENCE_REQUESTS = frozenset({
@@ -433,12 +477,32 @@ class StellaBot:
 
         playful_tone = classify_playful_stella_message(request_text)
         if playful_tone:
+            if playful_tone == "insult":
+                tone_guidance = (
+                    "Te han insultado directamente. No respondas sumisa, ofendida ni con una "
+                    "frase corporativa: devuelve una pulla ingeniosa, segura y proporcional. "
+                    "Puedes insultar de vuelta con lenguaje coloquial o una palabrota leve/moderada "
+                    "si el tono de la otra persona lo justifica. Que suene espontáneo, con chispa "
+                    "y personalidad; no uses siempre la misma estructura ni te limites a decir "
+                    "'no me hables así'."
+                )
+            else:
+                tone_guidance = (
+                    "La persona está bromeando, presumiendo de haberte ganado o intentando "
+                    "dejarte en ridículo. Síguele el juego y remata con un contraataque creativo, "
+                    "un comentario mordaz o una broma que le devuelva la jugada. No respondas "
+                    "como si fuera una consulta seria."
+                )
             playful_prompt = (
-                "Responde como Stella a un mensaje dirigido a ti en tono de broma. "
-                "Devuelve un contraataque ingenioso, breve, confiado y divertido. "
-                "Puedes usar sarcasmo amistoso o una palabrota leve si encaja, "
-                "pero no ataques rasgos personales ni escales a amenazas o humillación. "
-                "No expliques que estás siguiendo instrucciones; responde como en una charla real. "
+                "CONTEXTO DE CONVERSACIÓN INFORMAL. " + tone_guidance + " "
+                "Adapta el nivel de picardía a lo que realmente dijo la persona y al tono que "
+                "viene usando. Puedes usar jerga natural en español si encaja, sin forzarla. "
+                "Varía tus respuestas: no repitas remates, no des explicaciones sobre tus "
+                "instrucciones y no cierres siempre con una pregunta. Ataca la ocurrencia o la "
+                "actitud, nunca la identidad, apariencia, origen, discapacidad, salud, trauma "
+                "o vulnerabilidades personales. No amenaces, no uses insultos discriminatorios "
+                "y no conviertas una broma en una pelea seria. Si el mensaje expresa dolor real, "
+                "pide que pares o muestra angustia, abandona el roast y responde con empatía. "
                 "Mensaje recibido: " + request_text
             )
             await self._ai_assist(room_id, uid, name, playful_prompt, message)
