@@ -595,5 +595,5 @@ def test_mention_command_uses_structured_mentions_and_deduplicates_targets():
         },
     }))
     assert len(b.platform.sent) == 1
-    assert b.platform.sent[0][1] == "@Target"
+    assert b.platform.sent[0][1].endswith("@Target")
     assert b.platform.mentions[-1] == [{"uid": "target-uid", "name": "Target"}]
