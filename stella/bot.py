@@ -2312,7 +2312,7 @@ class StellaBot:
                 deleted = await ai_memory.clear(room_id, uid) if enabled and ai_memory is not None else False
                 await self._reply(room_id, "Contexto local eliminado." + (" También borré los turnos persistentes; la memoria sigue activada." if deleted else " No pude confirmar el borrado persistente."), message)
             else:
-                enabled = self.store.get_setting(room_id, ai_key, "0") == "1"
+                enabled = await ai_memory.is_enabled(room_id, uid) if ai_memory is not None else False
                 status = ai_memory.status if ai_memory is not None else "no inicializada"
                 await self._reply(room_id, f"Memoria de conversación: {'activada' if enabled else 'desactivada'}; {status}. Usa !memoria conversacion activar|desactivar|olvidar.", message)
             return
