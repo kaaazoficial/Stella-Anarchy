@@ -1065,3 +1065,76 @@ def test_insult_reply_to_stella_uses_ai_even_without_cached_id():
     assert len(ai_calls) == 1
     assert ai_calls[0][5] == "insult"
     assert b.platform.sent == []
+
+
+def test_ai_generated_playful_reply_is_sent_and_saved_to_short_term_history():
+    b = bot()
+
+    class FakeAI:
+        def __init__(self, answer=None, error=None):
+            self.answer = answer
+            self.error = error
+            self.saved = []
+            self.calls = []
+
+        def _history(self, key):
+            return []
+
+        def _append_history(self, key, role, content):
+            self.saved.append((key, role, content))
+
+        async def generate_playful_response(self, prompt, **kwargs):
+            self.calls.append((prompt, kwargs))
+            if self.error:
+                raise self.error
+            return self.answer
+
+    fake = FakeAI(answer="Tu intento de insulto fue bastante triste, imbécil.")
+    b.ai_core = fake
+    b.ai_memory = None
+    b.services = SimpleNamespace(ai_request=object())
+
+    asyncio.run(b._ai_assist(
+        "r", "u", "Persona", "Stella, eres una idiota",
+        {"messageId": "original"}, "insult",
+    ))
+
+    assert len(b.platform.sent) == 1
+    assert b.platform.sent[0][1] == "Tu intento de insulto fue bastante triste, imbécil."
+    assert fake.calls[0][1]["kind"] == "insult"
+    assert fake.calls[0][1]["rate_key"] == "u"
+    assert fake.saved == []
+
+
+def test_local_comeback_is_used_only_when_ai_generation_fails():
+    from stella.bot import _STELLA_INSULT_COMEBACKS
+
+    b = bot()
+
+    class FailedAI:
+        def __init__(self):
+            self.saved = []
+
+        def _history(self, key):
+            return []
+
+        def _append_history(self, key, role, content):
+            self.saved.append((role, content))
+
+        async def generate_playful_response(self, *args, **kwargs):
+            raise RuntimeError("Gemini y Groq no están disponibles")
+
+    fake = FailedAI()
+    b.ai_core = fake
+    b.ai_memory = None
+    b.services = SimpleNamespace(ai_request=object())
+
+    asyncio.run(b._ai_assist(
+        "r", "u", "Persona", "Stella, putita",
+        {"messageId": "original"}, "insult",
+    ))
+
+    assert len(b.platform.sent) == 1
+    assert b.platform.sent[0][1] in _STELLA_INSULT_COMEBACKS
+    assert fake.saved[0] == ("user", "Stella, putita")
+    assert fake.saved[1][0] == "assistant"
