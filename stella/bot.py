@@ -39,7 +39,6 @@ log = logging.getLogger("stella.bot")
 MAX_TRACKED_USERS = 5000
 ANTISPAM_WINDOW_SECONDS = 8
 ANTISPAM_WARNING_COOLDOWN = 60
-_GLOBAL_SETTINGS_ROOM_ID = "__stella_global__"
 _GLOBAL_CHAT_SILENCE_KEY = "chat_silence"
 
 _PLAYFUL_INSULT_PATTERNS = (
@@ -478,9 +477,6 @@ class StellaBot:
             return
         try:
             await self.shared_state.set_setting(_GLOBAL_CHAT_SILENCE_KEY, "1")
-            self.store.set_setting(
-                _GLOBAL_SETTINGS_ROOM_ID, _GLOBAL_CHAT_SILENCE_KEY, "1"
-            )
         except Exception:
             log.exception("Unable to persist global chat silence in shared state.")
             await self._reply(
@@ -508,9 +504,6 @@ class StellaBot:
             return
         try:
             await self.shared_state.set_setting(_GLOBAL_CHAT_SILENCE_KEY, "0")
-            self.store.set_setting(
-                _GLOBAL_SETTINGS_ROOM_ID, _GLOBAL_CHAT_SILENCE_KEY, "0"
-            )
         except Exception:
             log.exception("Unable to clear global chat silence in shared state.")
             await self._reply(
