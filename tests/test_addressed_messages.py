@@ -466,7 +466,7 @@ def test_playful_insults_are_routed_to_ai_generation(content):
     }))
 
     assert len(calls) == 1
-    assert calls[0][3] == content
+    assert calls[0][3] == content.removeprefix("Stella, ")
     assert calls[0][5] == "insult"
     assert b.platform.sent == []
 
@@ -491,7 +491,7 @@ def test_teasing_is_routed_to_ai_generated_playful_reply(content):
     }))
 
     assert len(calls) == 1
-    assert calls[0][3] == content
+    assert calls[0][3] == content.removeprefix("Stella, ")
     assert calls[0][5] == "teasing"
     assert b.platform.sent == []
 
@@ -1100,7 +1100,7 @@ def test_ai_generated_playful_reply_is_sent_and_saved_to_short_term_history():
     ))
 
     assert len(b.platform.sent) == 1
-    assert b.platform.sent[0][1] == "Tu intento de insulto fue bastante triste, imbécil."
+    assert b.platform.sent[0][1].removeprefix("[C] ") == "Tu intento de insulto fue bastante triste, imbécil."
     assert fake.calls[0][1]["kind"] == "insult"
     assert fake.calls[0][1]["rate_key"] == "u"
     assert fake.saved == []
@@ -1135,6 +1135,6 @@ def test_local_comeback_is_used_only_when_ai_generation_fails():
     ))
 
     assert len(b.platform.sent) == 1
-    assert b.platform.sent[0][1] in _STELLA_INSULT_COMEBACKS
+    assert b.platform.sent[0][1].removeprefix("[C] ") in _STELLA_INSULT_COMEBACKS
     assert fake.saved[0] == ("user", "Stella, putita")
     assert fake.saved[1][0] == "assistant"
