@@ -1487,7 +1487,8 @@ class StellaBot:
         language = language.strip()
         content = content.strip()
         if not separator or not language or not content:
-            await self._reply(room_id, f"Uso: {self.settings.command_prefix}traducir <idioma> | <texto>", message)
+            prefix = getattr(getattr(self, "settings", None), "command_prefix", "!")
+            await self._reply(room_id, f"Uso: {prefix}traducir <idioma> | <texto>", message)
             return
         if len(content) > 2500:
             await self._reply(room_id, "El texto para traducir no puede superar 2500 caracteres.", message)
@@ -1949,9 +1950,10 @@ class StellaBot:
         target = self._mentioned_user(message)
         amount_text = str(args or "").strip().split()[-1] if str(args or "").strip() else ""
         if not target or not re.fullmatch(r"\d+", amount_text):
+            prefix = getattr(getattr(self, "settings", None), "command_prefix", "!")
             await self._reply(
                 room_id,
-                f"Uso: {self.settings.command_prefix}pagar @usuario <cantidad positiva>. "
+                f"Uso: {prefix}pagar @usuario <cantidad positiva>. "
                 "También puedes responder al mensaje de la persona e indicar solo la cantidad.",
                 message,
             )
