@@ -201,6 +201,7 @@ class AnarchyClient:
         *,
         reply_id: str | None = None,
         buttons: list[dict[str, str]] | None = None,
+        mentions: list[dict[str, str]] | None = None,
         return_message_id: bool = False,
     ) -> bool | str:
         """Send a paced Anarchy message; optionally return its ID for interactive buttons."""
@@ -208,6 +209,23 @@ class AnarchyClient:
         body: dict[str, Any] = {"content": normalize_message_text(content)[:1900]}
         if reply_id:
             body["replyMessageId"] = reply_id
+        normalized_mentions: list[dict[str, str]] = []
+        if mentions:
+            seen_mentions: set[str] = set()
+            for mention in mentions[:5]:
+                if not isinstance(mention, dict):
+                    continue
+                mention_uid = str(mention.get("uid") or "").strip()
+                if not mention_uid or len(mention_uid) > 160 or mention_uid in seen_mentions:
+                    continue
+                mention_name = re.sub(
+                    r"[\\x00-\\x1f\\x7f@<>]", "",
+                    " ".join(str(mention.get("name") or "usuario").split()),
+                )[:48] or "usuario"
+                seen_mentions.add(mention_uid)
+                normalized_mentions.append({"uid": mention_uid, "name": mention_name})
+            if normalized_mentions:
+                body["mentions"] = normalized_mentions
         if buttons is not None:
             if len(buttons) > 5 or any(
                 not isinstance(button, dict)
