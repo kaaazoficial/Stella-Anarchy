@@ -10,6 +10,8 @@ from typing import Any
 
 import httpx
 
+from stella.config import get_gemini_api_key
+
 log = logging.getLogger("stella.vector_memory")
 
 
@@ -20,7 +22,7 @@ class VectorMemory:
         self.url = os.getenv("QDRANT_URL", "").strip().rstrip("/")
         self.api_key = os.getenv("QDRANT_API_KEY", "").strip()
         self.collection = os.getenv("QDRANT_COLLECTION", "stella_messages").strip()
-        self.gemini_key = os.getenv("GEMINI_API_KEY", "").strip()
+        self.gemini_key = get_gemini_api_key()
         self.model = os.getenv("GEMINI_EMBEDDING_MODEL", "gemini-embedding-2").strip()
         self.dimensions = int(os.getenv("GEMINI_EMBEDDING_DIMENSIONS", "768"))
         self.retention_days = max(1, min(90, int(os.getenv("MEMORY_RETENTION_DAYS", "30"))))
@@ -46,7 +48,7 @@ class VectorMemory:
             return "sin configurar: faltan credenciales de Qdrant o Gemini"
         if self.embedding_blocked_status is not None:
             return (
-                f"pausada: Gemini rechazó GEMINI_API_KEY (HTTP "
+                f"pausada: Google rechazó la clave configurada para Gemini (HTTP "
                 f"{self.embedding_blocked_status}); revisa la clave y sus restricciones"
             )
         remaining = self.embedding_retry_after - time.monotonic()
