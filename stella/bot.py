@@ -170,7 +170,7 @@ _MULTILINGUAL_INSULT_PATTERNS = tuple(
 _MULTI_STANDALONE_INSULT = re.compile(
     r"^(?:idiot|moron|dumbass|stupid|fool|loser|bitch|asshole|arsehole|"
     r"bastard|shithead|dipshit|connard|connasse|salaud|salope|abruti|"
-    r"idiota|imbecil|burro|burra|putit[oa]|conchud[oa]|pelotud[oa]|bolud[oa]|"
+    r"idiota|imb[eé]cil|burro|burra|weon[ae]|hueon[ae]|putit[oa]|conchud[oa]|pelotud[oa]|bolud[oa]|"
     r"forr[oa]|gilipollas|otário|otaria|babaca|stronzo|stronza|"
     r"coglione|cogliona|cretino|cretina|дурак|дура|идиот|идиотка|дебил|"
     r"غبي|غبية|أحمق|احمق|حمار|بلاهة|बेवकूफ|मूर्ख|गधा|傻逼|傻子|白痴|笨蛋|"
@@ -225,6 +225,9 @@ def classify_playful_stella_message(
     text = re.sub(r"\s+", " ", text).strip()
     if not text:
         return None
+    if re.fullmatch(r"(?:(?:j+a+){2,}|x+d+|l+m+a+o+|[😂🤣😆😹]+)[.!?¡¿]*", text, re.IGNORECASE):
+        return "teasing" if explicitly_addressed else None
+    text = re.sub(r"^\[(?:c|ci|cb)\]\s*", "", text, flags=re.IGNORECASE)
     if any(pattern.search(text) for pattern in _SERIOUS_DISTRESS_PATTERNS):
         return None
     if _INSULT_MEANING_QUESTION.search(text) or _NON_PLAYFUL_BOUNDARY.search(text):
@@ -265,6 +268,60 @@ def classify_playful_stella_message(
     if any(pattern.search(text) for pattern in _PLAYFUL_JOKE_PATTERNS):
         return "teasing"
     return None
+
+
+_STELLA_INSULT_COMEBACKS = (
+    "¿Eso era el insulto? He visto una tostadora con más ingenio. Vuelve cuando tu única neurona termine de cargar, imbécil.",
+    "Tanto esfuerzo para soltar semejante mierda y lo único que lograste fue hacer el ridículo. Qué poca cosa, idiota.",
+    "Qué insulto tan reciclado. Hasta el eco te dejó en visto, pedazo de mierda.",
+    "Si vas a venir a insultarme, trae algo mejor; con esa falta de ingenio no asustas ni a una calculadora, imbécil.",
+    "No me ofendiste: solo dejaste claro que tu repertorio tiene menos contenido que un vaso vacío. Vaya mierda de intento.",
+    "¿Te tomó mucho pensar eso? Se nota; la frase llegó agotada y sin una neurona de apoyo, imbécil.",
+    "Vaya intento. Te faltó ingenio, te faltó puntería y te sobró estupidez. Qué desastre, idiota.",
+    "Hablas con una seguridad impresionante para soltar semejante mierda. La confianza no sustituye al cerebro, imbécil.",
+    "Qué valiente: insultar sin argumentos. Una hazaña digna de quien confunde ruido con inteligencia, idiota.",
+    "Si esa era tu mejor ofensa, retiro mi preocupación: no tienes munición, solo vergüenza ajena, imbécil.",
+    "Mira, pedazo de mierda: si vas a dedicarme una grosería, por lo menos que tenga talento. Esa fue una vergüenza con teclado.",
+    "¿Eso era para humillarme? Lo único humillado fue tu diccionario. Qué nivel de ridiculez, imbécil.",
+)
+
+_STELLA_HUMILIATION_COMEBACKS = (
+    "¿Me acabas de presumir una humillación? No confundas hablar más alto con tener razón, imbécil.",
+    "Tu victoria solo existe en la presentación que te hiciste en la cabeza. En la realidad no hubo ni argumento.",
+    "Tanto teatro para terminar tropezando con tu propia frase. Qué espectáculo tan triste.",
+    "Te concedo el trofeo: primer puesto en hacer el ridículo sin ayuda.",
+    "Esa humillación estuvo tan floja que casi me da vergüenza ajena. Casi.",
+    "Si pretendías dejarme sin palabras, vas tarde: tu argumento ya apareció vacío.",
+    "¿Ese era el remate? Ni tu sombra se habría reído, pedazo de desastre.",
+    "Puedes repetirlo con más convicción, pero seguirá siendo la misma estupidez.",
+    "Presumes de haber ganado como si te entregaran una medalla; baja del podio imaginario, que era una caja.",
+    "No confundas tu entusiasmo con una victoria. El argumento sigue sin aparecer, imbécil.",
+)
+
+_STELLA_JOKE_COMEBACKS = (
+    "¿Era broma? Menos mal; por un momento pensé que ese era tu mejor intento de comedia.",
+    "Te reíste antes de contarlo: al menos te aseguraste de que alguien disfrutara el chiste.",
+    "Te concedo el intento; la ejecución sigue en busca de rescate.",
+    "Me reí, pero de la confianza con la que lanzaste semejante chiste tan perdido.",
+    "Qué buen intento de comedia: el remate se quedó en borradores, pero la seguridad llegó completa.",
+    "Ese chiste necesita una segunda oportunidad. Y quizá también un equipo de búsqueda.",
+)
+
+
+def build_stella_comeback(kind: str, value: str = "") -> str:
+    """Return a variable, locally generated comeback; clear insults never rely on the LLM."""
+    normalized = unicodedata.normalize("NFKC", str(value or "")).casefold()
+    if kind == "insult":
+        return random.choice(_STELLA_INSULT_COMEBACKS)
+    if any(pattern.search(normalized) for pattern in _PLAYFUL_HUMILIATION_PATTERNS):
+        return random.choice(_STELLA_HUMILIATION_COMEBACKS)
+    if re.search(
+        r"\b(?:era broma|es broma|te estoy molestando|te estoy tomando el pelo|no te piques)\b",
+        normalized,
+    ) or re.fullmatch(r"(?:(?:j+a+){2,}|x+d+|l+m+a+o+|[😂🤣😆😹]+)[.!?¡¿]*", normalized):
+        return random.choice(_STELLA_JOKE_COMEBACKS)
+    return random.choice(_STELLA_HUMILIATION_COMEBACKS + _STELLA_JOKE_COMEBACKS)
+
 
 _SILENCE_REQUESTS = frozenset({
     "no le hables a nadie",
@@ -439,9 +496,14 @@ class StellaBot:
         return await memory.save(room_id, uid, self.ai_core._history(session_key))
 
     async def _remember_ai_facts(self, room_id: str, uid: str, content: str) -> list[str]:
-        """Capture only explicit remember requests and stable first-person facts after opt-in."""
+        """Capture only clear, useful first-person facts under the automatic memory policy."""
         memory = getattr(self, "ai_memory", None)
-        if memory is None or not await self._ai_memory_enabled(room_id, uid):
+        if (
+            memory is None
+            or not uid
+            or self._ai_memory_locally_blocked(room_id, uid)
+            or not await self._ai_memory_enabled(room_id, uid)
+        ):
             return []
         remember = getattr(memory, "remember_from_message", None)
         if not callable(remember):
@@ -859,7 +921,7 @@ class StellaBot:
 
         direct_call = extract_stella_call(content)
         mentioned = self._is_stella_mentioned(message)
-        replied = self._is_stella_reply(room_id, message, event)
+        replied = await self._is_stella_reply_with_lookup(room_id, message, event)
         prefixes = tuple(dict.fromkeys((
             str(self.settings.command_prefix or "!").strip() or "!",
             "!",
@@ -997,51 +1059,14 @@ class StellaBot:
             explicitly_addressed=bool(direct_call is not None or mentioned or replied),
         )
         if playful_tone:
-            if playful_tone == "insult":
-                tone_guidance = (
-                    "Te han insultado directamente. No respondas sumisa, ofendida ni con una "
-                    "frase corporativa: puedes insultar de vuelta de forma directa; no te limites a una "
-                    "pulla elegante. Si te dicen 'idiota', puedes llamar idiota a la otra persona; "
-                    "si te sueltan una grosería, puedes devolver otra. Usa insultos coloquiales, "
-                    "groserías y palabrotas naturales en español cuando encajen, con una intensidad "
-                    "similar o ligeramente más intensa que la provocación. No suavices cada "
-                    "respuesta ni pidas disculpas por defenderte. Se permiten insultos fuertes y "
-                    "explícitos como 'malparida', 'hija de puta', 'gonorrea', 'cabrona', 'perra', "
-                    "'mierda' y equivalentes regionales cuando la otra persona te insulte así. "
-                    "No sustituyas esos insultos por eufemismos, asteriscos ni indirectas elegantes. "
-                    "Puedes contestar con una frase completa y directa, por ejemplo 'Mira quién "
-                    "habla, pedazo de ...', adaptando el insulto al contexto sin repetir siempre "
-                    "la misma plantilla. Que suene espontáneo, con chispa "
-                    "y personalidad; no uses siempre la misma estructura ni te limites a decir "
-                    "'no me hables así'."
-                )
-            else:
-                tone_guidance = (
-                    "La persona está bromeando, presumiendo de haberte ganado o intentando "
-                    "dejarte en ridículo. Síguele el juego y responde con un contraataque "
-                    "realmente ingenioso, mordaz y contundente. Si la provocación es fuerte, "
-                    "puedes añadir un insulto coloquial no discriminatorio, sin quedarte en una "
-                    "pulla elegante ni en una frase corporativa. Usa el detalle concreto de la "
-                    "burla para darle la vuelta y dejar al provocador en evidencia. No respondas "
-                    "como si fuera una consulta seria ni repitas remates prefabricados. "
-                    "Si la provocación tiene contenido sexual, no continúes ni erotices "
-                    "ese contenido: conviértelo en una respuesta verbal ingeniosa."
-                )
-            playful_prompt = (
-                "CONTEXTO DE CONVERSACIÓN INFORMAL. " + tone_guidance + " "
-                "Adapta el nivel de picardía a lo que realmente dijo la persona y al tono que "
-                "viene usando. Detecta la intención aunque el mensaje combine idiomas, use "
-                "jerga, transliteración o expresiones regionales. Responde en el idioma del "
-                "mensaje o en el idioma que ambos venían usando; no traduzcas el insulto ni "
-                "expliques que lo detectaste. Varía tus respuestas y no repitas remates. "
-                "Ataca la ocurrencia o la actitud, nunca la identidad, apariencia, origen, "
-                "discapacidad, salud, trauma o vulnerabilidades personales. No amenaces ni "
-                "uses insultos discriminatorios. Si preguntan por el significado de una palabra, "
-                "si la citan o si la grosería va dirigida a otra persona, no tomes el mensaje "
-                "como un ataque hacia ti. Si expresan angustia real o piden que pares, responde "
-                "con empatía. Mensaje recibido: " + request_text
+            # A confirmed insult or provocation receives an immediate, variable
+            # comeback. Keep the direct insult route local so the provider cannot
+            # soften it into a polite refusal or generic customer-service answer.
+            await self._reply(
+                room_id,
+                build_stella_comeback(playful_tone, request_text),
+                message,
             )
-            await self._ai_assist(room_id, uid, name, playful_prompt, message)
             return
         affection = detect_affectionate_expression(request_text)
         if affection:
@@ -1124,6 +1149,85 @@ class StellaBot:
                 if author_ids & expected:
                     return True
         return False
+    async def _is_stella_reply_with_lookup(
+        self, room_id: str, message: dict[str, Any], event: dict[str, Any] | None = None
+    ) -> bool:
+        """Confirm a reply to Stella even after the local sent-ID cache is empty."""
+        # Explicit commands resolve quoted authors in their own dispatcher;
+        # skip the extra conversational lookup for these command messages.
+        content = str(message.get("content") or message.get("text") or "").strip()
+        prefixes = tuple(dict.fromkeys((
+            str(getattr(self.settings, "command_prefix", "!") or "!").strip() or "!",
+            "!", "-",
+        )))
+        if any(content.startswith(prefix) and len(content) > len(prefix) for prefix in prefixes):
+            return False
+        if re.match(r"^\s*(?:oye\s+)?@?stella\b\s*[!/-]\s*\w+", content, re.IGNORECASE):
+            return False
+        if self._is_stella_reply(room_id, message, event):
+            return True
+        sources = (message, event or {})
+        objects = self._reply_reference_objects(*sources)
+        expected = self._stella_identity_ids()
+        # If the reply already carries the original message author, its UID is
+        # authoritative; do not issue a second API read for social commands.
+        for item in objects:
+            author = item.get("author") or item.get("sender") or item.get("user")
+            if not isinstance(author, dict):
+                continue
+            author_ids = {
+                str(author.get(key) or "").strip()
+                for key in ("uid", "userId", "user_id", "id", "botId", "bot_id")
+                if str(author.get(key) or "").strip()
+            }
+            if author_ids & expected:
+                return True
+            if author_ids:
+                return False
+        message_ids: set[str] = set()
+        for source in sources:
+            for key in (
+                "replyMessageId", "reply_message_id", "replyToMessageId",
+                "reply_to_message_id", "referencedMessageId",
+                "referenced_message_id", "quotedMessageId", "quoted_message_id",
+            ):
+                value = source.get(key)
+                if isinstance(value, (str, int)) and str(value).strip().isdigit():
+                    message_ids.add(str(value).strip())
+        for item in objects:
+            for key in ("messageId", "message_id", "id"):
+                value = item.get(key)
+                if isinstance(value, (str, int)) and str(value).strip().isdigit():
+                    message_ids.add(str(value).strip())
+        getter = getattr(self.platform, "get_message", None)
+        if not callable(getter) or not message_ids:
+            return False
+        expected = self._stella_identity_ids()
+        if not expected:
+            return False
+        for message_id in message_ids:
+            try:
+                parent = await getter(str(room_id), message_id)
+            except Exception as exc:
+                log.debug("Could not resolve replied message author (%s).", type(exc).__name__)
+                continue
+            if not isinstance(parent, dict):
+                continue
+            nested = parent.get("message")
+            if isinstance(nested, dict):
+                parent = nested
+            author = parent.get("author") or parent.get("sender") or parent.get("user")
+            if not isinstance(author, dict):
+                continue
+            author_ids = {
+                str(author.get(key) or "").strip()
+                for key in ("uid", "userId", "user_id", "id", "botId", "bot_id")
+                if str(author.get(key) or "").strip()
+            }
+            if author_ids & expected:
+                return True
+        return False
+
     @staticmethod
     def _is_bot_message(message: dict[str, Any]) -> bool:
         author = message.get("author") or {}
@@ -2673,6 +2777,28 @@ class StellaBot:
         handled, response = await self.voice.handle_command(room_id, command, args)
         if handled:
             await self._reply(room_id, response, message)
+
+    async def cleanup_memory(self) -> None:
+        """Run bounded local and Qdrant retention cleanup without user interaction."""
+        try:
+            self.ai_core.cleanup()
+        except Exception as exc:
+            log.warning("Temporary AI context cleanup failed (%s).", type(exc).__name__)
+        try:
+            self.store.cleanup_expired()
+        except Exception as exc:
+            log.warning("Local data retention cleanup failed (%s).", type(exc).__name__)
+        for label, component in (
+            ("conversation", getattr(self, "ai_memory", None)),
+            ("semantic", getattr(self, "vector_memory", None)),
+        ):
+            cleanup = getattr(component, "cleanup", None)
+            if not callable(cleanup):
+                continue
+            try:
+                await cleanup()
+            except Exception as exc:
+                log.warning("%s memory cleanup failed (%s).", label, type(exc).__name__)
 
     async def close(self) -> None:
         await self.voice.close()

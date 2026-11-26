@@ -10,7 +10,11 @@ from urllib.parse import quote
 import httpx
 
 from stella.config import get_gemini_api_key
-from stella.persona import GENDER_NEUTRAL_GUIDANCE, STELLA_CHARACTER_GUIDANCE
+from stella.persona import (
+    GENDER_NEUTRAL_GUIDANCE,
+    STELLA_CHARACTER_GUIDANCE,
+    STELLA_RESPONSE_QUALITY_GUIDANCE,
+)
 
 log = logging.getLogger("stella.ai")
 
@@ -29,6 +33,8 @@ STELLA_SYSTEM = (
     + GENDER_NEUTRAL_GUIDANCE
     + "\n\n"
     + STELLA_CHARACTER_GUIDANCE
+    + "\n\n"
+    + STELLA_RESPONSE_QUALITY_GUIDANCE
 )
 
 
@@ -85,7 +91,7 @@ class StellaAI:
             f"IA principal: {primary}. Gemini: {gemini_state} "
             f"({self.gemini_model}). Groq: {groq_state} ({self.groq_model}). "
             "La memoria persistente de conversación es opcional y se gestiona aparte en Qdrant; "
-            "solo se guarda cuando cada persona la activa explícitamente para esa sala."
+            "se guarda automáticamente por persona y sala, salvo que la persona la desactive o solicite que olvides sus datos."
         )
 
     @staticmethod

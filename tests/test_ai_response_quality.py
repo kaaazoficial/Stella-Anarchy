@@ -201,3 +201,24 @@ def test_stella_character_guidance_is_shared_by_all_conversation_prompts():
 
     for intent in ("conversation", "action", "research", "multi_action"):
         assert STELLA_CHARACTER_GUIDANCE in build_ai_instructions(frozenset(), intent)
+
+
+
+def test_every_ai_mode_has_an_explicit_final_gender_neutrality_review():
+    for mode in ("conversation", "action", "research", "multi_action"):
+        prompt = build_ai_instructions(frozenset(), mode)
+        assert "REVISIÓN FINAL OBLIGATORIA" in prompt
+        assert "no atribuyas" in prompt.casefold()
+        assert "género" in prompt.casefold()
+        assert "reescribe la frase de modo neutral" in prompt.casefold()
+
+
+def test_shared_response_quality_guidance_is_used_by_all_ai_providers():
+    from stella.ai import STELLA_SYSTEM
+    from stella.ai_core import STELLA_IDENTITY_GUIDANCE
+    from stella.persona import STELLA_RESPONSE_QUALITY_GUIDANCE
+
+    assert STELLA_RESPONSE_QUALITY_GUIDANCE in STELLA_SYSTEM
+    assert STELLA_RESPONSE_QUALITY_GUIDANCE in STELLA_IDENTITY_GUIDANCE
+    assert "sin convertir cada turno en un cuestionario" in STELLA_RESPONSE_QUALITY_GUIDANCE
+    assert "ninguna palabra, pronombre, adjetivo" in STELLA_RESPONSE_QUALITY_GUIDANCE

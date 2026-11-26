@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import hmac
 import json
@@ -75,15 +76,39 @@ def log_bot_identity(identity: dict[str, Any] | None) -> None:
     )
 
 
+async def _memory_maintenance_loop() -> None:
+    """Run retention cleanup independently of incoming chat traffic."""
+    interval = max(60, min(3600, int(os.getenv("MEMORY_MAINTENANCE_INTERVAL_SECONDS", "900"))))
+    while True:
+        try:
+            await bot.cleanup_memory()
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            log.warning("Automatic memory maintenance failed (%s).", type(exc).__name__)
+        await asyncio.sleep(interval)
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     store.initialize()
     store.cleanup_expired()
-    # Resolve the bot ID before it joins any room; no chat command is required.
-    identity = await platform.get_bot_identity()
-    log_bot_identity(identity)
-    yield
-    await bot.close()
+    maintenance_task = asyncio.create_task(
+        _memory_maintenance_loop(),
+        name="stella-memory-maintenance",
+    )
+    try:
+        # Resolve the bot ID before it joins any room; no chat command is required.
+        identity = await platform.get_bot_identity()
+        log_bot_identity(identity)
+        yield
+    finally:
+        maintenance_task.cancel()
+        try:
+            await maintenance_task
+        except asyncio.CancelledError:
+            pass
+        await bot.close()
 
 
 docs_enabled = os.getenv("API_DOCS_ENABLED", "").strip().casefold() in {"1", "true", "yes", "on"}

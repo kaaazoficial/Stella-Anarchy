@@ -451,7 +451,7 @@ def test_unaddressed_messages_are_not_read_aloud_even_when_voice_reading_is_enab
     "Stella, cállate payasa",
     "Stella, no sirves para nada XD",
 ])
-def test_playful_insults_are_routed_to_ai_for_a_comeback(content):
+def test_playful_insults_receive_local_comebacks_without_ai(content):
     b = bot()
     calls = []
 
@@ -465,11 +465,10 @@ def test_playful_insults_are_routed_to_ai_for_a_comeback(content):
         "message": {"content": content, "author": {"uid": "u", "nickname": "Persona"}},
     }))
 
-    assert len(calls) == 1
-    expected_message = content.removeprefix("Stella, ").strip()
-    assert "CONTEXTO DE CONVERSACIÓN INFORMAL" in calls[0][3]
-    assert calls[0][3].endswith("Mensaje recibido: " + expected_message)
-    assert b.platform.sent == []
+    assert calls == []
+    assert len(b.platform.sent) == 1
+    reply = b.platform.sent[0][1].casefold()
+    assert any(word in reply for word in ("imbécil", "mierda", "estupidez", "idiotez"))
 
 
 @pytest.mark.parametrize("content", [
@@ -477,7 +476,7 @@ def test_playful_insults_are_routed_to_ai_for_a_comeback(content):
     "Stella, te gané XD",
     "Stella, no te piques, te estoy molestando",
 ])
-def test_teasing_is_routed_to_ai_for_playful_banter(content):
+def test_teasing_receives_local_playful_comeback_without_ai(content):
     b = bot()
     calls = []
 
@@ -491,10 +490,9 @@ def test_teasing_is_routed_to_ai_for_playful_banter(content):
         "message": {"content": content, "author": {"uid": "u", "nickname": "Persona"}},
     }))
 
-    assert len(calls) == 1
-    expected_message = content.removeprefix("Stella, ").strip()
-    assert "CONTEXTO DE CONVERSACIÓN INFORMAL" in calls[0][3]
-    assert calls[0][3].endswith("Mensaje recibido: " + expected_message)
+    assert calls == []
+    assert len(b.platform.sent) == 1
+    assert b.platform.sent[0][1].strip()
 
 
 @pytest.mark.parametrize("content", [
@@ -968,9 +966,7 @@ def test_explicit_help_command_still_works_when_replying_to_stella():
     assert calls[0][3] == "ayuda"
 
 
-def test_single_word_insult_in_reply_to_stella_routes_to_comeback_prompt(monkeypatch):
-    import stella.bot as bot_module
-
+def test_single_word_insult_in_reply_to_stella_gets_local_comeback(monkeypatch):
     b = bot()
     calls = []
 
@@ -978,8 +974,6 @@ def test_single_word_insult_in_reply_to_stella_routes_to_comeback_prompt(monkeyp
         calls.append(args)
 
     b._ai_assist = capture_ai
-    monkeypatch.setattr(bot_module, "interpret_natural_request", lambda _value: None)
-
     asyncio.run(b.handle_event({
         "type": "message",
         "threadId": "r",
@@ -990,7 +984,87 @@ def test_single_word_insult_in_reply_to_stella_routes_to_comeback_prompt(monkeyp
         },
     }))
 
-    assert len(calls) == 1
-    assert "insultos" in calls[0][3].casefold() or "insultada" in calls[0][3].casefold()
-    assert "Mensaje recibido: putita" in calls[0][3]
-    assert b.platform.sent == []
+    assert calls == []
+    assert len(b.platform.sent) == 1
+    assert any(
+        word in b.platform.sent[0][1].casefold()
+        for word in ("imbécil", "mierda", "estupidez", "idiotez")
+    )
+
+
+
+def test_reply_to_stella_can_be_confirmed_after_local_sent_id_cache_is_empty():
+    b = bot()
+    b.platform.ids.clear()
+    b.platform.read_messages["123456"] = {
+        "messageId": "123456",
+        "author": {"uid": "stella-account"},
+    }
+    assert asyncio.run(b._is_stella_reply_with_lookup(
+        "r", {"replyMessageId": "123456"}
+    )) is True
+    assert b.platform.read_requests == [("r", "123456")]
+
+
+def test_reply_to_another_member_is_not_confirmed_as_stella():
+    b = bot()
+    b.platform.ids.clear()
+    b.platform.read_messages["123457"] = {
+        "messageId": "123457",
+        "author": {"uid": "other-member"},
+    }
+    assert asyncio.run(b._is_stella_reply_with_lookup(
+        "r", {"replyMessageId": "123457"}
+    )) is False
+
+
+def test_direct_insult_gets_local_comeback_without_calling_ai():
+    b = bot()
+    ai_calls = []
+
+    async def capture_ai(*args):
+        ai_calls.append(args)
+
+    b._ai_assist = capture_ai
+    asyncio.run(b.handle_event({
+        "type": "message",
+        "threadId": "r",
+        "message": {
+            "content": "Stella, putita",
+            "author": {"uid": "u", "nickname": "Persona"},
+        },
+    }))
+
+    assert len(b.platform.sent) == 1
+    response = b.platform.sent[0][1].casefold()
+    assert any(word in response for word in ("imbécil", "mierda", "estupidez", "idiotez"))
+    assert ai_calls == []
+
+
+def test_insult_reply_to_stella_gets_local_comeback_even_without_cached_id():
+    b = bot()
+    b.platform.ids.clear()
+    b.platform.read_messages["123458"] = {
+        "messageId": "123458",
+        "author": {"uid": "stella-account"},
+    }
+    ai_calls = []
+
+    async def capture_ai(*args):
+        ai_calls.append(args)
+
+    b._ai_assist = capture_ai
+    asyncio.run(b.handle_event({
+        "type": "message",
+        "threadId": "r",
+        "message": {
+            "content": "putita",
+            "replyMessageId": "123458",
+            "author": {"uid": "u", "nickname": "Persona"},
+        },
+    }))
+
+    assert len(b.platform.sent) == 1
+    response = b.platform.sent[0][1].casefold()
+    assert any(word in response for word in ("imbécil", "mierda", "estupidez", "idiotez"))
+    assert ai_calls == []
