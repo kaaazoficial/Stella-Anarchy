@@ -15,6 +15,7 @@ def _sections(p: str):
             f"▸ {p}ayuda [categoría] · {p}menu — Guía por secciones.",
             f"▸ {p}asistente <consulta> · {p}ia <consulta> — Conversación e instrucciones.",
             f"▸ {p}ia ayuda|preguntar <consulta>|estado|olvidar.",
+            f"▸ Memoria: {p}memoria conversacion activar|desactivar · {p}memoria guardar <dato> · recuerdos · borrar <ID>.",
             f"▸ {p}ia probar|guardian|diagnostico — Controles [ADMIN].",
             f"▸ {p}investigar <tema> — general, comparar, verificar, cronologia o informe.",
             f"▸ {p}analizartexto <modo> <texto> · {p}analizar <texto o enlaces> · {p}ortografia <texto>.",

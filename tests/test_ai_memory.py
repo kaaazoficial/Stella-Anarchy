@@ -157,3 +157,76 @@ async def test_expired_memory_is_not_restored_and_is_removed(memory):
     assert await store.is_enabled("room-a", "user-1") is False
     assert await store.load("room-a", "user-1") == []
     assert client.point is None
+
+
+
+def test_explicit_fact_capture_and_stable_personal_context():
+    samples = {
+        "Stella recuerda que mi proyecto se llama Eden Veil": "Eden Veil",
+        "Mi objetivo es estudiar informática": "estudiar informática",
+        "Estoy creando un videojuego de exploración": "un videojuego de exploración",
+        "Prefiero respuestas breves y directas": "respuestas breves y directas",
+    }
+    for message, expected in samples.items():
+        facts = QdrantConversationMemory.extract_explicit_facts(message)
+        assert facts
+        assert expected.casefold() in facts[0]["content"].casefold()
+
+
+def test_sensitive_and_credential_facts_are_not_saved():
+    rejected = (
+        "Recuerda que mi contraseña=secret123",
+        "Recuerda que mi domicilio es calle falsa 123",
+        "Recuerda que mi diagnóstico es ansiedad",
+        "Recuerda que mi correo es persona@example.com",
+        "Recuerda que mi número es +56912345678",
+        "Recuerda que mi cuenta está en https://example.com",
+    )
+    for message in rejected:
+        assert QdrantConversationMemory.extract_explicit_facts(message) == []
+
+
+@pytest.mark.asyncio
+async def test_durable_facts_survive_transcript_clear_and_can_be_deleted(memory):
+    store, client = memory
+    assert await store.set_enabled("room-a", "user-1", True) is True
+    fact_id = await store.remember_fact(
+        "room-a", "user-1", "Estoy desarrollando un proyecto de fantasía.", topic="proyecto"
+    )
+    assert fact_id
+    assert len(await store.load_facts("room-a", "user-1")) == 1
+    assert await store.save("room-a", "user-1", [
+        {"role": "user", "content": "Seguimos con el mismo proyecto."},
+    ]) is True
+
+    # Clearing only the recent transcript must not remove durable facts.
+    assert await store.clear("room-a", "user-1") is True
+    assert await store.load("room-a", "user-1") == []
+    facts = await store.load_facts("room-a", "user-1")
+    assert len(facts) == 1
+    assert facts[0]["id"] == fact_id
+
+    assert await store.forget_fact("room-a", "user-1", fact_id) is True
+    assert await store.load_facts("room-a", "user-1") == []
+
+
+@pytest.mark.asyncio
+async def test_turn_saves_require_explicit_opt_in(memory):
+    store, _ = memory
+    assert await store.save("room-a", "user-1", [
+        {"role": "user", "content": "No debe guardarse sin consentimiento."},
+    ]) is False
+    assert await store.is_enabled("room-a", "user-1") is False
+
+
+@pytest.mark.asyncio
+async def test_opt_out_erases_both_recent_turns_and_durable_facts(memory):
+    store, _ = memory
+    assert await store.set_enabled("room-a", "user-1", True) is True
+    assert await store.save("room-a", "user-1", [
+        {"role": "user", "content": "Contexto temporal."},
+    ]) is True
+    assert await store.remember_fact("room-a", "user-1", "Mi proyecto es Atlas", topic="proyecto")
+    assert await store.set_enabled("room-a", "user-1", False) is True
+    assert await store.load("room-a", "user-1") == []
+    assert await store.load_facts("room-a", "user-1") == []
