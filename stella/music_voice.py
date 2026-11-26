@@ -901,8 +901,12 @@ class MusicVoice:
                     "Accept": "application/json",
                     "User-Agent": (
                         "StellaAnarchy/1.0 "
-                        "(https://github.com/kaaazoficial/Stella-Anarchy; "
-                        + os.getenv("STELLA_CONTACT_EMAIL", "contact unavailable")
+                        "(https://github.com/kaaazoficial/Stella-Anarchy"
+                        + (
+                            "; " + os.getenv("STELLA_CONTACT_EMAIL", "").strip()
+                            if os.getenv("STELLA_CONTACT_EMAIL", "").strip()
+                            else ""
+                        )
                         + ")"
                     ),
                 },
