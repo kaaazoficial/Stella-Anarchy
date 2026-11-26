@@ -154,7 +154,8 @@ async def test_expired_memory_is_not_restored_and_is_removed(memory):
     client.point["payload"]["expires_at"] = 1
     store._last_cleanup = 0.0
 
-    assert await store.is_enabled("room-a", "user-1") is False
+    # Expiry deletes the record; automatic memory defaults to enabled for a new record.
+    assert await store.is_enabled("room-a", "user-1") is True
     assert await store.load("room-a", "user-1") == []
     assert client.point is None
 
