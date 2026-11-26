@@ -33,6 +33,9 @@ class StellaSettings(BaseSettings):
         default="",
         validation_alias=AliasChoices("ADMIN_UIDS", "ADMINUIDS"),
     )
+    additional_admin_uids: str = Field(
+        default="", validation_alias="ADDITIONAL_ADMIN_UIDS"
+    )
     data_dir: Path = Field(default=Path("./data"), validation_alias="DATA_DIR")
     tts_voice: str = Field(
         default="es-CL-CatalinaNeural", validation_alias="TTS_VOICE"

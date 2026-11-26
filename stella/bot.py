@@ -400,6 +400,7 @@ class StellaBot:
 
     def _is_admin(self, uid: str) -> bool:
         privileged = set(_uid_set(self.settings.admin_uids))
+        privileged.update(_uid_set(self.settings.additional_admin_uids))
         privileged.update(_uid_set(self.settings.sinner_uid))
         return bool(uid) and uid in privileged
 
