@@ -181,6 +181,7 @@ class QdrantConversationMemory:
         cleaned = self._clean_turns(turns, self.max_turns)
         try:
             await self.ensure_collection()
+            await self._cleanup_expired_if_due()
             digest, point_id = self._identity(room_id, uid)
             client = await self._http()
             now = int(time.time())
@@ -212,6 +213,7 @@ class QdrantConversationMemory:
             return False
         try:
             await self.ensure_collection()
+            await self._cleanup_expired_if_due()
             digest, point_id = self._identity(room_id, uid)
             client = await self._http()
             response = await client.get(
@@ -239,6 +241,7 @@ class QdrantConversationMemory:
             # re-enable memory after a restart. Conversation text is erased.
             try:
                 await self.ensure_collection()
+                await self._cleanup_expired_if_due()
                 digest, point_id = self._identity(room_id, uid)
                 client = await self._http()
                 now = int(time.time())
@@ -266,6 +269,7 @@ class QdrantConversationMemory:
         # Preserve existing turns if a record is already present.
         try:
             await self.ensure_collection()
+            await self._cleanup_expired_if_due()
             digest, point_id = self._identity(room_id, uid)
             client = await self._http()
             response = await client.get(
@@ -309,6 +313,7 @@ class QdrantConversationMemory:
             return False
         try:
             await self.ensure_collection()
+            await self._cleanup_expired_if_due()
             _, point_id = self._identity(room_id, uid)
             client = await self._http()
             response = await client.post(
