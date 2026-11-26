@@ -76,12 +76,19 @@ class VectorMemory:
         status = getattr(response, "status_code", None)
         reason = f"HTTP {status}" if status is not None else type(exc).__name__
         detail = ""
-        if response is not None:
+        # Never echo authentication diagnostics: they may contain credential-related text.
+        if response is not None and status not in {401, 403}:
             try:
                 payload = response.json()
                 if isinstance(payload, dict):
                     status_data = payload.get("status")
-                    detail = str(status_data.get("error") if isinstance(status_data, dict) else payload.get("error") or "")[:180]
+                    raw_detail = (
+                        status_data.get("error") if isinstance(status_data, dict)
+                        else payload.get("error")
+                    )
+                    if isinstance(raw_detail, dict):
+                        raw_detail = raw_detail.get("message") or raw_detail.get("code") or ""
+                    detail = str(raw_detail or "")[:180]
             except Exception:
                 detail = ""
         detail = re.sub(r"(?i)(api[_ -]?key|token|password)\s*[:=]\s*[^\s,;]+", r"\1=[REDACTED]", detail)
