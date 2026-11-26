@@ -897,7 +897,7 @@ def test_local_opt_out_blocks_persistent_memory_when_remote_storage_is_still_ena
     ("Necesito ayuda, Stella", "Necesito ayuda"),
     ("Oye, Stella, mira esto", "mira esto"),
     ("Tengo una duda, Stella: ¿puedes revisarla?", "Tengo una duda ¿puedes revisarla?"),
-    ("¿Puedes ayudarme, Stella?", "¿Puedes ayudarme"),
+    ("¿Puedes ayudarme, Stella?", "¿Puedes ayudarme?"),
     ("Mira esto, Stella", "Mira esto"),
 ])
 def test_stella_call_is_recognized_at_the_start_middle_and_end(content, expected):
@@ -966,3 +966,31 @@ def test_explicit_help_command_still_works_when_replying_to_stella():
 
     assert len(calls) == 1
     assert calls[0][3] == "ayuda"
+
+
+def test_single_word_insult_in_reply_to_stella_routes_to_comeback_prompt(monkeypatch):
+    import stella.bot as bot_module
+
+    b = bot()
+    calls = []
+
+    async def capture_ai(*args):
+        calls.append(args)
+
+    b._ai_assist = capture_ai
+    monkeypatch.setattr(bot_module, "interpret_natural_request", lambda _value: None)
+
+    asyncio.run(b.handle_event({
+        "type": "message",
+        "threadId": "r",
+        "message": {
+            "content": "putita",
+            "replyMessageId": "stella-msg",
+            "author": {"uid": "u", "nickname": "Persona"},
+        },
+    }))
+
+    assert len(calls) == 1
+    assert "insultos" in calls[0][3].casefold() or "insultada" in calls[0][3].casefold()
+    assert "Mensaje recibido: putita" in calls[0][3]
+    assert b.platform.sent == []
