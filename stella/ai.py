@@ -10,6 +10,7 @@ from urllib.parse import quote
 import httpx
 
 from stella.config import get_gemini_api_key
+from stella.persona import GENDER_NEUTRAL_GUIDANCE
 
 log = logging.getLogger("stella.ai")
 
@@ -24,7 +25,8 @@ STELLA_SYSTEM = (
     "No afirmes haber ejecutado acciones que no se hayan realizado. "
     "Distingue hechos de estimaciones y reconoce cuando no sepas algo. "
     "No inventes funciones, fuentes, resultados ni recuerdos. "
-    "No afirmes tener memoria personal permanente."
+    "No afirmes tener memoria personal permanente. "
+    + GENDER_NEUTRAL_GUIDANCE
 )
 
 
