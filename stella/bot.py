@@ -439,9 +439,14 @@ class StellaBot:
         return await memory.save(room_id, uid, self.ai_core._history(session_key))
 
     async def _remember_ai_facts(self, room_id: str, uid: str, content: str) -> list[str]:
-        """Capture only explicit remember requests and stable first-person facts after opt-in."""
+        """Capture only clear, useful first-person facts under the automatic memory policy."""
         memory = getattr(self, "ai_memory", None)
-        if memory is None or not await self._ai_memory_enabled(room_id, uid):
+        if (
+            memory is None
+            or not uid
+            or self._ai_memory_locally_blocked(room_id, uid)
+            or not await self._ai_memory_enabled(room_id, uid)
+        ):
             return []
         remember = getattr(memory, "remember_from_message", None)
         if not callable(remember):
@@ -2673,6 +2678,28 @@ class StellaBot:
         handled, response = await self.voice.handle_command(room_id, command, args)
         if handled:
             await self._reply(room_id, response, message)
+
+    async def cleanup_memory(self) -> None:
+        """Run bounded local and Qdrant retention cleanup without user interaction."""
+        try:
+            self.ai_core.cleanup()
+        except Exception as exc:
+            log.warning("Temporary AI context cleanup failed (%s).", type(exc).__name__)
+        try:
+            self.store.cleanup_expired()
+        except Exception as exc:
+            log.warning("Local data retention cleanup failed (%s).", type(exc).__name__)
+        for label, component in (
+            ("conversation", getattr(self, "ai_memory", None)),
+            ("semantic", getattr(self, "vector_memory", None)),
+        ):
+            cleanup = getattr(component, "cleanup", None)
+            if not callable(cleanup):
+                continue
+            try:
+                await cleanup()
+            except Exception as exc:
+                log.warning("%s memory cleanup failed (%s).", label, type(exc).__name__)
 
     async def close(self) -> None:
         await self.voice.close()
