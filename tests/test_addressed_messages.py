@@ -440,7 +440,9 @@ def test_playful_insults_are_routed_to_ai_for_a_comeback(content):
     }))
 
     assert len(calls) == 1
-    assert calls[0][3] == content.removeprefix("Stella, ").strip()
+    expected_message = content.removeprefix("Stella, ").strip()
+    assert "CONTEXTO DE CONVERSACIÓN INFORMAL" in calls[0][3]
+    assert calls[0][3].endswith("Mensaje recibido: " + expected_message)
     assert b.platform.sent == []
 
 
@@ -464,7 +466,9 @@ def test_teasing_is_routed_to_ai_for_playful_banter(content):
     }))
 
     assert len(calls) == 1
-    assert calls[0][3] == content.removeprefix("Stella, ").strip()
+    expected_message = content.removeprefix("Stella, ").strip()
+    assert "CONTEXTO DE CONVERSACIÓN INFORMAL" in calls[0][3]
+    assert calls[0][3].endswith("Mensaje recibido: " + expected_message)
 
 
 @pytest.mark.parametrize("content", [
