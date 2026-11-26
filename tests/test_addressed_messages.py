@@ -788,3 +788,69 @@ def test_sleep_social_action_does_not_assume_the_sender_gender():
     assert "Alex se queda junto a y acompaña a @Persona." in b.platform.sent[0][1]
     assert "dormido" not in b.platform.sent[0][1]
     assert "dormida" not in b.platform.sent[0][1]
+
+
+def test_proactive_participation_is_off_by_default():
+    b = bot()
+    b._proactive_cooldown = {}
+    calls = []
+
+    async def fake_ask(prompt, *, system=None):
+        calls.append(prompt)
+        return "Yo empezaría comparando las necesidades del proyecto."
+
+    b.ai = SimpleNamespace(ask=fake_ask)
+
+    asyncio.run(b._maybe_proactive_reply(
+        "room-a",
+        "member",
+        "Alex",
+        "¿Alguien sabe qué base de datos conviene para un proyecto pequeño?",
+        {"messageId": "msg-1"},
+    ))
+
+    assert calls == []
+    assert b.platform.sent == []
+
+
+def test_proactive_participation_only_answers_clear_room_invitations_and_respects_cooldown():
+    b = bot()
+    b._proactive_cooldown = {}
+    b.shared_state.values["stella_proactive:room-a"] = "1"
+    calls = []
+
+    async def fake_ask(prompt, *, system=None):
+        calls.append((prompt, system))
+        return "Yo empezaría comparando las necesidades, el volumen de datos y el presupuesto."
+
+    b.ai = SimpleNamespace(ask=fake_ask)
+    invitation = "¿Alguien sabe qué base de datos conviene para un proyecto pequeño?"
+    message = {"messageId": "msg-1"}
+
+    asyncio.run(b._maybe_proactive_reply("room-a", "member", "Alex", invitation, message))
+    asyncio.run(b._maybe_proactive_reply("room-a", "member-2", "Sam", invitation, {"messageId": "msg-2"}))
+
+    assert len(calls) == 1
+    assert "no ejecutes" in calls[0][1].casefold()
+    assert len(b.platform.sent) == 1
+    assert "base de datos" in b.platform.sent[0][1].casefold()
+
+
+def test_proactive_participation_ignores_ordinary_chat_without_an_invitation():
+    b = bot()
+    b._proactive_cooldown = {}
+    b.shared_state.values["stella_proactive:room-a"] = "1"
+    calls = []
+
+    async def fake_ask(prompt, *, system=None):
+        calls.append(prompt)
+        return "No debería responder."
+
+    b.ai = SimpleNamespace(ask=fake_ask)
+
+    asyncio.run(b._maybe_proactive_reply(
+        "room-a", "member", "Alex", "Hoy estoy jugando Minecraft con mis amigos.", {}
+    ))
+
+    assert calls == []
+    assert b.platform.sent == []
