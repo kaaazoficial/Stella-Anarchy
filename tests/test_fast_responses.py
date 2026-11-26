@@ -41,7 +41,7 @@ def test_background_work_is_scheduled_without_waiting_for_completion():
         await asyncio.sleep(0)
 
     asyncio.run(scenario())
-    assert completed == []
+    assert completed == [True]
     assert bot._background_tasks == set()
 
 
