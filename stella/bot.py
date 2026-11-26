@@ -1446,8 +1446,11 @@ class StellaBot:
         # the command lacks explicit arguments.
         target_commands = social_actions | {
             "roast", "afinidad", "amistad", "reputacion", "duelo",
+            "pagar", "transferir", "regalo",
         }
-        if command in target_commands and not args:
+        if command in target_commands and (
+            not args or (command in {"pagar", "transferir"} and not self._mentioned_user(message))
+        ):
             reply_target = await self._resolve_reply_target(room_id, message, uid)
             if reply_target:
                 message["_stella_reply_target"] = reply_target
@@ -1463,7 +1466,8 @@ class StellaBot:
         if handler is None:
             suggestion = suggest_command(command, set(routes) | social_actions)
             if suggestion:
-                await self._reply(room_id, f"No reconozco !{command}. ¿Quisiste decir !{suggestion[0]}? No ejecutaré la sugerencia automáticamente.", message)
+                prefix = self.settings.command_prefix
+                await self._reply(room_id, f"No reconozco {prefix}{command}. ¿Quisiste decir {prefix}{suggestion[0]}? No ejecutaré la sugerencia automáticamente.", message)
             else:
                 await self._reply(room_id, f"No reconozco ese comando. Usa {self.settings.command_prefix}ayuda.", message)
             return
@@ -1474,7 +1478,7 @@ class StellaBot:
         try:
             result = format_calculation_result(calculate_expression(args))
         except ValueError as exc:
-            await self._reply(room_id, f"Uso: !calcular <operación>\n{exc}", message)
+            await self._reply(room_id, f"Uso: {self.settings.command_prefix}calcular <operación>\n{exc}", message)
             return
         await self._reply(room_id, f"🧮 {args[:160]} = {result}", message)
 
@@ -1483,7 +1487,8 @@ class StellaBot:
         language = language.strip()
         content = content.strip()
         if not separator or not language or not content:
-            await self._reply(room_id, "Uso: !traducir <idioma> | <texto>", message)
+            prefix = getattr(getattr(self, "settings", None), "command_prefix", "!")
+            await self._reply(room_id, f"Uso: {prefix}traducir <idioma> | <texto>", message)
             return
         if len(content) > 2500:
             await self._reply(room_id, "El texto para traducir no puede superar 2500 caracteres.", message)
@@ -1789,13 +1794,27 @@ class StellaBot:
     async def _music_volume_up(self, room_id, uid, name, args, message):
         state = self.voice.rooms.get(room_id)
         current = round(float(state.get("music_volume", 0.8)) * 100) if state else 80
-        step = int(args.strip()) if args.strip().isdigit() else 10
+        step_text = args.strip()
+        if step_text and not re.fullmatch(r"\d+", step_text):
+            await self._reply(room_id, "Indica cuánto subir el volumen con un entero positivo (1-100).", message)
+            return
+        step = int(step_text) if step_text else 10
+        if not 1 <= step <= 100:
+            await self._reply(room_id, "El incremento debe estar entre 1 y 100.", message)
+            return
         await self._reply(room_id, await self.voice.set_music_volume(room_id, min(100, current + step)), message)
 
     async def _music_volume_down(self, room_id, uid, name, args, message):
         state = self.voice.rooms.get(room_id)
         current = round(float(state.get("music_volume", 0.8)) * 100) if state else 80
-        step = int(args.strip()) if args.strip().isdigit() else 10
+        step_text = args.strip()
+        if step_text and not re.fullmatch(r"\d+", step_text):
+            await self._reply(room_id, "Indica cuánto bajar el volumen con un entero positivo (1-100).", message)
+            return
+        step = int(step_text) if step_text else 10
+        if not 1 <= step <= 100:
+            await self._reply(room_id, "La reducción debe estar entre 1 y 100.", message)
+            return
         await self._reply(room_id, await self.voice.set_music_volume(room_id, max(0, current - step)), message)
 
     async def _music_mute(self, room_id, uid, name, args, message):
@@ -1817,7 +1836,14 @@ class StellaBot:
             await self._reply(room_id, "No hay una llamada activa. Usa !join.", message)
             return
         current = round(float(state.get("tts_volume", 0.75)) * 100)
-        step = int(args.strip()) if args.strip().isdigit() else 10
+        step_text = args.strip()
+        if step_text and not re.fullmatch(r"\d+", step_text):
+            await self._reply(room_id, "Indica cuánto subir el volumen de lectura con un entero positivo (1-100).", message)
+            return
+        step = int(step_text) if step_text else 10
+        if not 1 <= step <= 100:
+            await self._reply(room_id, "El incremento debe estar entre 1 y 100.", message)
+            return
         await self._reply(room_id, await self.voice.configure_tts(room_id, "volumen", str(min(100, current + step))), message)
 
     async def _tts_volume_down(self, room_id, uid, name, args, message):
@@ -1826,7 +1852,14 @@ class StellaBot:
             await self._reply(room_id, "No hay una llamada activa. Usa !join.", message)
             return
         current = round(float(state.get("tts_volume", 0.75)) * 100)
-        step = int(args.strip()) if args.strip().isdigit() else 10
+        step_text = args.strip()
+        if step_text and not re.fullmatch(r"\d+", step_text):
+            await self._reply(room_id, "Indica cuánto bajar el volumen de lectura con un entero positivo (1-100).", message)
+            return
+        step = int(step_text) if step_text else 10
+        if not 1 <= step <= 100:
+            await self._reply(room_id, "La reducción debe estar entre 1 y 100.", message)
+            return
         await self._reply(room_id, await self.voice.configure_tts(room_id, "volumen", str(max(0, current - step))), message)
 
     async def _tts_mute(self, room_id, uid, name, args, message):
@@ -1915,17 +1948,38 @@ class StellaBot:
 
     async def _pay(self, room_id, uid, name, args, message):
         target = self._mentioned_user(message)
-        values = re.findall(r"\d+", args)
-        if not target or not values:
-            await self._reply(room_id, "Uso: !pagar @usuario <cantidad>.", message)
+        amount_text = str(args or "").strip().split()[-1] if str(args or "").strip() else ""
+        if not target or not re.fullmatch(r"\d+", amount_text):
+            prefix = getattr(getattr(self, "settings", None), "command_prefix", "!")
+            await self._reply(
+                room_id,
+                f"Uso: {prefix}pagar @usuario <cantidad positiva>. "
+                "También puedes responder al mensaje de la persona e indicar solo la cantidad.",
+                message,
+            )
             return
-        amount = int(values[-1])
+        amount = int(amount_text)
+        if amount <= 0:
+            await self._reply(room_id, "La cantidad debe ser mayor que cero.", message)
+            return
         if amount > 100000:
             await self._reply(room_id, "El límite por transferencia es de 100.000 puntos.", message)
             return
+        if target[0] == uid:
+            await self._reply(room_id, "No puedes transferirte puntos a ti mismo.", message)
+            return
         result = self.store.transfer_points(uid, target[0], amount)
-        labels = {"ok": f"Transferiste {amount} puntos a {target[1]}.", "missing": "No encontré el perfil de origen o destino.", "insufficient": "No tienes puntos suficientes.", "invalid": "La transferencia no es válida."}
-        await self._reply(room_id, labels.get(result, "No pude completar la transferencia."), message)
+        labels = {
+            "ok": f"💸 Transferencia realizada: {amount} puntos para {target[1]}.",
+            "missing": "No encontré el perfil de origen o destino. Comprueba que ambas personas tengan perfil.",
+            "insufficient": f"No tienes suficientes puntos para transferir {amount}. Tu saldo actual es {self.store.points_balance(uid)}.",
+            "invalid": "La transferencia no es válida. Comprueba la cantidad y el destinatario.",
+        }
+        if result == "ok":
+            response = labels["ok"] + f"\nTu saldo actual: {self.store.points_balance(uid)} puntos."
+        else:
+            response = labels.get(result, "No pude completar la transferencia. No se descontaron puntos.")
+        await self._reply(room_id, response, message)
 
     async def _gift(self, room_id, uid, name, args, message):
         target = self._mentioned_user(message)
@@ -2004,7 +2058,7 @@ class StellaBot:
             if isinstance(reply_target, dict) and reply_target.get("name"):
                 target = "@" + str(reply_target["name"])
         if not target:
-            await self._reply(room_id, f"Uso: !{message.get('_stella_social_action')} @usuario (o responde al mensaje de esa persona)", message)
+            await self._reply(room_id, f"Uso: {self.settings.command_prefix}{message.get('_stella_social_action')} @usuario (o responde al mensaje de esa persona).", message)
             return
         action = str(message.get("_stella_social_action") or "").casefold()
         labels = {
@@ -2030,7 +2084,7 @@ class StellaBot:
     async def _roast(self, room_id, uid, name, args, message):
         target = args.strip()
         if not target:
-            await self._reply(room_id, "Uso: !roast @usuario", message)
+            await self._reply(room_id, f"Uso: {self.settings.command_prefix}roast @usuario (o responde al mensaje de esa persona).", message)
             return
         lines = [
             "tienes tanta suerte que hasta el azar te deja en visto.",
@@ -2043,7 +2097,7 @@ class StellaBot:
     async def _ship(self, room_id, uid, name, args, message):
         names = [part.strip() for part in re.split(r"\s*(?:\+|,|\by\b)\s*", args, flags=re.I) if part.strip()]
         if len(names) != 2:
-            await self._reply(room_id, "Uso: !ship <persona 1> + <persona 2>", message)
+            await self._reply(room_id, f"Uso: {self.settings.command_prefix}ship <persona 1> + <persona 2>.", message)
             return
         digest = hashlib.sha256(("|".join(sorted(names, key=str.casefold))).casefold().encode("utf-8")).digest()
         score = int.from_bytes(digest[:2], "big") % 101
@@ -2112,10 +2166,14 @@ class StellaBot:
             await self._reply(room_id, "No hay una trivia activa. Inicia una con !trivia.", message)
             return
         try:
-            answer = int(args.strip()) - 1
+            selected = int(args.strip())
         except ValueError:
-            await self._reply(room_id, "Responde con un número del 1 al 4.", message)
+            await self._reply(room_id, "Responde con el número de la opción: del 1 al 4.", message)
             return
+        if not 1 <= selected <= 4:
+            await self._reply(room_id, "Esa opción no existe. Elige un número del 1 al 4.", message)
+            return
+        answer = selected - 1
         if answer == game["answer"]:
             await self._reply(room_id, f"✅ ¡Correcto, {name}!", message)
             self._game_sessions.pop(room_id, None)
@@ -2138,7 +2196,7 @@ class StellaBot:
             await self._reply(room_id, "Indica un número entero del 1 al 20.", message)
             return
         if not 1 <= value <= 20:
-            await self._reply(room_id, "El número debe estar entre 1 y 20.", message)
+            await self._reply(room_id, "El número debe estar entre 1 y 20. Ese intento no cuenta.", message)
             return
         game["attempts"] += 1
         if value == game["answer"]:
@@ -2734,11 +2792,17 @@ class StellaBot:
                 await self._reply(room_id, self.voice.youtube_search_message(rest), message)
                 return
             if action.casefold() in {"buscar", "search"}:
+                if not rest.strip():
+                    await self._reply(room_id, "Indica qué quieres escuchar. Ejemplo: !dj buscar música ambiental.", message)
+                    return
                 await self.voice.search_music_interactive(
                     room_id, rest, reply_id=str(message.get("messageId") or message.get("id") or "") or None
                 )
                 return
             if action.casefold() in {"ambiente", "mood"}:
+                if not rest.strip():
+                    await self._reply(room_id, "Indica el ambiente que buscas. Ejemplo: !dj ambiente concentración.", message)
+                    return
                 from stella.astra import resolve_music_mood
                 await self.voice.search_music_interactive(
                     room_id, resolve_music_mood(rest),
@@ -2801,6 +2865,13 @@ class StellaBot:
         handled, response = await self.voice.handle_command(room_id, command, args)
         if handled:
             await self._reply(room_id, response, message)
+            return
+        await self._reply(
+            room_id,
+            "No reconocí esa acción de voz o DJ. Usa !dj ayuda para ver los controles de música, "
+            "o !tts para consultar los ajustes de lectura.",
+            message,
+        )
 
     async def cleanup_memory(self) -> None:
         """Run bounded local and Qdrant retention cleanup without user interaction."""
