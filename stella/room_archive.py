@@ -96,6 +96,34 @@ def _to_epoch_ms(value: Any, fallback_ms: int) -> int:
         return fallback_ms
 
 
+def _to_epoch_us(value: Any, fallback_us: int) -> int:
+    if value is None or value == "":
+        return fallback_us
+    if isinstance(value, (int, float)):
+        numeric = float(value)
+        # Accept Unix seconds, milliseconds, microseconds, or nanoseconds.
+        if numeric > 10**17:
+            return int(numeric / 1000)
+        if numeric > 10**14:
+            return int(numeric)
+        if numeric > 10**11:
+            return int(numeric * 1000)
+        return int(numeric * 1_000_000)
+    text = str(value).strip()
+    if not text:
+        return fallback_us
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return int(parsed.timestamp() * 1_000_000)
+    except (TypeError, ValueError, OverflowError):
+        try:
+            return int(float(text) * 1_000_000)
+        except (TypeError, ValueError, OverflowError):
+            return fallback_us
+
+
 class RoomArchive:
     """Persistent chronological room ledger; independent from AI personal memory."""
 
@@ -287,10 +315,11 @@ class RoomArchive:
         received_ns = time.time_ns()
         received_ms = received_ns // 1_000_000
         occurred_ms = _to_epoch_ms(event_time, received_ms)
-        # Stable ordering for webhook retries and the outgoing-message echo.
-        # Qdrant integer payloads are signed 64-bit; millisecond * 1e6 stays safe.
-        tie_breaker = int(hashlib.sha256(identity.encode("utf-8")).hexdigest()[:6], 16) % 1_000_000
-        order_key = occurred_ms * 1_000_000 + tie_breaker
+        occurred_us = _to_epoch_us(event_time, received_ns // 1000)
+        # Stable, near-microsecond ordering for webhook retries and bot echoes.
+        # Qdrant integer payloads are signed 64-bit; microseconds * 1000 stays safe.
+        tie_breaker = int(hashlib.sha256(identity.encode("utf-8")).hexdigest()[:6], 16) % 1000
+        order_key = occurred_us * 1000 + tie_breaker
         self._last_order_key = max(self._last_order_key, order_key)
         occurred_iso = datetime.fromtimestamp(
             occurred_ms / 1000, tz=timezone.utc
