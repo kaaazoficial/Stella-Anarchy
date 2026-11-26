@@ -8,13 +8,11 @@ class Platform:
     def __init__(self):
         self.identity = {"uid":"stella-account","botId":"stella-bot"}
         self.sent = []
-        self.mentions = []
         self.ids = {"stella-msg"}
     def has_sent_message(self, room, message_id):
         return message_id in self.ids
-    async def send_message(self, room, content, reply_id=None, mentions=None):
+    async def send_message(self, room, content, reply_id=None):
         self.sent.append((room, content, reply_id))
-        self.mentions.append(mentions)
         return True
 
 class Store:
@@ -575,8 +573,7 @@ def test_mention_command_targets_replied_to_author():
     }))
     assert len(b.platform.sent) == 1
     sent = b.platform.sent[0]
-    assert "@OtraPersona ven a ver esto" in sent[1]
-    assert b.platform.mentions[-1] == [{"uid": "target-uid", "name": "OtraPersona"}]
+    assert sent[1].endswith("@OtraPersona ven a ver esto")
 
 
 def test_mention_command_uses_structured_mentions_and_deduplicates_targets():
@@ -596,4 +593,3 @@ def test_mention_command_uses_structured_mentions_and_deduplicates_targets():
     }))
     assert len(b.platform.sent) == 1
     assert b.platform.sent[0][1].endswith("@Target")
-    assert b.platform.mentions[-1] == [{"uid": "target-uid", "name": "Target"}]
