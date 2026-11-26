@@ -730,7 +730,11 @@ class StellaBot:
             if not tail:
                 await self._reply(room_id, "Uso: !historial usuario <UID o nombre>", message)
                 return
-            if re.fullmatch(r"[A-Za-z0-9_-]{3,160}", tail):
+            looks_like_uid = bool(
+                re.fullmatch(r"[0-9a-fA-F]{8}-[0-9a-fA-F-]{27,}", tail)
+                or re.fullmatch(r"\d{8,}", tail)
+            )
+            if looks_like_uid:
                 events = await archive.list_room_events(room_id, actor_uid=tail, reverse=True, limit=30)
             else:
                 events = await archive.list_room_events(room_id, actor_name=tail[:100], reverse=True, limit=30)
@@ -779,8 +783,17 @@ class StellaBot:
                     if item.get(key) not in (None, "")
                 }
                 rows.append(json.dumps(record, ensure_ascii=False, separators=(",", ":")))
-            export_text = "\n".join(rows)
-            chunks = [export_text[i:i + 2400] for i in range(0, len(export_text), 2400)]
+            chunks: list[str] = []
+            current = ""
+            for row in rows:
+                candidate = f"{current}\n{row}".strip()
+                if len(candidate) > 2200 and current:
+                    chunks.append(current)
+                    current = row
+                else:
+                    current = candidate
+            if current:
+                chunks.append(current)
             for index, chunk in enumerate(chunks, 1):
                 await self._reply(
                     room_id,
