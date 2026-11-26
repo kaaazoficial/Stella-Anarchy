@@ -36,7 +36,7 @@ _NAME_TOKEN_RE = re.compile(
 )
 _DIRECT_REQUEST_RE = re.compile(
     r"\b(?:que|qué|como|cómo|quien|quién|cuando|cuándo|donde|dónde|"
-    r"puedes|podrias|podrías|quieres|ayudarme|ayudame|ayúdame|ayudas|"
+    r"puedes|podrias|podrías|quieres|ayuda|help|ayudarme|ayudame|ayúdame|ayudas|"
     r"dime|explica|explicame|explícame|revisa|mira|escucha|consulta|"
     r"busca|recomiendame|recomiéndame|cuentame|cuéntame|"
     r"haz|resuelve|enseña|ensename|enséñame|"
@@ -44,7 +44,7 @@ _DIRECT_REQUEST_RE = re.compile(
     flags=re.IGNORECASE,
 )
 _DIRECT_CALL_START_RE = re.compile(
-    r"^[\s,;:!?¡¿]*(?:puedes|podrias|podrías|quieres|ayudarme|ayudame|ayúdame|"
+    r"^[\s,;:!?¡¿]*(?:puedes|podrias|podrías|quieres|ayuda|help|ayudarme|ayudame|ayúdame|"
     r"ayudas|dime|explica|explicame|explícame|revisa|mira|escucha|consulta|"
     r"busca|recomiendame|recomiéndame|cuentame|cuéntame|haz|resuelve|"
     r"enseña|ensename|enséñame|me ayudas)\b"
@@ -111,7 +111,7 @@ def _is_direct_vocative(text: str, match: re.Match) -> bool:
     # third-person reference ("hablé con Stella", "¿qué opinas de Stella?").
     # A clear imperative/question directed at Stella still takes precedence.
     object_reference = bool(_NAME_OBJECT_PREPOSITION_RE.search(before_trimmed))
-    if object_reference and not has_request_cue:
+    if object_reference:
         return False
 
     # Commas, colons and semicolons can mark a vocative in the middle or end.
