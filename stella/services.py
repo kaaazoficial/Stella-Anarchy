@@ -65,10 +65,12 @@ class StellaServices:
             "AI_BASE_URL", "https://api.groq.com/openai/v1"
         ).rstrip("/")
         self.ai_model = os.getenv("AI_MODEL", "llama-3.3-70b-versatile").strip()
-        self.timeout = httpx.Timeout(30.0, connect=8.0)
+        self.timeout = httpx.Timeout(18.0, connect=3.0)
+        self._ai_client: httpx.AsyncClient | None = None
 
     async def close(self) -> None:
-        return None
+        if self._ai_client is not None and not self._ai_client.is_closed:
+            await self._ai_client.aclose()
 
     async def ask(self, prompt: str, *, system: str | None = None) -> str:
         if not self.ai_key:
@@ -151,14 +153,16 @@ class StellaServices:
             return []
     async def ai_request(self, method: str, url: str, **kwargs):
         """Make one bounded HTTPS request for the configured AI provider."""
-        timeout = kwargs.pop("timeout", 45)
-        async with httpx.AsyncClient(
-            timeout=timeout,
-            follow_redirects=False,
-            trust_env=False,
-            headers={"User-Agent": "StellaCommunityBot/1.0"},
-        ) as client:
-            return await client.request(method, url, **kwargs)
+        timeout = kwargs.pop("timeout", 18)
+        if self._ai_client is None or self._ai_client.is_closed:
+            self._ai_client = httpx.AsyncClient(
+                timeout=httpx.Timeout(timeout, connect=3.0),
+                follow_redirects=False,
+                trust_env=False,
+                headers={"User-Agent": "StellaCommunityBot/1.0"},
+                limits=httpx.Limits(max_connections=30, max_keepalive_connections=15, keepalive_expiry=30.0),
+            )
+        return await self._ai_client.request(method, url, timeout=timeout, **kwargs)
 
     async def fetch_avatar_image(self, source_url: str) -> tuple[bytes, str, dict[str, Any]]:
         from stella.images import validate_avatar_image_bytes
