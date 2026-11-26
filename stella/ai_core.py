@@ -278,6 +278,7 @@ def _is_structured_output_rejection(response: Any) -> bool:
     return any(marker in detail for marker in (
         "json_schema", "response_format", "structured output",
         "json schema", "schema validation", "invalid schema",
+        "tool_use_failed", "failed_generation", "tool call failed",
     ))
 
 def _retry_header_seconds(value: Any) -> float | None:
