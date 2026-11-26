@@ -225,6 +225,10 @@ async def health() -> JSONResponse:
         str(getattr(vector_memory, "status", "no inicializada"))
         if vector_memory is not None else "no inicializada"
     )
+    vector_diagnostics = (
+        getattr(vector_memory, "diagnostics", {})
+        if vector_memory is not None else {}
+    )
     ai_configured = bool(
         get_gemini_api_key()
         or os.getenv("GROQ_API_KEY", "").strip()
@@ -251,6 +255,7 @@ async def health() -> JSONResponse:
             "ai_provider_configured": ai_configured,
             "ai_providers": ai_diagnostics,
             "vector_memory": vector_status,
+            "vector_memory_diagnostics": vector_diagnostics,
         },
     }
     # Render and other HTTP monitors must receive a failing status when the
