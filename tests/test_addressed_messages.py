@@ -854,3 +854,22 @@ def test_proactive_participation_ignores_ordinary_chat_without_an_invitation():
 
     assert calls == []
     assert b.platform.sent == []
+
+
+
+def test_proactive_presence_setting_is_admin_only_and_persisted():
+    b = bot()
+    b.settings.additional_admin_uids = ""
+    b.settings.admin_uids = "owner"
+    b._proactive_enabled_cache = {}
+
+    asyncio.run(b._stella_presence("room-a", "member", "Persona", "activar", {}))
+    assert b.shared_state.values.get("stella_proactive:room-a") is None
+
+    asyncio.run(b._stella_presence("room-a", "owner", "Owner", "activar", {}))
+    assert b.shared_state.values["stella_proactive:room-a"] == "1"
+    assert asyncio.run(b._proactive_enabled("room-a")) is True
+
+    asyncio.run(b._stella_presence("room-a", "owner", "Owner", "desactivar", {}))
+    assert b.shared_state.values["stella_proactive:room-a"] == "0"
+    assert asyncio.run(b._proactive_enabled("room-a")) is False
