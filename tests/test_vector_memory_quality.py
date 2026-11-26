@@ -103,3 +103,34 @@ def test_score_threshold_is_bounded_and_has_safe_fallback(monkeypatch):
     monkeypatch.setenv("QDRANT_SCORE_THRESHOLD", "not-a-number")
     memory = VectorMemory()
     assert memory.score_threshold == 0.35
+
+
+@pytest.mark.asyncio
+async def test_qdrant_applies_similarity_threshold_in_the_search_request(memory):
+    from stella.vector_memory import VectorMemory
+
+    memory.ready = True
+    async def fake_embedding(text, query=False):
+        return [0.0] * 768
+    memory._embed = fake_embedding
+
+    class CaptureClient:
+        is_closed = False
+        def __init__(self):
+            self.payload = None
+        async def post(self, url, *, headers=None, json=None):
+            self.payload = json
+            import httpx
+            request = httpx.Request("POST", url)
+            return httpx.Response(200, request=request, json={"result": []})
+        async def aclose(self):
+            self.is_closed = True
+
+    client = CaptureClient()
+    memory.client = client
+    await memory.search("room-1", "consulta relevante", "member-1")
+
+    assert client.payload["score_threshold"] == memory.score_threshold
+    assert {"key": "room_id", "match": {"value": "room-1"}} in client.payload["filter"]["must"]
+    assert {"key": "uid", "match": {"value": "member-1"}} in client.payload["filter"]["must"]
+    await memory.close()
