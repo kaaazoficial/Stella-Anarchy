@@ -2369,7 +2369,7 @@ class StellaBot:
             memory_status = vector_memory.status if vector_memory is not None else "no inicializada en este proceso"
             retention_days = vector_memory.retention_days if vector_memory is not None else 30
             enabled = self.store.get_setting(room_id, key, "0") == "1"
-            ai_enabled = self.store.get_setting(room_id, ai_key, "0") == "1"
+            ai_enabled = await ai_memory.is_enabled(room_id, uid) if ai_memory is not None else False
             ai_status = ai_memory.status if ai_memory is not None else "no inicializada"
             await self._reply(room_id, f"Memoria semántica: {memory_status}; tu estado: {'activada' if enabled else 'desactivada'}. Memoria de conversación: {'activada' if ai_enabled else 'desactivada'}; {ai_status}; retención semántica: {retention_days} días. Usa !memoria conversacion activar|desactivar|olvidar.", message)
 
