@@ -28,6 +28,11 @@ def test_health_reports_component_status_without_exposing_secrets(monkeypatch):
         "bot",
         SimpleNamespace(
             vector_memory=SimpleNamespace(status="conectada"),
+            room_archive=SimpleNamespace(
+                status="conectado: archivo cronológico activo",
+                events_written=17,
+                write_failures=0,
+            ),
             ai_core=SimpleNamespace(provider_diagnostics=lambda: {
                 "primary": "Google Gemini",
                 "gemini_configured": True,
@@ -57,6 +62,7 @@ def test_health_reports_component_status_without_exposing_secrets(monkeypatch):
     assert result["checks"]["ai_providers"]["primary"] == "Google Gemini"
     assert result["checks"]["ai_providers"]["last_successful_provider"] == "Google Gemini"
     assert result["checks"]["vector_memory"] == "conectada"
+    assert result["checks"]["room_archive"] == "conectado: archivo cronológico activo"
     rendered = repr(result)
     assert "private-token" not in rendered
     assert "private-secret" not in rendered
