@@ -862,6 +862,7 @@ def test_proactive_presence_setting_is_admin_only_and_persisted():
     b.settings.additional_admin_uids = ""
     b.settings.admin_uids = "owner"
     b._proactive_enabled_cache = {}
+    b._proactive_cooldown = {}
 
     asyncio.run(b._stella_presence("room-a", "member", "Persona", "activar", {}))
     assert b.shared_state.values.get("stella_proactive:room-a") is None
