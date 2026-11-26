@@ -272,7 +272,7 @@ def sanitize_ai_trace_text(value: Any, limit: int = 2400) -> str:
     text = re.sub(r"(?<![\w])@[A-Za-z0-9_.-]{2,64}\b", "@[usuario]", text)
     text = re.sub(r"(?<!\w)\d{7,}(?!\w)", "[identificador]", text)
     text = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", " ", text)
-    text = re.sub(r"\s+", " ", text).strip()
+        text = re.sub(r"\s+", " ", text).strip()
     maximum = max(80, min(4000, int(limit)))
     return text if len(text) <= maximum else text[:maximum] + "…[recortado]"
 
@@ -329,8 +329,8 @@ def _retry_header_seconds(value: Any) -> float | None:
 def resolve_community_faq(question: str) -> str | None:
     """Resolve short, domain-independent conversational replies."""
     text = normalize_topic_text(question)
-    text = re.sub(r"^(?:stella)\s+", "", text).strip()
-    text = re.sub(r"^[¿¡\s]+|[?!.¡¿\s]+$", "", text).strip()
+        text = re.sub(r"\s+", " ", text).strip()
+        text = re.sub(r"\s+", " ", text).strip()
     if text in {"hola", "buenas", "buenos dias", "buenas tardes", "buenas noches"}:
         return "¡Hola! Soy Stella. ¿En qué puedo ayudarte?"
     if text in {"gracias", "muchas gracias", "te lo agradezco"}:
