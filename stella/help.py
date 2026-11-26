@@ -121,7 +121,7 @@ def filter_commands_help_text(
         return str(help_text)
     index = ALIASES.get(key)
     if index is None:
-        return "[CB] ✦ STELLA · GUÍA DE COMANDOS ✦\\n[C] Categorías: ia, social, juegos, musica, multimedia, memoria."
+        return "[CB] ✦ STELLA · GUÍA DE COMANDOS ✦\n[C] Categorías: ia, social, juegos, musica, multimedia, memoria."
     p = "!"
     for line in str(help_text).splitlines():
         if line.startswith("[C] Prefijos aceptados: "):
