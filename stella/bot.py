@@ -128,7 +128,7 @@ _MULTILINGUAL_INSULT_PATTERNS = tuple(
     re.compile(pattern, re.IGNORECASE)
     for pattern in (
         # English and international online slang.
-        r"\b(?:you(?:'re| are|r)?|u r|ur)\s+(?:(?:a|an|such a)\s+)?(?:idiot|moron|dumbass|dumb\s+shit|stupid|fool|loser|bitch|asshole|arsehole|bastard|piece of shit|shithead|dipshit|scumbag|trash)\b",
+        r"\b(?:you(?:'re| are|r)?|u r|ur)\s+(?:(?:a|an|such a)\s+)?(?:(?:fucking|fuckin|damn|really|very|such a)\s+)?(?:idiot|moron|dumbass|dumb\s+shit|stupid|fool|loser|bitch|asshole|arsehole|bastard|piece of shit|shithead|dipshit|scumbag|trash)\b",
         r"\b(?:fuck you|screw you|you suck|go to hell|you piece of shit|you are trash)\b",
         # French.
         r"\b(?:tu es|t'es|vous êtes|vous etes)\s+(?:(?:un|une)\s+)?(?:idiot|idiote|imbécile|imbécile|con|connard|connasse|salaud|salope|abruti|ordure)\b",
