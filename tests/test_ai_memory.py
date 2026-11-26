@@ -145,13 +145,14 @@ def test_memory_identity_does_not_expose_room_or_member_identifiers():
 
 
 @pytest.mark.asyncio
-async def test_expired_memory_is_not_restored_and_is_removed(memory, monkeypatch):
+async def test_expired_memory_is_not_restored_and_is_removed(memory):
     store, client = memory
     assert await store.set_enabled("room-a", "user-1", True) is True
     assert await store.save("room-a", "user-1", [
         {"role": "user", "content": "Este contexto debe caducar."},
     ]) is True
     client.point["payload"]["expires_at"] = 1
+    store._last_cleanup = 0.0
 
     assert await store.is_enabled("room-a", "user-1") is False
     assert await store.load("room-a", "user-1") == []
