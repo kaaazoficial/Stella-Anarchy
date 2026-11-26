@@ -79,6 +79,33 @@ _PLAYFUL_INSULT_PATTERNS = (
         re.IGNORECASE,
     ),
 )
+_PLAYFUL_HUMILIATION_PATTERNS = (
+    re.compile(
+        r"\b(?:te (?:humill[eé]|gan[eé]|destru[ií]|dej[eé] en rid[ií]culo|"
+        r"cerr[eé] la boca|call[eé])|acabo de humillarte|"
+        r"quedaste en rid[ií]culo|te quedaste sin palabras)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\b(?:eres un chiste|no das risa|tu (?:humor|chiste|respuesta) "
+        r"(?:es|da) (?:pena|asco)|hasta un bot sabe m[aá]s|"
+        r"ni para eso sirves|te falta calle)\b",
+        re.IGNORECASE,
+    ),
+)
+_PLAYFUL_JOKE_PATTERNS = (
+    re.compile(
+        r"\b(?:era broma|es broma|te estoy molestando|no te enojes|"
+        r"no te piques|jaj+a+|xd+|lmao|roast|te estoy tomando el pelo)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\b(?:te gan[eé]|te humill[eé]|te destru[ií]|"
+        r"te dej[eé] en rid[ií]culo|te cerr[eé] la boca|"
+        r"te call[eé]|te quedaste sin palabras)\b",
+        re.IGNORECASE,
+    ),
+)
 _SERIOUS_DISTRESS_PATTERNS = (
     re.compile(
         r"\b(?:estoy sufriendo|me quiero morir|quiero hacerme daño|"
