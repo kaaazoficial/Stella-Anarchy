@@ -527,6 +527,7 @@ class VectorMemory:
                 json={
                     "vector": vector,
                     "limit": max(1, min(8, int(limit))),
+                    "score_threshold": self.score_threshold,
                     "with_payload": True,
                     "filter": {
                         "must": [
