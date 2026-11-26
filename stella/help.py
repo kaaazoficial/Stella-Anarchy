@@ -116,13 +116,21 @@ ALIASES = {
 }
 
 @lru_cache(maxsize=64)
-def filter_commands_help_text(help_text: str, topic: str | None = None) -> str:
+def filter_commands_help_text(
+    help_text: str,
+    topic: str | None = None,
+    *,
+    include_admin: bool = True,
+) -> str:
     key = _normalize(topic or "")
-    if not key or key in {"todo","todos","completo","all","menu"}:
-        return str(help_text)
+    if not key or key in {"todo", "todos", "completo", "all", "menu"}:
+        if include_admin:
+            return str(help_text)
+        admin_heading = "[CB] ✦ 6. ADMINISTRACIÓN Y ESTADO ✦"
+        return str(help_text).split(admin_heading, 1)[0].rstrip()
     index = ALIASES.get(key)
-    if index is None:
-        return "[CB] ✦ STELLA · GUÍA DE COMANDOS ✦\n[C] Categorías: ia, social, juegos, musica, multimedia, admin."
+    if index is None or (index == 5 and not include_admin):
+        return "[CB] ✦ STELLA · GUÍA DE COMANDOS ✦\\n[C] No hay una categoría disponible con ese nombre."
     p = "!"
     for line in str(help_text).splitlines():
         if line.startswith("[C] Prefijos aceptados: "):
