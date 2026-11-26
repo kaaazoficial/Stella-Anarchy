@@ -170,7 +170,7 @@ _MULTILINGUAL_INSULT_PATTERNS = tuple(
 _MULTI_STANDALONE_INSULT = re.compile(
     r"^(?:idiot|moron|dumbass|stupid|fool|loser|bitch|asshole|arsehole|"
     r"bastard|shithead|dipshit|connard|connasse|salaud|salope|abruti|"
-    r"idiota|imbecil|burro|burra|putit[oa]|conchud[oa]|pelotud[oa]|bolud[oa]|"
+    r"idiota|imb[eé]cil|burro|burra|weon[ae]|hueon[ae]|putit[oa]|conchud[oa]|pelotud[oa]|bolud[oa]|"
     r"forr[oa]|gilipollas|otário|otaria|babaca|stronzo|stronza|"
     r"coglione|cogliona|cretino|cretina|дурак|дура|идиот|идиотка|дебил|"
     r"غبي|غبية|أحمق|احمق|حمار|بلاهة|बेवकूफ|मूर्ख|गधा|傻逼|傻子|白痴|笨蛋|"
@@ -226,8 +226,8 @@ def classify_playful_stella_message(
     if not text:
         return None
     if re.fullmatch(r"(?:j+a+j+a+|x+d+|l+m+a+o+|[😂🤣😆😹]+)[.!?¡¿]*", text, re.IGNORECASE):
-        return None
-    text = re.sub(r"^\\[(?:c|ci|cb)\\]\\s*", "", text, flags=re.IGNORECASE)
+        return "teasing" if explicitly_addressed else None
+    text = re.sub(r"^\[(?:c|ci|cb)\]\s*", "", text, flags=re.IGNORECASE)
     if any(pattern.search(text) for pattern in _SERIOUS_DISTRESS_PATTERNS):
         return None
     if _INSULT_MEANING_QUESTION.search(text) or _NON_PLAYFUL_BOUNDARY.search(text):
@@ -1156,6 +1156,23 @@ class StellaBot:
         if self._is_stella_reply(room_id, message, event):
             return True
         sources = (message, event or {})
+        objects = self._reply_reference_objects(*sources)
+        expected = self._stella_identity_ids()
+        # If the reply already carries the original message author, its UID is
+        # authoritative; do not issue a second API read for social commands.
+        for item in objects:
+            author = item.get("author") or item.get("sender") or item.get("user")
+            if not isinstance(author, dict):
+                continue
+            author_ids = {
+                str(author.get(key) or "").strip()
+                for key in ("uid", "userId", "user_id", "id", "botId", "bot_id")
+                if str(author.get(key) or "").strip()
+            }
+            if author_ids & expected:
+                return True
+            if author_ids:
+                return False
         message_ids: set[str] = set()
         for source in sources:
             for key in (
@@ -1166,7 +1183,7 @@ class StellaBot:
                 value = source.get(key)
                 if isinstance(value, (str, int)) and str(value).strip().isdigit():
                     message_ids.add(str(value).strip())
-        for item in self._reply_reference_objects(*sources):
+        for item in objects:
             for key in ("messageId", "message_id", "id"):
                 value = item.get(key)
                 if isinstance(value, (str, int)) and str(value).strip().isdigit():
