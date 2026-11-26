@@ -16,7 +16,7 @@ from fastapi.responses import JSONResponse, Response
 
 from stella.bot import StellaBot
 from stella.boot import IMPORT_STARTED_AT
-from stella.config import Settings
+from stella.config import Settings, get_gemini_api_key
 from stella.platform import AnarchyClient
 from stella.storage import Store
 from stella.metrics import render_prometheus_metrics
@@ -198,7 +198,7 @@ async def health() -> JSONResponse:
         if vector_memory is not None else "no inicializada"
     )
     ai_configured = bool(
-        os.getenv("GEMINI_API_KEY", "").strip()
+        get_gemini_api_key()
         or os.getenv("GROQ_API_KEY", "").strip()
     )
     payload = {

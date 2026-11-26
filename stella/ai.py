@@ -9,6 +9,8 @@ from urllib.parse import quote
 
 import httpx
 
+from stella.config import get_gemini_api_key
+
 log = logging.getLogger("stella.ai")
 
 DEFAULT_GEMINI_MODEL = "gemini-3.5-flash-lite"
@@ -30,7 +32,7 @@ class StellaAI:
     """Gemini-first AI with Groq fallback; prompts and answers are never persisted."""
 
     def __init__(self) -> None:
-        self.gemini_key = os.getenv("GEMINI_API_KEY", "").strip()
+        self.gemini_key = get_gemini_api_key()
         self.gemini_model = os.getenv("GEMINI_MODEL", DEFAULT_GEMINI_MODEL).strip()
         self.gemini_base = os.getenv("GEMINI_API_URL", DEFAULT_GEMINI_BASE).rstrip("/")
         self.groq_key = os.getenv("GROQ_API_KEY", "").strip()
