@@ -1,6 +1,7 @@
 """Short-lived semantic memory for public room messages."""
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import re
@@ -30,6 +31,7 @@ class VectorMemory:
         self.client: httpx.AsyncClient | None = None
         self.ready = False
         self.last_cleanup = 0.0
+        self._collection_lock = asyncio.Lock()
 
         # Authentication failures are permanent for this process. Render restarts
         # the service after a key change, which resets the breaker safely.
@@ -70,9 +72,21 @@ class VectorMemory:
         now = time.monotonic()
         if now - self.last_failure_log_at < 60:
             return
-        status = getattr(getattr(exc, "response", None), "status_code", None)
+        response = getattr(exc, "response", None)
+        status = getattr(response, "status_code", None)
         reason = f"HTTP {status}" if status is not None else type(exc).__name__
-        log.warning("Vector memory %s failed (%s).", operation, reason)
+        detail = ""
+        if response is not None:
+            try:
+                payload = response.json()
+                if isinstance(payload, dict):
+                    status_data = payload.get("status")
+                    detail = str(status_data.get("error") if isinstance(status_data, dict) else payload.get("error") or "")[:180]
+            except Exception:
+                detail = ""
+        detail = re.sub(r"(?i)(api[_ -]?key|token|password)\s*[:=]\s*[^\s,;]+", r"\1=[REDACTED]", detail)
+        suffix = f" · {detail}" if detail else ""
+        log.warning("Vector memory %s failed (%s)%s.", operation, reason, suffix)
         self.last_failure_log_at = now
 
     def _schedule_retry(self) -> None:
@@ -134,6 +148,12 @@ class VectorMemory:
     async def ensure_collection(self) -> None:
         if self.ready:
             return
+        async with self._collection_lock:
+            if self.ready:
+                return
+            await self._ensure_collection_locked()
+
+    async def _ensure_collection_locked(self) -> None:
         client = await self._http()
         response = await client.get(
             f"{self.url}/collections/{self.collection}",
