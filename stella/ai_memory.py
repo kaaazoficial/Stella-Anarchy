@@ -1,4 +1,4 @@
-"""Opt-in, durable AI conversation memory backed by Qdrant."""
+"""Opt-in, durable AI conversation and fact memory backed by Qdrant."""
 from __future__ import annotations
 
 import asyncio
@@ -16,9 +16,58 @@ import httpx
 
 log = logging.getLogger("stella.ai_memory")
 
+_ALLOWED_FACT_TOPICS = frozenset({
+    "nota", "proyecto", "objetivo", "preferencia", "estudio", "trabajo", "interes",
+})
+_MEMORY_SECRET_RE = re.compile(
+    r"(?i)(?:api[_ -]?key|access[_ -]?token|token|password|contraseñ|clave|secret|"
+    r"bearer|https?://|www\\.|[\\w.+-]+@[\\w.-]+\\.[a-z]{2,}|\\b\\d{7,}\\b)"
+)
+_MEMORY_SENSITIVE_RE = re.compile(
+    r"(?i)\\b(?:me diagnosticaron|tengo (?:depresi[oó]n|ansiedad|bipolaridad|"
+    r"diabetes|epilepsia|vih|c[aá]ncer|una enfermedad)|tomo (?:medicaci[oó]n|"
+    r"antidepresivos|ansiol[ií]ticos)|mi historial m[eé]dico|mi salud mental|"
+    r"mi orientaci[oó]n sexual|mi vida sexual|mi religi[oó]n|soy (?:cat[oó]lic[oa]|"
+    r"evang[eé]lic[oa]|musulm[aá]n|jud[ií]o|ate[oa])|mi partido pol[ií]tico|"
+    r"voto por|mi domicilio|mi direcci[oó]n|mi n[uú]mero de tel[eé]fono|"
+    r"mi correo electr[oó]nico)\\b"
+)
+_EXPLICIT_REMEMBER_RE = re.compile(
+    r"^(?:stella[, ]*)?(?:recuerda(?:me)?|no olvides|ten en cuenta|ten presente|"
+    r"guarda en tu memoria|acu[eé]rdate de)\\s+(?:que\\s+)?(?P<fact>.+)$",
+    re.IGNORECASE,
+)
+_STABLE_FACT_PATTERNS = (
+    ("proyecto", re.compile(
+        r"\\b(?:mi proyecto|estoy (?:creando|desarrollando|construyendo|trabajando en))\\s+"
+        r"(?:se llama\\s+|es\\s+|consiste en\\s+)?(?P<fact>[^.!?\\n]{5,300})",
+        re.IGNORECASE,
+    )),
+    ("objetivo", re.compile(
+        r"\\b(?:mi objetivo|mi meta|mi prop[oó]sito)\\s+(?:es|consiste en)\\s+"
+        r"(?P<fact>[^.!?\\n]{5,300})",
+        re.IGNORECASE,
+    )),
+    ("preferencia", re.compile(
+        r"\\b(?:prefiero|me gusta|me encanta|no me gusta|no soporto)\\s+"
+        r"(?P<fact>[^.!?\\n]{5,240})",
+        re.IGNORECASE,
+    )),
+    ("estudio", re.compile(
+        r"\\b(?:estudio|estoy estudiando|mi carrera es|me estoy formando en)\\s+"
+        r"(?P<fact>[^.!?\\n]{3,240})",
+        re.IGNORECASE,
+    )),
+    ("trabajo", re.compile(
+        r"\\b(?:trabajo en|trabajo como|mi trabajo es|me dedico a)\\s+"
+        r"(?P<fact>[^.!?\\n]{3,240})",
+        re.IGNORECASE,
+    )),
+)
+
 
 class QdrantConversationMemory:
-    """Stores a small rolling transcript per room/member, with explicit opt-in at the caller."""
+    """Stores recent turns and durable, user-confirmed facts per room/member."""
 
     def __init__(self, *, client: httpx.AsyncClient | None = None) -> None:
         self.url = os.getenv("QDRANT_URL", "").strip().rstrip("/")
@@ -30,6 +79,7 @@ class QdrantConversationMemory:
         )
         self._last_cleanup = 0.0
         self.max_turns = 10
+        self.max_facts = 20
         self.client = client
         self._owns_client = client is None
         self._ready = False
@@ -43,7 +93,10 @@ class QdrantConversationMemory:
     def status(self) -> str:
         if not self.enabled:
             return "no configurada: faltan QDRANT_URL o QDRANT_API_KEY"
-        return f"Qdrant disponible; retención de {self.retention_days} días por usuario y sala"
+        return (
+            f"Qdrant disponible; retención de {self.retention_days} días por usuario y sala; "
+            f"hasta {self.max_facts} recuerdos confirmados"
+        )
 
     def _headers(self) -> dict[str, str]:
         return {"api-key": self.api_key, "Content-Type": "application/json"}
@@ -64,7 +117,7 @@ class QdrantConversationMemory:
 
     @staticmethod
     def _identity(room_id: str, uid: str) -> tuple[str, str]:
-        raw = f"{str(room_id)}\0{str(uid)}"
+        raw = f"{str(room_id)}\\0{str(uid)}"
         digest = hashlib.sha256(raw.encode("utf-8", "replace")).hexdigest()
         point_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"stella-ai-memory:{digest}"))
         return digest, point_id
@@ -121,7 +174,23 @@ class QdrantConversationMemory:
             log.warning("Expired AI memory cleanup failed (%s).", type(exc).__name__)
 
     @staticmethod
-    def _clean_turns(turns: list[dict[str, Any]], limit: int = 10) -> list[dict[str, str]]:
+    def _redact_secrets(content: str) -> str:
+        text = re.sub(
+            r"(?i)\\b(api[_ -]?key|access[_ -]?token|token|password|contraseña|clave|secret)\\s*[:=]\\s*([^\\s,;]+)",
+            r"\\1=[REDACTED]",
+            content,
+        )
+        text = re.sub(r"(?i)\\bBearer\\s+[^\\s,;]+", "Bearer [REDACTED]", text)
+        text = re.sub(
+            r"(?i)\\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,}\\b",
+            "[EMAIL OMITIDO]",
+            text,
+        )
+        text = re.sub(r"(?<!\\w)\\+?\\d[\\d ()-]{7,}\\d(?!\\w)", "[TELÉFONO OMITIDO]", text)
+        return text
+
+    @classmethod
+    def _clean_turns(cls, turns: list[dict[str, Any]], limit: int = 10) -> list[dict[str, str]]:
         cleaned: list[dict[str, str]] = []
         safe_limit = max(1, min(20, int(limit)))
         source = turns if isinstance(turns, list) else []
@@ -134,16 +203,139 @@ class QdrantConversationMemory:
             content = " ".join(str(item.get("content") or "").split())
             if not content:
                 continue
-            # Never preserve obvious credentials or secrets in long-term context.
-            content = re.sub(
-                r"(?i)\b(api[_ -]?key|access[_ -]?token|token|password|contraseña|clave|secret)\s*[:=]\s*([^\s,;]+)",
-                r"\1=[REDACTED]",
-                content,
-            )
-            content = re.sub(r"(?i)\bBearer\s+[^\s,;]+", "Bearer [REDACTED]", content)
+            content = cls._redact_secrets(content)
             maximum = 1400 if role == "user" else 1200
             cleaned.append({"role": role, "content": content[:maximum]})
         return cleaned[-safe_limit:]
+
+    @classmethod
+    def _clean_facts(cls, facts: list[dict[str, Any]], limit: int = 20) -> list[dict[str, Any]]:
+        cleaned: list[dict[str, Any]] = []
+        safe_limit = max(1, min(30, int(limit)))
+        for item in (facts if isinstance(facts, list) else [])[-safe_limit * 2:]:
+            if not isinstance(item, dict):
+                continue
+            content = " ".join(str(item.get("content") or "").split()).strip()
+            topic = str(item.get("topic") or "nota").casefold()
+            if topic not in _ALLOWED_FACT_TOPICS:
+                topic = "nota"
+            if not content or len(content) > 360:
+                continue
+            if _MEMORY_SECRET_RE.search(content) or _MEMORY_SENSITIVE_RE.search(content):
+                continue
+            identifier = str(item.get("id") or "").strip()
+            if not re.fullmatch(r"[A-Za-z0-9_-]{6,40}", identifier):
+                identifier = uuid.uuid4().hex[:12]
+            try:
+                updated_at = int(item.get("updated_at") or time.time())
+            except (TypeError, ValueError, OverflowError):
+                updated_at = int(time.time())
+            cleaned.append({
+                "id": identifier,
+                "topic": topic,
+                "content": cls._redact_secrets(content),
+                "updated_at": updated_at,
+            })
+        # Keep the newest version of a repeated fact, preserving its stable ID.
+        deduplicated: dict[str, dict[str, Any]] = {}
+        for item in cleaned:
+            key = re.sub(r"\\W+", " ", item["content"].casefold()).strip()
+            previous = deduplicated.get(key)
+            if previous is None or item["updated_at"] >= previous["updated_at"]:
+                deduplicated[key] = item
+        return sorted(deduplicated.values(), key=lambda item: item["updated_at"])[-safe_limit:]
+
+    @staticmethod
+    def extract_explicit_facts(value: str) -> list[dict[str, str]]:
+        """Extract only clear memory requests or stable self-descriptions."""
+        text = " ".join(str(value or "").split()).strip()
+        if not text or len(text) > 1200 or text.startswith(("!", "-", "/")):
+            return []
+        match = _EXPLICIT_REMEMBER_RE.match(text)
+        candidates: list[tuple[str, str]] = []
+        if match:
+            candidates.append(("nota", match.group("fact").strip()))
+        else:
+            for topic, pattern in _STABLE_FACT_PATTERNS:
+                found = pattern.search(text)
+                if found:
+                    fact = found.group("fact").strip(" ,;:-")
+                    if fact:
+                        candidates.append((topic, fact))
+        result = []
+        for topic, fact in candidates[:2]:
+            fact = " ".join(fact.split()).strip()
+            if not fact or len(fact) > 360:
+                continue
+            if _MEMORY_SECRET_RE.search(fact) or _MEMORY_SENSITIVE_RE.search(fact):
+                continue
+            result.append({"topic": topic, "content": fact})
+        return result
+
+    async def _read_payload(self, room_id: str, uid: str) -> dict[str, Any] | None:
+        await self.ensure_collection()
+        digest, point_id = self._identity(room_id, uid)
+        client = await self._http()
+        response = await client.get(
+            f"{self._collection_url()}/points/{point_id}",
+            headers=self._headers(),
+            params={"with_payload": "true", "with_vector": "false"},
+        )
+        if response.status_code == 404:
+            return None
+        response.raise_for_status()
+        result = response.json().get("result")
+        payload = result.get("payload", {}) if isinstance(result, dict) else {}
+        if payload.get("identity") != digest:
+            return None
+        if int(payload.get("expires_at", 0)) <= int(time.time()):
+            await self.forget(room_id, uid)
+            return None
+        return payload
+
+    async def _write_payload(
+        self, room_id: str, uid: str, payload: dict[str, Any], *, enabled: bool = True
+    ) -> bool:
+        digest, point_id = self._identity(room_id, uid)
+        now = int(time.time())
+        safe_payload = dict(payload)
+        safe_payload.update({
+            "identity": digest,
+            "enabled": bool(enabled),
+            "updated_at": now,
+            "expires_at": now + self.retention_days * 86400,
+        })
+        safe_payload["turns"] = json.dumps(
+            self._clean_turns(self._parse_list(safe_payload.get("turns")), self.max_turns),
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+        safe_payload["facts"] = json.dumps(
+            self._clean_facts(self._parse_list(safe_payload.get("facts")), self.max_facts),
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+        client = await self._http()
+        response = await client.put(
+            f"{self._collection_url()}/points?wait=true",
+            headers=self._headers(),
+            json={"points": [{
+                "id": point_id,
+                "vector": [0.0],
+                "payload": safe_payload,
+            }]},
+        )
+        response.raise_for_status()
+        return True
+
+    @staticmethod
+    def _parse_list(value: Any) -> list[dict[str, Any]]:
+        if isinstance(value, str):
+            try:
+                value = json.loads(value)
+            except (TypeError, ValueError):
+                return []
+        return value if isinstance(value, list) else []
 
     async def load(self, room_id: str, uid: str) -> list[dict[str, str]]:
         if not self.enabled or not room_id or not uid:
@@ -151,61 +343,119 @@ class QdrantConversationMemory:
         try:
             await self.ensure_collection()
             await self._cleanup_expired_if_due()
-            digest, point_id = self._identity(room_id, uid)
-            client = await self._http()
-            response = await client.get(
-                f"{self._collection_url()}/points/{point_id}",
-                headers=self._headers(),
-                params={"with_payload": "true", "with_vector": "false"},
-            )
-            if response.status_code == 404:
+            payload = await self._read_payload(room_id, uid)
+            if not payload or payload.get("enabled") is not True:
                 return []
-            response.raise_for_status()
-            result = response.json().get("result")
-            payload = result.get("payload", {}) if isinstance(result, dict) else {}
-            if payload.get("identity") != digest or payload.get("enabled") is not True:
-                return []
-            if int(payload.get("expires_at", 0)) <= int(time.time()):
-                await self.forget(room_id, uid)
-                return []
-            raw = payload.get("turns")
-            turns = json.loads(raw) if isinstance(raw, str) else raw
-            return self._clean_turns(turns if isinstance(turns, list) else [], self.max_turns)
+            return self._clean_turns(self._parse_list(payload.get("turns")), self.max_turns)
         except Exception as exc:
             log.warning("Persistent AI memory load failed (%s).", type(exc).__name__)
+            return []
+
+    async def load_facts(self, room_id: str, uid: str) -> list[dict[str, Any]]:
+        if not self.enabled or not room_id or not uid:
+            return []
+        try:
+            await self.ensure_collection()
+            await self._cleanup_expired_if_due()
+            payload = await self._read_payload(room_id, uid)
+            if not payload or payload.get("enabled") is not True:
+                return []
+            return self._clean_facts(self._parse_list(payload.get("facts")), self.max_facts)
+        except Exception as exc:
+            log.warning("Persistent AI fact-memory load failed (%s).", type(exc).__name__)
             return []
 
     async def save(self, room_id: str, uid: str, turns: list[dict[str, Any]]) -> bool:
         if not self.enabled or not room_id or not uid:
             return False
-        cleaned = self._clean_turns(turns, self.max_turns)
         try:
             await self.ensure_collection()
             await self._cleanup_expired_if_due()
-            digest, point_id = self._identity(room_id, uid)
-            client = await self._http()
-            now = int(time.time())
-            response = await client.put(
-                f"{self._collection_url()}/points?wait=true",
-                headers=self._headers(),
-                json={
-                    "points": [{
-                        "id": point_id,
-                        "vector": [0.0],
-                        "payload": {
-                            "identity": digest,
-                            "enabled": True,
-                            "turns": json.dumps(cleaned, ensure_ascii=False, separators=(",", ":")),
-                            "updated_at": now,
-                            "expires_at": now + self.retention_days * 86400,
-                        },
-                    }]
-                },
+            payload = await self._read_payload(room_id, uid) or {}
+            if payload.get("enabled") is False:
+                return False
+            payload["turns"] = json.dumps(
+                self._clean_turns(turns, self.max_turns),
+                ensure_ascii=False,
+                separators=(",", ":"),
             )
-            response.raise_for_status()
-            return True
+            return await self._write_payload(room_id, uid, payload, enabled=True)
         except Exception as exc:
             log.warning("Persistent AI memory save failed (%s).", type(exc).__name__)
+            return False
+
+    async def remember_fact(
+        self, room_id: str, uid: str, content: str, *, topic: str = "nota"
+    ) -> str | None:
+        if not self.enabled or not room_id or not uid:
+            return None
+        cleaned = self._clean_facts([{
+            "id": uuid.uuid4().hex[:12],
+            "topic": topic,
+            "content": content,
+            "updated_at": int(time.time()),
+        }], 1)
+        if not cleaned:
+            return None
+        try:
+            await self.ensure_collection()
+            await self._cleanup_expired_if_due()
+            payload = await self._read_payload(room_id, uid)
+            if not payload or payload.get("enabled") is not True:
+                return None
+            facts = self._clean_facts(self._parse_list(payload.get("facts")), self.max_facts)
+            new_fact = cleaned[0]
+            normalized = re.sub(r"\\W+", " ", new_fact["content"].casefold()).strip()
+            for index, existing in enumerate(facts):
+                existing_normalized = re.sub(r"\\W+", " ", existing["content"].casefold()).strip()
+                if existing["topic"] == new_fact["topic"] and existing_normalized == normalized:
+                    new_fact["id"] = existing["id"]
+                    facts[index] = new_fact
+                    break
+            else:
+                facts.append(new_fact)
+            payload["facts"] = json.dumps(
+                self._clean_facts(facts, self.max_facts),
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )
+            await self._write_payload(room_id, uid, payload, enabled=True)
+            return new_fact["id"]
+        except Exception as exc:
+            log.warning("Persistent AI fact-memory save failed (%s).", type(exc).__name__)
+            return None
+
+    async def remember_from_message(self, room_id: str, uid: str, value: str) -> list[str]:
+        """Capture only explicit remember requests and clear, stable first-person facts."""
+        saved: list[str] = []
+        for fact in self.extract_explicit_facts(value):
+            identifier = await self.remember_fact(
+                room_id, uid, fact["content"], topic=fact["topic"]
+            )
+            if identifier:
+                saved.append(identifier)
+        return saved
+
+    async def forget_fact(self, room_id: str, uid: str, fact_id: str) -> bool:
+        if not self.enabled or not room_id or not uid:
+            return False
+        target = str(fact_id or "").strip()
+        if not re.fullmatch(r"[A-Za-z0-9_-]{6,40}", target):
+            return False
+        try:
+            await self.ensure_collection()
+            await self._cleanup_expired_if_due()
+            payload = await self._read_payload(room_id, uid)
+            if not payload or payload.get("enabled") is not True:
+                return False
+            facts = self._clean_facts(self._parse_list(payload.get("facts")), self.max_facts)
+            remaining = [item for item in facts if item["id"] != target]
+            if len(remaining) == len(facts):
+                return False
+            payload["facts"] = json.dumps(remaining, ensure_ascii=False, separators=(",", ":"))
+            return await self._write_payload(room_id, uid, payload, enabled=True)
+        except Exception as exc:
+            log.warning("Persistent AI fact-memory deletion failed (%s).", type(exc).__name__)
             return False
 
     async def is_enabled(self, room_id: str, uid: str) -> bool:
@@ -214,21 +464,8 @@ class QdrantConversationMemory:
         try:
             await self.ensure_collection()
             await self._cleanup_expired_if_due()
-            digest, point_id = self._identity(room_id, uid)
-            client = await self._http()
-            response = await client.get(
-                f"{self._collection_url()}/points/{point_id}",
-                headers=self._headers(),
-                params={"with_payload": "true", "with_vector": "false"},
-            )
-            if response.status_code == 404:
-                return False
-            response.raise_for_status()
-            result = response.json().get("result")
-            payload = result.get("payload", {}) if isinstance(result, dict) else {}
-            if payload.get("identity") != digest or payload.get("enabled") is not True:
-                return False
-            return int(payload.get("expires_at", 0)) > int(time.time())
+            payload = await self._read_payload(room_id, uid)
+            return bool(payload and payload.get("enabled") is True)
         except Exception as exc:
             log.warning("Persistent AI memory preference read failed (%s).", type(exc).__name__)
             return False
@@ -236,77 +473,39 @@ class QdrantConversationMemory:
     async def set_enabled(self, room_id: str, uid: str, enabled: bool) -> bool:
         if not self.enabled or not room_id or not uid:
             return False
-        if not enabled:
-            # Keep a durable opt-out tombstone so stale local settings cannot
-            # re-enable memory after a restart. Conversation text is erased.
-            try:
-                await self.ensure_collection()
-                await self._cleanup_expired_if_due()
-                digest, point_id = self._identity(room_id, uid)
-                client = await self._http()
-                now = int(time.time())
-                response = await client.put(
-                    f"{self._collection_url()}/points?wait=true",
-                    headers=self._headers(),
-                    json={"points": [{
-                        "id": point_id,
-                        "vector": [0.0],
-                        "payload": {
-                            "identity": digest,
-                            "enabled": False,
-                            "turns": "[]",
-                            "updated_at": now,
-                            "expires_at": now + self.retention_days * 86400,
-                        },
-                    }]},
-                )
-                response.raise_for_status()
-                return True
-            except Exception as exc:
-                log.warning("Persistent AI memory opt-out failed (%s).", type(exc).__name__)
-                return False
-        # Persist consent in Qdrant itself, not ephemeral local settings.
-        # Preserve existing turns if a record is already present.
         try:
             await self.ensure_collection()
             await self._cleanup_expired_if_due()
-            digest, point_id = self._identity(room_id, uid)
-            client = await self._http()
-            response = await client.get(
-                f"{self._collection_url()}/points/{point_id}",
-                headers=self._headers(),
-                params={"with_payload": "true", "with_vector": "false"},
-            )
-            if response.status_code == 404:
-                return await self.save(room_id, uid, [])
-            response.raise_for_status()
-            result = response.json().get("result")
-            payload = result.get("payload", {}) if isinstance(result, dict) else {}
-            if payload.get("identity") != digest:
-                return False
-            if int(payload.get("expires_at", 0)) <= int(time.time()):
-                return await self.save(room_id, uid, [])
-            payload["enabled"] = True
-            payload["updated_at"] = int(time.time())
-            payload["expires_at"] = int(time.time()) + self.retention_days * 86400
-            written = await client.put(
-                f"{self._collection_url()}/points?wait=true",
-                headers=self._headers(),
-                json={"points": [{
-                    "id": point_id,
-                    "vector": [0.0],
-                    "payload": payload,
-                }]},
-            )
-            written.raise_for_status()
-            return True
+            payload = await self._read_payload(room_id, uid) or {}
+            if enabled:
+                return await self._write_payload(room_id, uid, payload, enabled=True)
+            # Keep a durable opt-out tombstone but erase conversation and fact content.
+            payload["turns"] = "[]"
+            payload["facts"] = "[]"
+            return await self._write_payload(room_id, uid, payload, enabled=False)
         except Exception as exc:
-            log.warning("Persistent AI memory opt-in failed (%s).", type(exc).__name__)
+            log.warning(
+                "Persistent AI memory %s failed (%s).",
+                "opt-in" if enabled else "opt-out",
+                type(exc).__name__,
+            )
             return False
 
     async def clear(self, room_id: str, uid: str) -> bool:
-        """Erase conversation turns while keeping the explicit opt-in enabled."""
-        return await self.save(room_id, uid, [])
+        """Erase conversation history and saved facts while keeping explicit opt-in."""
+        if not self.enabled or not room_id or not uid:
+            return False
+        try:
+            await self.ensure_collection()
+            payload = await self._read_payload(room_id, uid)
+            if not payload or payload.get("enabled") is not True:
+                return False
+            payload["turns"] = "[]"
+            payload["facts"] = "[]"
+            return await self._write_payload(room_id, uid, payload, enabled=True)
+        except Exception as exc:
+            log.warning("Persistent AI memory clear failed (%s).", type(exc).__name__)
+            return False
 
     async def forget(self, room_id: str, uid: str) -> bool:
         if not self.enabled or not room_id or not uid:
