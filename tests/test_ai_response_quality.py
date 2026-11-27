@@ -333,3 +333,67 @@ def test_short_group_chat_replies_keep_the_context_of_stellas_last_question(repl
     ]
 
     assert StellaAICore.is_contextual_followup(reply, history)
+
+
+def test_response_quality_guidance_prioritizes_specific_reactions_and_varied_wording():
+    from stella.persona import STELLA_RESPONSE_QUALITY_GUIDANCE
+
+    guidance = STELLA_RESPONSE_QUALITY_GUIDANCE.casefold()
+    assert "lee la intención social del mensaje" in guidance
+    assert "evita repetir la misma estructura sintáctica" in guidance
+    assert "no termines cada turno con una pregunta" in guidance
+    assert "no repitas la pregunta con otras palabras" in guidance
+    assert "no conviertas cada turno en un cuestionario" in guidance
+
+
+def test_assist_uses_previous_replies_only_as_anti_repetition_style_context(monkeypatch):
+    from stella.ai_core import StellaAICore
+
+    core = StellaAICore()
+    monkeypatch.setattr(core, "is_enabled", True)
+    key = "room:user"
+    core._append_history(key, "user", "Cuéntame un chiste.")
+    core._append_history(key, "assistant", "¡Claro! Aquí tienes uno: ...")
+    captured = {}
+
+    async def fake_request(instructions, messages, request_func, **kwargs):
+        captured["instructions"] = instructions
+        captured["messages"] = messages
+        return {"kind": "answer", "answer": "La electricidad es el movimiento de cargas."}
+
+    monkeypatch.setattr(core, "_request_assist_json", fake_request)
+    result = asyncio.run(core.assist(
+        "Explícame qué es la electricidad.", key, object(),
+        allowed_commands=frozenset(),
+    ))
+
+    assert result["answer"] == "La electricidad es el movimiento de cargas."
+    assert "REFERENCIAS ANTIRREPETICIÓN" in captured["instructions"]
+    assert "¡Claro! Aquí tienes uno" in captured["instructions"]
+    assert "solo estilo; no son contexto temático" in captured["instructions"]
+    assert "Cuéntame un chiste" not in str(captured["messages"])
+
+
+def test_shared_generic_cache_is_not_used_for_natural_conversation():
+    from stella.ai_core import StellaAICore
+
+    core = StellaAICore()
+    calls = []
+
+    async def fake_request(*args, **kwargs):
+        calls.append(kwargs)
+        return {"kind": "answer", "answer": "Una respuesta distinta."}
+
+    async def run():
+        core._request_json = fake_request
+        return await core._request_assist_json(
+            "instrucciones", [{"role": "user", "content": "hola"}], object(),
+            rate_key="member", session_key="room:member",
+            difficulty="simple", cacheable=False, response_mode="answer",
+        )
+
+    result = asyncio.run(run())
+    assert result["answer"] == "Una respuesta distinta."
+    assert len(calls) == 1
+    assert not core._simple_answer_cache
+    assert not core._simple_request_inflight
