@@ -170,7 +170,10 @@ async def receive_webhook(request: Request) -> dict[str, bool]:
 
     now = time.monotonic()
     while seen_events and now - next(iter(seen_events.values())) > 900:
-        seen_events.popitem(last=False)
+        expired_key, _ = seen_events.popitem(last=False)
+        expired_lock = event_locks.get(expired_key)
+        if expired_lock is not None and not expired_lock.locked():
+            event_locks.pop(expired_key, None)
     key = _event_key(event, raw)
 
     # Serialize deliveries of the same event. Do not mark it as seen until the
@@ -181,7 +184,10 @@ async def receive_webhook(request: Request) -> dict[str, bool]:
         if key in seen_events:
             return {"ok": True, "duplicate": True}
         while seen_events and now - next(iter(seen_events.values())) > 900:
-            seen_events.popitem(last=False)
+            expired_key, _ = seen_events.popitem(last=False)
+            expired_lock = event_locks.get(expired_key)
+            if expired_lock is not None and not expired_lock.locked():
+                event_locks.pop(expired_key, None)
 
         METRICS["webhook_events"] += 1
         event_type = str(event.get("type") or "").casefold()
@@ -210,8 +216,11 @@ async def receive_webhook(request: Request) -> dict[str, bool]:
         METRICS["webhook_dispatch_completed"] += 1
         seen_events[key] = time.monotonic()
         while len(seen_events) > SEEN_EVENTS_LIMIT:
-            seen_events.popitem(last=False)
-        event_locks.pop(key, None)
+            expired_key, _ = seen_events.popitem(last=False)
+            expired_lock = event_locks.get(expired_key)
+            if expired_lock is not None and not expired_lock.locked():
+                event_locks.pop(expired_key, None)
+        return {"ok": True}
 
 
 @app.get("/")
