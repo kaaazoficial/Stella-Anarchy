@@ -86,3 +86,15 @@ def test_incidents_are_isolated_between_rooms(tmp_path):
     monitor.record("room-a", "uid-1", "Member", finding)
     assert len(monitor.recent("room-a")) == 1
     assert monitor.recent("room-b") == []
+
+
+def test_normalization_detects_accented_minor_reference():
+    finding = classify_safety_message("Niños en una situación sexual")
+    assert finding is not None
+    assert finding.category == "sexualizacion_de_menores"
+
+
+def test_adult_content_marker_is_flagged():
+    finding = classify_safety_message("Dejen de publicar contenido +18 aquí")
+    assert finding is not None
+    assert finding.category == "contenido_sexual_explicito"
