@@ -16,7 +16,6 @@ def _sections(p: str):
             f"▸ {p}asistente <consulta> · {p}ia <consulta> — Conversación e instrucciones.",
             f"▸ {p}ia ayuda|preguntar <consulta>|estado|olvidar.",
             f"▸ Memoria automática: guarda contexto útil sin comandos · {p}memoria recuerdos|borrar <ID>|desactivar.",
-            f"▸ {p}ia probar|guardian|diagnostico — Controles [ADMIN].",
             f"▸ {p}investigar <tema> — general, comparar, verificar, cronologia o informe.",
             f"▸ {p}analizartexto <modo> <texto> · {p}analizar <texto o enlaces> · {p}ortografia <texto>.",
             f"▸ {p}calcular <operación> · {p}traducir <idioma> | <texto>.",
@@ -39,7 +38,7 @@ def _sections(p: str):
             f"▸ {p}evento|eventos — lista, crear, apuntarse o cerrar por ID.",
         ]),
         ("4. MÚSICA, VOZ Y LECTURA", [
-            f"▸ {p}join · {p}salirsala · {p}salas · {p}voz participantes|hablando|estado.",
+            f"▸ {p}join · {p}salirsala · {p}voz participantes|hablando|estado.",
             f"▸ {p}dj buscar <tema> · resultados 1|2 · reproducir|encolar <n> · cola · actual.",
             f"▸ {p}dj youtube <tema> · abre la búsqueda en YouTube; no se retransmite a LiveKit.",
             f"▸ {p}dj ayuda · pausa|reanudar|saltar|detener|volumen <0-100>|fuentes|ambiente <tema>.",
@@ -47,7 +46,7 @@ def _sections(p: str):
             f"▸ {p}dj quitar <n>|mover <a> <b>|vaciar|repetir off|una|cola.",
             f"▸ {p}dj transicion <0-2000>|duck on|off|estado — Fundido y atenuación durante TTS.",
             f"▸ {p}dj archivos|añadir <archivo> · {p}reproducir <archivo> — Audio local.",
-            f"▸ {p}dj favorito lista|guardar <n>|reproducir <n>|quitar <n>|probar [ADMIN].",
+            f"▸ {p}dj favorito lista|guardar <n>|reproducir <n>|quitar <n>.",
             f"▸ {p}playlist crear|lista|agregar|ver|reproducir|borrar.",
             f"▸ {p}volumen <0-100>|subirvolumen|bajarvolumen|silencio.",
             f"▸ {p}leer|noleer · {p}tts voces|probar|voz|velocidad|volumen|enlaces|menciones.",
@@ -56,21 +55,15 @@ def _sections(p: str):
         ("5. UTILIDADES Y MULTIMEDIA", [
             f"▸ {p}fecha · {p}zona <Area/Ciudad>.",
             f"▸ {p}multimedia imagen|video|audio <búsqueda> · {p}imagen <búsqueda> · {p}video <búsqueda> · {p}audio <búsqueda>.",
-            f"▸ {p}ping · {p}miuid · {p}idbot [ADMIN].",
+            f"▸ {p}ping · {p}miuid.",
         ]),
-        ("6. ADMINISTRACIÓN Y ESTADO", [
-            f"▸ {p}estado · {p}fuentes · {p}metricas · {p}autotest · {p}centro.",
-            f"▸ {p}admin resumen|actividad|antispam|avisos|historial.",
-            f"▸ {p}historial [cantidad]|buscar <texto>|usuario <UID/nombre>|desde AAAA-MM-DD|anterior <cursor>|exportar [cantidad]|integridad [ADMIN].",
-            f"▸ Los controles del DJ favoritos y diagnóstico requieren [ADMIN].",
-            f"▸ {p}antispam estado|on|off|limite N|ventana N|repeticiones N|enlaces N|menciones N.",
-            f"▸ {p}advertir @usuario [motivo] · {p}advertencias [@usuario] · {p}quitaradvertencia ID.",
-            f"▸ {p}respuestas estado|on|off · {p}respuesta añadir|lista|eliminar ID.",
-            f"▸ {p}perfilbot <nombre> | <estado> · {p}avatarbot <URL HTTPS>.",
-            f"▸ {p}silenciarchat · {p}hablarchat · {p}despertar — Silencio global reversible [OWNER].",
-            f"▸ También puedes decir «No le hables a nadie» y luego «Ya puedes hablar».",
-            f"▸ {p}eliminarmensajes — Solo mensajes propios identificados [ADMIN].",
-            "Los controles [ADMIN] requieren UID autorizado en ADMIN_UIDS o SINNER_UID; [OWNER] requiere el UID exacto de SINNER_UID.",
+        ("6. MEMORIA, CONTEXTO Y PRIVACIDAD", [
+            f"▸ {p}memoria recuerdos — Consulta tus recuerdos personales disponibles.",
+            f"▸ {p}memoria borrar <ID> — Elimina un recuerdo guardado.",
+            f"▸ {p}memoria desactivar|activar — Controla tu memoria personal en esta sala.",
+            "▸ La memoria personal es independiente del archivo cronológico de actividad de la sala.",
+            "▸ Stella puede recuperar mensajes recientes de esta misma sala cuando le hablan o responden.",
+            "▸ Stella no responde a cada mensaje: interviene cuando la llaman, le responden o se usa un comando.",
         ]),
     ]
 
@@ -112,17 +105,23 @@ ALIASES = {
     "juegos":2,"economia":2,"comunidad":2,"entretenimiento":2,
     "musica":3,"voz":3,"dj":3,"tts":3,
     "multimedia":4,"utilidades":4,
-    "admin":5,"administracion":5,"moderacion":5,"estado":5,
+    "memoria":5,"contexto":5,"privacidad":5,
 }
 
 @lru_cache(maxsize=64)
-def filter_commands_help_text(help_text: str, topic: str | None = None) -> str:
+def filter_commands_help_text(
+    help_text: str,
+    topic: str | None = None,
+    *,
+    include_admin: bool = True,
+) -> str:
+    """Filter the six public help categories; the admin catalogue is not a chat feature."""
     key = _normalize(topic or "")
-    if not key or key in {"todo","todos","completo","all","menu"}:
+    if not key or key in {"todo", "todos", "completo", "all", "menu"}:
         return str(help_text)
     index = ALIASES.get(key)
     if index is None:
-        return "[CB] ✦ STELLA · GUÍA DE COMANDOS ✦\n[C] Categorías: ia, social, juegos, musica, multimedia, admin."
+        return "[CB] ✦ STELLA · GUÍA DE COMANDOS ✦\n[C] Categorías: ia, social, juegos, musica, multimedia, memoria."
     p = "!"
     for line in str(help_text).splitlines():
         if line.startswith("[C] Prefijos aceptados: "):

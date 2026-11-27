@@ -66,6 +66,25 @@ def archive_event_type(event_type: str) -> str:
     normalized = str(event_type or "").strip().casefold()
     return _ARCHIVE_EVENT_TYPES.get(normalized, f"anarchy.{normalized or 'unknown'}")
 
+_PRIVATE_ADMIN_COMMANDS = AI_ADMIN_COMMANDS | frozenset({
+    "status", "warn", "warnings", "unwarn", "idbot", "botid",
+    "identidadbot", "salas", "silenciarchat", "hablarchat",
+    "despertar", "saludfuentes",
+})
+
+
+def _audit_admin_operation(command: str, room_id: str, authorized: bool) -> None:
+    """Record control-plane usage without exposing actor IDs or message content."""
+    room_fingerprint = hashlib.sha256(
+        str(room_id or "").encode("utf-8", "replace")
+    ).hexdigest()[:16]
+    audit_event(
+        "admin.command",
+        command=str(command or "unknown")[:48],
+        room_fingerprint=room_fingerprint,
+        authorized=bool(authorized),
+    )
+
 
 _PLAYFUL_INSULT_PATTERNS = (
     re.compile(
@@ -941,9 +960,9 @@ class StellaBot:
         return uid, name
 
     def _is_admin(self, uid: str) -> bool:
-        privileged = set(_uid_set(self.settings.admin_uids))
-        privileged.update(_uid_set(self.settings.additional_admin_uids))
-        privileged.update(_uid_set(self.settings.sinner_uid))
+        privileged = set(_uid_set(getattr(self.settings, "admin_uids", "")))
+        privileged.update(_uid_set(getattr(self.settings, "additional_admin_uids", "")))
+        privileged.update(_uid_set(getattr(self.settings, "sinner_uid", "")))
         return bool(uid) and uid in privileged
 
     def _is_owner(self, uid: str) -> bool:
@@ -989,58 +1008,38 @@ class StellaBot:
 
     async def _silence_chat(self, room_id, uid, name, args, message):
         if not self._is_owner(uid):
-            await self._reply(
-                room_id,
-                "Este control global está reservado al propietario de Stella.",
-                message,
-            )
+            _audit_admin_operation("global_silence", room_id, False)
             return
         try:
             await self.shared_state.set_setting(_GLOBAL_CHAT_SILENCE_KEY, "1")
-        except Exception:
-            log.exception("Unable to persist global chat silence in shared state.")
-            await self._reply(
-                room_id,
-                "No pude activar el silencio global porque el estado compartido no está disponible. No he cambiado el modo.",
-                message,
-            )
+        except Exception as exc:
+            log.warning("Unable to persist global chat silence (%s).", type(exc).__name__)
+            _audit_admin_operation("global_silence_failed", room_id, True)
             return
         stop_speech = getattr(self.voice, "stop_all_speech", None)
         if callable(stop_speech):
             await stop_speech()
-        await self._reply(
-            room_id,
-            "Modo de silencio global activado. No responderé en ningún chat hasta que uses !hablarchat.",
-            message,
-        )
+        _audit_admin_operation("global_silence_enabled", room_id, True)
 
     async def _resume_chat(self, room_id, uid, name, args, message):
         if not self._is_owner(uid):
-            await self._reply(
-                room_id,
-                "Solo el propietario de Stella puede reactivar sus respuestas.",
-                message,
-            )
+            _audit_admin_operation("global_silence_resume", room_id, False)
             return
         try:
             await self.shared_state.set_setting(_GLOBAL_CHAT_SILENCE_KEY, "0")
-        except Exception:
-            log.exception("Unable to clear global chat silence in shared state.")
-            await self._reply(
-                room_id,
-                "No pude desactivar el silencio global porque el estado compartido no está disponible. El silencio sigue activo.",
-                message,
-            )
+        except Exception as exc:
+            log.warning("Unable to clear global chat silence (%s).", type(exc).__name__)
+            _audit_admin_operation("global_silence_resume_failed", room_id, True)
             return
-        await self._reply(
-            room_id,
-            "Modo de silencio global desactivado. Ya puedo volver a responder.",
-            message,
-        )
+        _audit_admin_operation("global_silence_disabled", room_id, True)
 
     async def _reply(
         self, room_id: str, text: str, message: dict[str, Any],
     ) -> None:
+        # Administrative commands are intentionally silent in public rooms.
+        # Anarchy exposes no private bot-DM endpoint in this integration.
+        if message.get("_stella_admin_silent"):
+            return
         reply_id = message.get("messageId") or message.get("id")
         # Keep chat replies link-free; source names and attribution remain in the text.
         safe_text = re.sub(r"(?:https?://|www\.)[^\s<>]+", "[enlace omitido]", str(text), flags=re.IGNORECASE)
@@ -1407,11 +1406,7 @@ class StellaBot:
             if self._is_owner(uid):
                 await self._silence_chat(room_id, uid, name, "", message)
             else:
-                await self._reply(
-                    room_id,
-                    "Solo el propietario de Stella puede activar el silencio global.",
-                    message,
-                )
+                _audit_admin_operation("global_silence", room_id, False)
             return
         # A direct call containing only Stella's name (possibly with
         # punctuation or a short greeting) is a presence check, never an AI query.
@@ -1826,6 +1821,10 @@ class StellaBot:
             await self._social_action(room_id, uid, name, args, message)
             return
         handler = routes.get(command)
+        if command in _PRIVATE_ADMIN_COMMANDS:
+            authorized = self._is_admin(uid)
+            message["_stella_admin_silent"] = True
+            _audit_admin_operation(command, room_id, authorized)
         if handler is None:
             suggestion = suggest_command(command, set(routes) | social_actions)
             if suggestion:
@@ -2574,9 +2573,16 @@ class StellaBot:
 
     async def _help_command(self, room_id, uid, name, args, message):
         prefix = self.settings.command_prefix
+        # Never publish the administrative catalogue into a shared room,
+        # even when an administrator requests the public help menu.
+        include_admin = False
         if args.strip():
             text = build_commands_help_text(prefix)
-            await self._reply(room_id, filter_commands_help_text(text, args), message)
+            await self._reply(
+                room_id,
+                filter_commands_help_text(text, args, include_admin=include_admin),
+                message,
+            )
             return
         blocks = build_commands_help_blocks(prefix)
         await self._reply(room_id, blocks[0], message)

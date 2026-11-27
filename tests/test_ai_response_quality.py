@@ -180,6 +180,29 @@ def test_stella_never_guesses_a_person_gender_or_pronouns():
     assert "cómo prefiere que te refieras" in GENDER_NEUTRAL_GUIDANCE
 
 
+def test_stella_uses_feminine_self_references_without_gendering_members():
+    from stella.ai import STELLA_SYSTEM
+    from stella.ai_core import STELLA_IDENTITY_GUIDANCE, build_ai_instructions
+    from stella.persona import STELLA_SELF_IDENTITY_GUIDANCE
+
+    assert "stella es mujer" in STELLA_SELF_IDENTITY_GUIDANCE.casefold()
+    assert "utiliza siempre el género femenino" in STELLA_SELF_IDENTITY_GUIDANCE.casefold()
+    assert "únicamente a stella" in STELLA_SELF_IDENTITY_GUIDANCE.casefold()
+    assert "no deduzcas el género o los pronombres de otras personas" in STELLA_SELF_IDENTITY_GUIDANCE.casefold()
+
+    for prompt in (STELLA_SYSTEM, STELLA_IDENTITY_GUIDANCE):
+        assert STELLA_SELF_IDENTITY_GUIDANCE in prompt
+        assert "estoy preparada" in prompt
+        assert "estoy conectada" in prompt
+        assert "no deduzcas ni presupongas" in prompt.casefold()
+
+    for mode in ("conversation", "action", "research", "multi_action"):
+        assert STELLA_SELF_IDENTITY_GUIDANCE in build_ai_instructions(frozenset(), mode)
+
+    assert "bot comunitario independiente" not in STELLA_SYSTEM.casefold()
+    assert "anarchy apps" not in STELLA_SYSTEM.casefold()
+
+
 def test_all_general_ai_instruction_modes_include_neutral_person_references():
     from stella.ai_core import STELLA_IDENTITY_GUIDANCE, build_ai_instructions
 

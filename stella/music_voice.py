@@ -204,6 +204,39 @@ class MusicVoice:
         self._edge_tts = None
         self._load_errors: dict[str, str] = {}
 
+    @property
+    def diagnostics(self) -> dict[str, Any]:
+        """Return aggregate voice diagnostics without room IDs, member data or audio content."""
+        states = list(self.rooms.values())
+        return {
+            "active_rooms": len(states),
+            "connected_rooms": sum(
+                1 for state in states
+                if self._room_is_connected(state.get("room"), state)
+            ),
+            "reconnecting_rooms": sum(
+                1 for state in states
+                if str(state.get("connection_state", "")).casefold() == "reconnecting"
+            ),
+            "music_players": sum(1 for state in states if state.get("music_current")),
+            "queued_tracks": sum(
+                len(state.get("music_queue", ()))
+                for state in states
+            ),
+            "speech_queues": sum(
+                int(state.get("speech_queue").qsize())
+                for state in states
+                if state.get("speech_queue") is not None
+            ),
+            "tts_enabled_rooms": sum(1 for state in states if state.get("tts_enabled")),
+            "dependencies": {
+                "livekit_loaded": self._rtc is not None,
+                "audio_loaded": self._av is not None and self._np is not None,
+                "tts_loaded": self._edge_tts is not None,
+            },
+            "load_error_components": sorted(self._load_errors),
+        }
+
     async def close(self) -> None:
         for room_id in list(self.rooms):
             await self.leave_room(room_id, request_leave=True)
@@ -1737,8 +1770,25 @@ class MusicVoice:
         try:
             if source and callable(getattr(source, "clear_queue", None)):
                 source.clear_queue()
-        except Exception:
-            log.exception("Could not clear LiveKit music buffer")
+        except Exception as exc:
+            log.warning("Could not clear LiveKit music buffer (%s).", type(exc).__name__)
+
+        # Let the playback loop observe the skip flag and exit. If a codec or
+        # LiveKit capture is stuck, cancel the worker instead of leaving audio
+        # active indefinitely; a later track can start a fresh worker.
+        task = state.get("music_task")
+        if task is not None and task is not asyncio.current_task() and not task.done():
+            try:
+                await asyncio.wait_for(asyncio.shield(task), timeout=1.5)
+            except asyncio.TimeoutError:
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+                except Exception as exc:
+                    log.warning("Music worker did not stop cleanly (%s).", type(exc).__name__)
+        state["music_current"] = None
         return "⏹️ Música detenida. Stella permanece dentro de la llamada."
 
     async def set_music_volume(self, room_id: str, target: int) -> str:

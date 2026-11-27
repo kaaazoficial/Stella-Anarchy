@@ -12,6 +12,19 @@ class UnauthorizedGeminiClient:
         self.calls = 0
         self.is_closed = False
 
+    async def get(self, url, *, headers=None):
+        request = httpx.Request("GET", url)
+        return httpx.Response(200, request=request, json={
+            "result": {
+                "config": {"params": {"vectors": {"size": 768}}},
+                "payload_schema": {
+                    "room_id": {"data_type": "keyword"},
+                    "uid": {"data_type": "keyword"},
+                    "expires_at": {"data_type": "integer"},
+                },
+            }
+        })
+
     async def post(self, url, *, headers=None, json=None):
         self.calls += 1
         request = httpx.Request("POST", url)
