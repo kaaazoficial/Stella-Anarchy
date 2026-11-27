@@ -1386,10 +1386,13 @@ class StellaBot:
         if finding is not None:
             incident_id, notify = self.safety_monitor.record(room_id, uid, name, finding)
             if notify:
-                if finding.supportive:
-                    await self._reply(room_id, finding.notice, message)
-                else:
-                    await self._reply(room_id, f"⚠️ {name}: {finding.notice}", message)
+                # Child-protection incidents are recorded for administrators only.
+                # Do not repeat sensitive allegations or details in the public room.
+                if not finding.staff_only:
+                    if finding.supportive:
+                        await self._reply(room_id, finding.notice, message)
+                    else:
+                        await self._reply(room_id, f"⚠️ {name}: {finding.notice}", message)
                 audit_event(
                     "safety.incident.detected",
                     room_id=room_id,
