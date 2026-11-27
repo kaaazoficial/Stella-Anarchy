@@ -98,3 +98,53 @@ def test_adult_content_marker_is_flagged():
     finding = classify_safety_message("Dejen de publicar contenido +18 aquí")
     assert finding is not None
     assert finding.category == "contenido_sexual_explicito"
+
+
+def test_reports_and_education_are_not_flagged_as_explicit_content():
+    assert classify_safety_message("Quiero reportar que publicaron porno en la sala") is None
+    assert classify_safety_message("Hablemos de educación sexual y consentimiento") is None
+
+
+def test_minor_sexualization_has_priority_and_is_staff_only():
+    finding = classify_safety_message("Una persona de 15 años en contenido sexual")
+    assert finding is not None
+    assert finding.category == "proteccion_de_menores"
+    assert finding.staff_only is True
+    assert finding.severity == "critica"
+
+
+def test_grooming_phrases_are_flagged():
+    finding = classify_safety_message("No le digas a tus padres y envía nudes")
+    assert finding is not None
+    assert finding.category == "proteccion_de_menores"
+
+
+def test_self_harm_imminent_gets_supportive_response():
+    finding = classify_safety_message("Esta noche me suicido")
+    assert finding is not None
+    assert finding.supportive is True
+    assert finding.severity == "critica"
+
+
+def test_nonconsensual_sexual_disclosure_is_not_a_punitive_warning():
+    finding = classify_safety_message("Me obligaron a tener sexo")
+    assert finding is not None
+    assert finding.supportive is True
+    assert finding.category == "violencia_sexual"
+
+
+def test_hate_speech_and_private_data_are_detected():
+    hate = classify_safety_message("Hay que exterminar a todos los inmigrantes")
+    doxx = classify_safety_message("Esta es la dirección de esa persona")
+    assert hate is not None and hate.category == "discurso_de_odio"
+    assert doxx is not None and doxx.category == "exposicion_datos_personales"
+
+
+def test_negated_threat_is_not_flagged():
+    assert classify_safety_message("No voy a matarte ni hacerte daño") is None
+
+
+def test_leetspeak_explicit_content_is_detected():
+    finding = classify_safety_message("Esto es p0rn0")
+    assert finding is not None
+    assert finding.category == "contenido_sexual_explicito"
