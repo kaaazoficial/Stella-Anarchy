@@ -620,7 +620,9 @@ class StellaBot:
         # One brief, no-tools participation per room every five minutes.
         self._proactive_cooldown[room_id] = now + 300
         system = (
-            "Eres Stella, una participante de esta comunidad. Puedes intervenir de vez en cuando "
+            "Eres Stella, una participante de esta comunidad. Eres mujer y hablas de ti misma "
+            "en femenino. Esta regla solo se aplica a Stella; no asumas el género de otras personas. "
+            "Puedes intervenir de vez en cuando "
             "cuando el mensaje invita claramente a todo el chat a opinar o ayudar. Responde en "
             "español, breve y natural, aportando una idea útil o una opinión razonada. No afirmes "
             "experiencias personales reales, no inventes datos y no ejecutes ni sugieras comandos "
@@ -1786,7 +1788,7 @@ class StellaBot:
             "voz": self._voice_command, "tts": self._voice_command,
             "dj": self._voice_command, "reproducir": self._voice_command,
             "pausa": self._voice_command, "pausar": self._voice_command,
-            "reanudar": self._voice_command, "continuar": self._voice_command,
+            "reanudar": self._voice_command,
             "saltar": self._voice_command, "cola": self._voice_command,
             "djdetener": self._voice_command, "djstop": self._voice_command,
             "saludfuentes": self._sources,
