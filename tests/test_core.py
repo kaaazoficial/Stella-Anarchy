@@ -115,3 +115,66 @@ def test_log_bot_identity_warns_when_bot_id_is_missing(caplog):
         log_bot_identity({"uid": "account-uid-test"})
 
     assert "returned no botId" in caplog.text
+
+
+
+def test_webhook_event_key_deduplication_is_committed_only_after_success(monkeypatch):
+    import asyncio
+    import main
+    from fastapi import HTTPException
+
+    class Request:
+        def __init__(self, body):
+            self.body = body
+            self.headers = {
+                "X-Anarchy-Bot-Timestamp": str(int(time.time())),
+                "X-Anarchy-Bot-Signature": "",
+            }
+
+        async def stream(self):
+            yield self.body
+
+    async def scenario():
+        raw = json.dumps({"eventId": "retry-me", "type": "message", "message": "malformed"}).encode()
+        stamp = Request(raw).headers["X-Anarchy-Bot-Timestamp"]
+        signature = hmac.new(
+            main.settings.webhook_secret.encode(),
+            stamp.encode("ascii") + b"." + raw,
+            hashlib.sha256,
+        ).hexdigest()
+        request = Request(raw)
+        request.headers["X-Anarchy-Bot-Signature"] = signature
+        monkeypatch.setattr(main.settings, "webhook_secret", "test-secret", raising=False)
+        request.headers["X-Anarchy-Bot-Signature"] = hmac.new(
+            b"test-secret", stamp.encode("ascii") + b"." + raw, hashlib.sha256
+        ).hexdigest()
+
+        calls = {"count": 0}
+        async def fail_once(event):
+            calls["count"] += 1
+            if calls["count"] == 1:
+                raise RuntimeError("transient")
+        monkeypatch.setattr(main.bot, "handle_event", fail_once)
+        key = main._event_key(json.loads(raw), raw)
+        main.seen_events.pop(key, None)
+        main.event_locks.pop(key, None)
+        with pytest.raises(HTTPException) as error:
+            await main.receive_webhook(request)
+        assert error.value.status_code == 503
+        assert key not in main.seen_events
+        result = await main.receive_webhook(request)
+        assert result == {"ok": True}
+        assert calls["count"] == 2
+        assert key in main.seen_events
+
+    asyncio.run(scenario())
+
+
+def test_duplicate_continuar_route_does_not_override_ai_continuation():
+    import inspect
+    from stella.bot import StellaBot
+
+    source = inspect.getsource(StellaBot._command)
+    assert '"continuar": self._ai' in source
+    assert '"reanudar": self._voice_command' in source
+    assert '"reanudar": self._voice_command, "continuar": self._voice_command' not in source
