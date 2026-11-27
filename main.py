@@ -174,6 +174,11 @@ async def receive_webhook(request: Request) -> dict[str, bool]:
         expired_lock = event_locks.get(expired_key)
         if expired_lock is not None and not expired_lock.locked():
             event_locks.pop(expired_key, None)
+    # Failed deliveries are intentionally absent from seen_events; release their
+    # idle locks on a later request so repeated transient failures cannot grow RAM.
+    for old_key, old_lock in list(event_locks.items()):
+        if old_key not in seen_events and not old_lock.locked():
+            event_locks.pop(old_key, None)
     key = _event_key(event, raw)
 
     # Serialize deliveries of the same event. Do not mark it as seen until the
