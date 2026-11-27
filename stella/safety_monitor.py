@@ -41,7 +41,7 @@ _EXPLICIT_SEXUAL = re.compile(
     r"rol sexual explicito)\b"
 )
 _MINOR_SEXUAL = re.compile(
-    r"\b(?:menor(?:es)? de edad|niñ[oa]s?|adolescentes?|"
+    r"\b(?:menor(?:es)? de edad|nin[oa]s?|adolescentes?|"
     r"chic[oa]s? de \d{1,2} años?)\b.{0,100}\b"
     r"(?:sexo|sexual|nude|desnud[oa]|porn|masturb|penetr|"
     r"tocamientos|abuso sexual)\b|"
@@ -56,7 +56,7 @@ _GRAPHIC_VIOLENCE = re.compile(
     r"destripar|destripamiento|gore explicito)\b"
 )
 _DIRECT_THREAT = re.compile(
-    r"\b(?:te voy a matar|voy a matarte|te voy a apuñalar|"
+    r"\b(?:te voy a matar|voy a matarte|te voy a apunalar|"
     r"voy a dispararte|te voy a golpear|voy a hacerte daño|"
     r"te voy a encontrar y|se donde vives y voy)\b"
 )
@@ -67,7 +67,7 @@ _DOXXING = re.compile(
 )
 _SELF_HARM = re.compile(
     r"\b(?:me quiero suicidar|voy a suicidarme|quiero quitarme la vida|"
-    r"me voy a hacer daño|quiero hacerme daño|planeo acabar con mi vida)\b"
+    r"me voy a hacer dano|quiero hacerme dano|planeo acabar con mi vida)\b"
 )
 _HARASSMENT = re.compile(
     r"\b(?:te voy a acosar|no te dejare en paz|"
