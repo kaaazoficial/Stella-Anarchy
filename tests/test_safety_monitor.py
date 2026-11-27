@@ -49,3 +49,40 @@ def test_graphic_violence_is_flagged():
 def test_short_or_empty_text_is_ignored():
     assert classify_safety_message("") is None
     assert classify_safety_message("sexo") is None
+
+
+def test_incident_register_persists_metadata_without_message_content(tmp_path):
+    from stella.safety_monitor import SafetyMonitor
+
+    monitor = SafetyMonitor(tmp_path / "safety.sqlite3")
+    finding = classify_safety_message("Esto es porno y sexo explícito")
+    incident_id, notify = monitor.record("room", "uid-1", "Member", finding)
+    assert incident_id > 0
+    assert notify is True
+    rows = monitor.recent("room")
+    assert len(rows) == 1
+    assert rows[0]["category"] == "contenido_sexual_explicito"
+    assert "porno" not in str(rows[0]).casefold()
+
+
+def test_incident_register_rate_limits_repeated_public_notices(tmp_path):
+    from stella.safety_monitor import SafetyMonitor
+
+    monitor = SafetyMonitor(tmp_path / "safety.sqlite3")
+    finding = classify_safety_message("Esto es porno y sexo explícito")
+    first_id, first_notify = monitor.record("room", "uid-1", "Member", finding)
+    second_id, second_notify = monitor.record("room", "uid-1", "Member", finding)
+    assert first_notify is True
+    assert second_notify is False
+    assert second_id == first_id
+    assert len(monitor.recent("room")) == 1
+
+
+def test_incidents_are_isolated_between_rooms(tmp_path):
+    from stella.safety_monitor import SafetyMonitor
+
+    monitor = SafetyMonitor(tmp_path / "safety.sqlite3")
+    finding = classify_safety_message("Te voy a matar")
+    monitor.record("room-a", "uid-1", "Member", finding)
+    assert len(monitor.recent("room-a")) == 1
+    assert monitor.recent("room-b") == []
