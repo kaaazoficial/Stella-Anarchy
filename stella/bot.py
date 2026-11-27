@@ -3417,7 +3417,7 @@ class StellaBot:
                 f"{p}chiste · {p}frase · {p}reto",
             ],
             "MODERACIÓN Y ADMINISTRACIÓN": [
-                f"{p}advertir <UID> | <motivo> · {p}advertencias [UID] · {p}quitaradvertencia <ID>",
+                f"{p}advertir <UID> | <motivo> · {p}advertencias [UID] · {p}quitaradvertencia <ID> · {p}alertas",
                 f"{p}antispam activar|desactivar · {p}actividad · {p}respuesta añadir|quitar|lista · {p}estado",
             ],
             "MÚSICA Y VOZ": [
