@@ -178,3 +178,40 @@ def test_duplicate_continuar_route_does_not_override_ai_continuation():
     assert '"continuar": self._ai' in source
     assert '"reanudar": self._voice_command' in source
     assert '"reanudar": self._voice_command, "continuar": self._voice_command' not in source
+
+
+
+def test_webhook_duplicate_delivery_is_processed_once_after_success(monkeypatch):
+    import asyncio
+    import main
+
+    async def scenario():
+        raw = json.dumps({"eventId": "duplicate-after-success", "type": "future.event"}).encode()
+        stamp = str(int(time.time()))
+        signature = hmac.new(
+            b"test-secret", stamp.encode("ascii") + b"." + raw, hashlib.sha256
+        ).hexdigest()
+
+        class Request:
+            headers = {
+                "X-Anarchy-Bot-Timestamp": stamp,
+                "X-Anarchy-Bot-Signature": signature,
+            }
+            async def stream(self):
+                yield raw
+
+        monkeypatch.setattr(main.settings, "webhook_secret", "test-secret", raising=False)
+        calls = 0
+        async def handle(event):
+            nonlocal calls
+            calls += 1
+        monkeypatch.setattr(main.bot, "handle_event", handle)
+        key = main._event_key(json.loads(raw), raw)
+        main.seen_events.pop(key, None)
+        main.event_locks.pop(key, None)
+
+        assert await main.receive_webhook(Request()) == {"ok": True}
+        assert await main.receive_webhook(Request()) == {"ok": True, "duplicate": True}
+        assert calls == 1
+
+    asyncio.run(scenario())
