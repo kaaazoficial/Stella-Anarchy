@@ -270,9 +270,11 @@ class AnarchyClient:
                     if message_id:
                         self._remember_sent_message(room_id, message_id)
                     archive = getattr(self, "room_archive", None)
+                    enqueue_archive_event = getattr(archive, "enqueue_event", None)
                     record_archive_event = getattr(archive, "record_event", None)
-                    if callable(record_archive_event):
-                        await record_archive_event(
+                    archive_writer = enqueue_archive_event if callable(enqueue_archive_event) else record_archive_event
+                    if callable(archive_writer):
+                        await archive_writer(
                             room_id,
                             "chat.message.out",
                             actor_uid=(
