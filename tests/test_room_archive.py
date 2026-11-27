@@ -323,3 +323,51 @@ def test_recent_room_context_and_integrity_report(monkeypatch):
         await archive.close()
 
     asyncio.run(scenario())
+
+
+def test_archive_outbox_persists_before_remote_delivery_and_retries(monkeypatch, tmp_path):
+    async def scenario():
+        monkeypatch.setenv("QDRANT_URL", "https://qdrant.example")
+        monkeypatch.setenv("QDRANT_API_KEY", "test-qdrant-key")
+        monkeypatch.setenv("ROOM_ARCHIVE_OUTBOX_PATH", str(tmp_path / "outbox.sqlite3"))
+        archive = RoomArchive(client=FakeQdrant())
+
+        assert await archive.enqueue_event(
+            "room-1", "chat.message.in",
+            source_event_id="event-outbox-1",
+            message_id="message-outbox-1",
+            actor_name="Aurora",
+            content="Mensaje guardado antes de enviar",
+        )
+        assert archive.pending_count == 1
+        assert await archive.flush_pending() == 1
+        assert archive.pending_count == 0
+        events = await archive.list_room_events("room-1", limit=5)
+        assert len(events) == 1
+        assert events[0]["content"] == "Mensaje guardado antes de enviar"
+        await archive.close()
+
+    asyncio.run(scenario())
+
+
+def test_archive_outbox_survives_archive_instance_restart(monkeypatch, tmp_path):
+    async def scenario():
+        monkeypatch.setenv("QDRANT_URL", "https://qdrant.example")
+        monkeypatch.setenv("QDRANT_API_KEY", "test-qdrant-key")
+        path = str(tmp_path / "persistent-outbox.sqlite3")
+        monkeypatch.setenv("ROOM_ARCHIVE_OUTBOX_PATH", path)
+        first = RoomArchive(client=FakeQdrant())
+        assert await first.enqueue_event(
+            "room-2", "chat.message.in", source_event_id="restart-event",
+            content="Pendiente tras reinicio",
+        )
+        assert first.pending_count == 1
+        await first.close()
+
+        restored = RoomArchive(client=FakeQdrant())
+        assert restored.pending_count == 1
+        assert await restored.flush_pending() == 1
+        assert restored.pending_count == 0
+        await restored.close()
+
+    asyncio.run(scenario())
