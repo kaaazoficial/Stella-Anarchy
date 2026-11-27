@@ -413,11 +413,8 @@ class RoomArchive:
         if task is not None and not task.done():
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)
-        if self.enabled:
-            try:
-                await self.flush_pending(limit=100, force=True)
-            except Exception as exc:
-                log.warning("Final room archive flush failed (%s).", type(exc).__name__)
+        # Pending rows are already committed to SQLite; do not block shutdown
+        # on a remote Qdrant outage. The next process can resume the backlog.
         if self._owns_client and self.client is not None and not self.client.is_closed:
             await self.client.aclose()
 
