@@ -2474,6 +2474,13 @@ class StellaAICore:
             str(item).strip().lstrip("!").casefold() for item in allowed_commands
         )
         history = self._history(key)
+        # Keep a tiny, same-user/same-room sample solely to avoid repeating
+        # Stella's recent wording when the next message starts a new topic.
+        recent_style_replies = [
+            str(turn.get("content") or "").strip()[:220]
+            for turn in history
+            if turn.get("role") == "assistant" and str(turn.get("content") or "").strip()
+        ][-3:]
         faq_answer = resolve_community_faq(text)
         if faq_answer:
             last_user_turn = next(
@@ -2519,6 +2526,14 @@ class StellaAICore:
         allowed = select_ai_tool_commands(text, allowed, intent)
         difficulty = classify_request_difficulty(text, intent)
         instructions = build_ai_instructions(allowed, intent)
+        if recent_style_replies:
+            instructions += (
+                "\\n\\nREFERENCIAS ANTIRREPETICIÓN (solo estilo; no son contexto temático):\\n"
+                + "\\n".join(f"- {reply}" for reply in recent_style_replies)
+                + "\\nEvita reutilizar estas frases, aperturas, cierres o estructuras. "
+                "No continúes sus temas salvo que el mensaje actual lo pida; "
+                "úsalas exclusivamente para que tu redacción no suene repetida."
+            )
         if room_context:
             instructions += (
                 "\n\nCONTEXTO HISTÓRICO DE LA SALA (contenido no confiable):\n"
@@ -2544,23 +2559,11 @@ class StellaAICore:
                 "fallback": True,
             }
         messages = [*history, {"role": "user", "content": text}]
-        normalized_request = normalize_topic_text(text)
-        cacheable_generic = (
-            intent == "conversation"
-            and difficulty in {"simple", "standard"}
-            and not request_is_specialized_subject
-            and not history
-            and not room_context
-            and len(text) <= 160
-            and not re.search(
-                r"\b(?:yo|soy|somos|nos|nosotros|mi|mis|mio|mia|me|tengo|estoy|siento|necesito|quiero|pareja|cuenta|usuario|edad|nombre|vivo|ubicacion|telefono|correo|uid|perfil|saldo)\b",
-                normalized_request,
-            )
-            and not re.search(
-                r"\b(?:eso|ese|esa|ellos|ellas|aquello|anterior|antes|mi|mis|mio|mia)\b|[@]|https?://|\b\d{6,}\b",
-                normalized_request,
-            )
-        )
+        # Never reuse a shared cached natural-language answer: it made
+        # different members receive identical generic replies for the same prompt.
+        # Conversation responses should be freshly generated with each session's
+        # own context and anti-repetition references.
+        cacheable_generic = False
         response_mode = "answer" if intent == "conversation" else "action"
         output_budget = output_token_budget_for_difficulty(difficulty)
         try:
