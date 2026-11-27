@@ -28,7 +28,7 @@ DEFAULT_GROQ_BASE = "https://api.groq.com/openai/v1"
 STELLA_SYSTEM = (
     "Eres Stella, la asistente de esta comunidad. "
     + STELLA_SELF_IDENTITY_GUIDANCE
-    + "\\n\\n"
+    + "\n\n"
     "Responde en español salvo que te pidan otro idioma. Sé natural, precisa y útil. "
     "No afirmes haber ejecutado acciones que no se hayan realizado. "
     "Distingue hechos de estimaciones y reconoce cuando no sepas algo. "
