@@ -38,6 +38,7 @@ MAX_WEBHOOK_BODY_BYTES = 256 * 1024
 SIGNATURE_TOLERANCE_SECONDS = 300
 SEEN_EVENTS_LIMIT = 3000
 seen_events: OrderedDict[str, float] = OrderedDict()
+event_locks: dict[str, asyncio.Lock] = {}
 PROCESS_STARTED_AT = IMPORT_STARTED_AT
 METRICS: dict[str, float] = {
     "webhook_events": 0,
@@ -169,32 +170,62 @@ async def receive_webhook(request: Request) -> dict[str, bool]:
 
     now = time.monotonic()
     while seen_events and now - next(iter(seen_events.values())) > 900:
-        seen_events.popitem(last=False)
+        expired_key, _ = seen_events.popitem(last=False)
+        expired_lock = event_locks.get(expired_key)
+        if expired_lock is not None and not expired_lock.locked():
+            event_locks.pop(expired_key, None)
+    # Failed deliveries are intentionally absent from seen_events; release their
+    # idle locks on a later request so repeated transient failures cannot grow RAM.
+    for old_key, old_lock in list(event_locks.items()):
+        if old_key not in seen_events and not old_lock.locked():
+            event_locks.pop(old_key, None)
     key = _event_key(event, raw)
-    if key in seen_events:
-        seen_events.move_to_end(key)
-        return {"ok": True, "duplicate": True}
-    seen_events[key] = now
-    while len(seen_events) > SEEN_EVENTS_LIMIT:
-        seen_events.popitem(last=False)
 
-    METRICS["webhook_events"] += 1
-    if str(event.get("type") or "").casefold() in {"message", "message.created", "message_create"}:
-        METRICS["text_messages_received"] += 1
-        msg = event.get("message") or {}
-        content = str(msg.get("content") or "")
-        if content.startswith(settings.command_prefix):
-            METRICS["commands_received"] += 1
-            if content.split(maxsplit=1)[0].casefold() in {settings.command_prefix + "ia", settings.command_prefix + "asistente"}:
-                METRICS["ai_requests"] += 1
-    try:
-        await bot.handle_event(event)
+    # Serialize deliveries of the same event. Do not mark it as seen until the
+    # handler has completed: a transient failure must remain retryable by Anarchy.
+    lock = event_locks.setdefault(key, asyncio.Lock())
+    async with lock:
+        now = time.monotonic()
+        if key in seen_events:
+            return {"ok": True, "duplicate": True}
+        while seen_events and now - next(iter(seen_events.values())) > 900:
+            expired_key, _ = seen_events.popitem(last=False)
+            expired_lock = event_locks.get(expired_key)
+            if expired_lock is not None and not expired_lock.locked():
+                event_locks.pop(expired_key, None)
+
+        METRICS["webhook_events"] += 1
+        event_type = str(event.get("type") or "").casefold()
+        message = event.get("message")
+        message = message if isinstance(message, dict) else {}
+        if event_type in {"message", "message.created", "message_create"}:
+            METRICS["text_messages_received"] += 1
+            content = str(message.get("content") or message.get("text") or "")
+            if content.startswith(settings.command_prefix):
+                METRICS["commands_received"] += 1
+                command = content.split(maxsplit=1)[0].casefold()
+                if command in {settings.command_prefix + "ia", settings.command_prefix + "asistente"}:
+                    METRICS["ai_requests"] += 1
+        try:
+            await bot.handle_event(event)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            METRICS["webhook_dispatch_failures"] += 1
+            log.exception("Event processing failed; event id=%s", key[:80])
+            raise HTTPException(
+                status_code=503,
+                detail="Event processing failed; the delivery may be retried.",
+            ) from exc
+
         METRICS["webhook_dispatch_completed"] += 1
-    except Exception:
-        METRICS["webhook_dispatch_failures"] += 1
-        log.exception("Event processing failed; event id=%s", key[:80])
-        # Acknowledge authenticated events to avoid platform retry storms.
-    return {"ok": True}
+        seen_events[key] = time.monotonic()
+        while len(seen_events) > SEEN_EVENTS_LIMIT:
+            expired_key, _ = seen_events.popitem(last=False)
+            expired_lock = event_locks.get(expired_key)
+            if expired_lock is not None and not expired_lock.locked():
+                event_locks.pop(expired_key, None)
+        return {"ok": True}
 
 
 @app.get("/")
