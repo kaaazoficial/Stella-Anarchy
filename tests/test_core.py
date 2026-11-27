@@ -137,13 +137,7 @@ def test_webhook_event_key_deduplication_is_committed_only_after_success(monkeyp
     async def scenario():
         raw = json.dumps({"eventId": "retry-me", "type": "message", "message": "malformed"}).encode()
         stamp = Request(raw).headers["X-Anarchy-Bot-Timestamp"]
-        signature = hmac.new(
-            main.settings.webhook_secret.encode(),
-            stamp.encode("ascii") + b"." + raw,
-            hashlib.sha256,
-        ).hexdigest()
         request = Request(raw)
-        request.headers["X-Anarchy-Bot-Signature"] = signature
         monkeypatch.setattr(main.settings, "webhook_secret", "test-secret", raising=False)
         request.headers["X-Anarchy-Bot-Signature"] = hmac.new(
             b"test-secret", stamp.encode("ascii") + b"." + raw, hashlib.sha256
