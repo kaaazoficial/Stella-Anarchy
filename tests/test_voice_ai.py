@@ -1041,3 +1041,40 @@ def test_voice_diagnostics_are_aggregate_and_exclude_room_identifiers():
     assert "private-room-id" not in repr(report)
     assert "private track" not in repr(report)
     assert "private speech" not in repr(report)
+
+
+@pytest.mark.asyncio
+async def test_disabling_room_reading_cancels_active_tts_and_releases_music_gate():
+    voice = object.__new__(MusicVoice)
+    queue = asyncio.Queue()
+    await queue.put("pendiente")
+    speech_done = asyncio.Event()
+    speech_done.clear()
+    tts_active = asyncio.Event()
+    tts_active.set()
+    started = asyncio.Event()
+
+    async def active_worker():
+        started.set()
+        await asyncio.Event().wait()
+
+    task = asyncio.create_task(active_worker())
+    await started.wait()
+    state = {
+        "tts_enabled": True,
+        "speech_queue": queue,
+        "speech_task": task,
+        "speech_done": speech_done,
+        "tts_active": tts_active,
+    }
+    voice.rooms = {"room-1": state}
+
+    ok, message = await voice.enable_reading("room-1", False)
+
+    assert ok is True
+    assert "desactivada" in message
+    assert task.cancelled()
+    assert state["speech_task"] is None
+    assert queue.empty()
+    assert speech_done.is_set()
+    assert not tts_active.is_set()
