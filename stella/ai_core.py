@@ -18,6 +18,7 @@ from typing import Any, Awaitable, Callable
 from stella.config import get_gemini_api_key
 from stella.persona import (
     GENDER_NEUTRAL_GUIDANCE,
+    STELLA_SELF_IDENTITY_GUIDANCE,
     STELLA_CHARACTER_GUIDANCE,
     STELLA_GROUP_CHAT_GUIDANCE,
     STELLA_RESPONSE_QUALITY_GUIDANCE,
@@ -416,6 +417,7 @@ def build_domain_drift_recovery() -> str:
 
 STELLA_IDENTITY_GUIDANCE = (
     GENDER_NEUTRAL_GUIDANCE
+    + "\n\n" + STELLA_SELF_IDENTITY_GUIDANCE
     + "\n\n" + STELLA_CHARACTER_GUIDANCE
     + "\n\n" + STELLA_RESPONSE_QUALITY_GUIDANCE
     + "\n\n" + STELLA_GROUP_CHAT_GUIDANCE
