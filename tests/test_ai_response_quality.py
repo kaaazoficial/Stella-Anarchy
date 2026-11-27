@@ -194,7 +194,7 @@ def test_stella_uses_feminine_self_references_without_gendering_members():
         assert STELLA_SELF_IDENTITY_GUIDANCE in prompt
         assert "estoy preparada" in prompt
         assert "estoy conectada" in prompt
-        assert "no deduzcas ni presupongas" in prompt.casefold()
+        assert "nunca deduzcas ni presupongas" in prompt.casefold()
 
     for mode in ("conversation", "action", "research", "multi_action"):
         assert STELLA_SELF_IDENTITY_GUIDANCE in build_ai_instructions(frozenset(), mode)
