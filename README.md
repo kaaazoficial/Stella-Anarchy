@@ -29,7 +29,7 @@ Stella is an independent Python bot for Anarchy Apps. It has its own codebase, c
 - Profiles and social economy: `!perfil`, `!bio`, `!miestado`, `!puntos`, `!ranking` (`!top`), `!diario` (`!daily`), `!trabajar`, `!pagar` (`!transferir`), `!regalo`, `!muro`, `!afinidad` (`!amistad`, `!reputacion`) and `!duelo`.
 - High-confidence command typo suggestions; suggestions are never executed automatically.
 - User references: reply to a member's message with `!mencionar [texto]` to put their visible `@nickname` in Stella's reply. The documented Anarchy bot-send API does not currently provide an outbound mention/notification field, so this is visible text and not a guaranteed notification.
-- Commands are also parsed when the user's reply begins with an explicit command after a leading @-mention of the replied-to member. Stella archives every authenticated room event delivered by Anarchy, including messages, edits, deletions, interactions and room activity, plus successful outgoing messages. The archive is stored chronologically in its own Qdrant collection, with no automatic expiry; recognizable credentials are redacted. A community bot needs the Agent's read-all-messages permission to receive ordinary chat text.
+- Commands are also parsed when the user's reply begins with an explicit command after a leading @-mention of the replied-to member. Stella archives every authenticated room event delivered by Anarchy, including messages, edits, deletions, interactions and room activity, plus successful outgoing messages. Each event is sanitized and committed first to a SQLite write-ahead outbox, then delivered to its own Qdrant collection by a retry worker. Failed writes remain pending with exponential backoff and are visible in health diagnostics; duplicate deliveries are idempotent. The Qdrant archive has no automatic expiry; recognizable credentials are redacted. The outbox is a local safety net, not a substitute for persistent storage: Render Free has an ephemeral filesystem, so a pending backlog can be lost on a host replacement/redeploy before it reaches Qdrant. For strict zero-loss guarantees during a Qdrant outage, the outbox must live on a persistent disk or managed database. A community bot needs the Agent's read-all-messages permission to receive ordinary chat text.
 - Reversible global chat silence, controlled only by the exact owner UID in `SINNER_UID`: say "No le hables a nadie" or use `!silenciarchat`; restore with "Ya puedes hablar", `!hablarchat` or `!despertar`. While silenced, Stella ignores messages, commands and voice reading; pending TTS is cancelled. The wake-up path remains available to the owner.
 - Exact UID-based administrator permissions. Admin aliases include `!admin`, `!centro`, `!nexus`, `!paneladmin`, `!sistema`, `!diagnostico`, `!rendimiento`, `!laboratorio`, `!fuentes`, `!saludfuentes`, `!metricas` and `!autotest`. Admins can update Stella's name/status with `!perfilbot` and set its avatar with `!avatarbot`; avatar uploads are restricted to direct HTTPS images from Wikimedia Commons, Imgur, Unsplash or Pexels, validated for real image format, dimensions and a 512 KB cap.
 - `/metrics` exposes aggregate Prometheus counters and can be protected with `PROMETHEUS_METRICS_TOKEN`; `/health` reports privacy-safe component readiness and uptime, while `/ready` checks the required Anarchy credentials and SQLite before traffic is accepted.
@@ -74,6 +74,7 @@ Set these variables in the hosting provider. Never commit real credentials.
 | `QDRANT_URL` | No | Qdrant Cloud endpoint |
 | `QDRANT_API_KEY` | No | Qdrant API key; keep secret |
 | `QDRANT_ROOM_ARCHIVE_COLLECTION` | No | Defaults to `stella_room_archive`; permanent chronological room event archive |
+| `ROOM_ARCHIVE_OUTBOX_PATH` | No | Optional path for the SQLite retry outbox; defaults to `DATA_DIR/stella_room_archive_outbox.sqlite3` |
 | `QDRANT_COLLECTION` | No | Defaults to `stella_messages` |
 | `QDRANT_AI_MEMORY_COLLECTION` | No | Defaults to `stella_ai_memory`; separate durable conversation history |
 | `AI_MEMORY_RETENTION_DAYS` | No | Durable conversation-memory expiry; defaults to 30 days |
@@ -128,7 +129,7 @@ The included `render.yaml` targets the `stella-anarchy` Free web service in Ohio
 
 ## Room archive recovery and export
 
-The archive itself starts recording events as authenticated Anarchy webhooks arrive. To import older audit entries still retained by Render, run the backfill utility locally with the Render and Qdrant credentials in environment variables (never commit them):
+The archive itself starts recording events as authenticated Anarchy webhooks arrive. Every accepted event is first persisted in the local SQLite outbox and then retried into Qdrant until acknowledged. Monitor `checks.room_archive_diagnostics.pending_events` and resolve any growing backlog; on Render Free, pending local rows are not guaranteed to survive a redeploy or host replacement. To import older audit entries still retained by Render, run the backfill utility locally with the Render and Qdrant credentials in environment variables (never commit them):
 
 ```bash
 export RENDER_API_KEY="..."

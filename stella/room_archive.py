@@ -7,9 +7,11 @@ import json
 import logging
 import os
 import re
+import sqlite3
 import time
 import uuid
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
@@ -141,18 +143,251 @@ class RoomArchive:
         self.events_written = 0
         self.write_failures = 0
         self.last_failure_log_at = 0.0
+        configured_outbox = os.getenv("ROOM_ARCHIVE_OUTBOX_PATH", "").strip()
+        data_dir = Path(os.getenv("DATA_DIR", "./data"))
+        self.outbox_path = Path(configured_outbox) if configured_outbox else data_dir / "stella_room_archive_outbox.sqlite3"
+        self._outbox_lock = asyncio.Lock()
+        self._worker_task: asyncio.Task | None = None
+        self._worker_stop = asyncio.Event()
+        self._worker_wakeup = asyncio.Event()
+        self.events_enqueued = 0
+        self.last_success_at = 0.0
 
     @property
     def enabled(self) -> bool:
         return bool(self.url and self.api_key and self.collection)
 
+    def _outbox_connection(self) -> sqlite3.Connection:
+        self.outbox_path.parent.mkdir(parents=True, exist_ok=True)
+        db = sqlite3.connect(str(self.outbox_path), timeout=10.0)
+        db.execute("PRAGMA journal_mode=WAL")
+        db.execute("PRAGMA synchronous=FULL")
+        db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS room_archive_outbox (
+                point_id TEXT PRIMARY KEY,
+                payload_json TEXT NOT NULL,
+                attempts INTEGER NOT NULL DEFAULT 0,
+                next_attempt_at REAL NOT NULL DEFAULT 0,
+                created_at REAL NOT NULL,
+                last_error TEXT NOT NULL DEFAULT ''
+            )
+            """
+        )
+        db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_room_archive_outbox_retry "
+            "ON room_archive_outbox(next_attempt_at, created_at)"
+        )
+        db.commit()
+        return db
+
+    def _outbox_count_sync(self) -> int:
+        db = self._outbox_connection()
+        try:
+            row = db.execute("SELECT COUNT(*) FROM room_archive_outbox").fetchone()
+            return int(row[0] if row else 0)
+        finally:
+            db.close()
+
+    @property
+    def pending_count(self) -> int:
+        try:
+            return self._outbox_count_sync()
+        except Exception as exc:
+            log.warning("Room archive outbox status failed (%s).", type(exc).__name__)
+            return -1
+
+    @property
+    def diagnostics(self) -> dict[str, Any]:
+        return {
+            "qdrant_configured": self.enabled,
+            "qdrant_ready": self.ready,
+            "pending_events": self.pending_count,
+            "events_enqueued": self.events_enqueued,
+            "events_written": self.events_written,
+            "write_failures": self.write_failures,
+            "worker_running": bool(self._worker_task and not self._worker_task.done()),
+            "last_success_at": self.last_success_at or None,
+        }
+
     @property
     def status(self) -> str:
+        pending = self.pending_count
+        backlog = f"; {pending} evento(s) pendientes" if pending else ""
         if not self.enabled:
-            return "no configurado: faltan QDRANT_URL o QDRANT_API_KEY"
+            return "Qdrant no configurado; eventos protegidos en la cola local" + backlog
         if self.ready:
-            return "conectado: archivo cronológico activo, sin caducidad automática"
-        return "configurado: el archivo se inicializará al recibir el primer evento"
+            return "conectado: archivo cronológico activo, sin caducidad automática" + backlog
+        return "configurado: el archivo se inicializará al procesar eventos" + backlog
+
+    def start_worker(self) -> None:
+        """Start the retry worker after the event loop is running."""
+        if self._worker_task is None or self._worker_task.done():
+            self._worker_stop.clear()
+            self._worker_task = asyncio.create_task(
+                self._worker_loop(), name="stella-room-archive-outbox"
+            )
+        self._worker_wakeup.set()
+
+    async def _worker_loop(self) -> None:
+        while not self._worker_stop.is_set():
+            try:
+                await self.flush_pending(limit=50)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                self._report_failure("outbox worker", exc)
+            self._worker_wakeup.clear()
+            try:
+                await asyncio.wait_for(
+                    self._worker_wakeup.wait(),
+                    timeout=5.0 if self.pending_count else 30.0,
+                )
+            except asyncio.TimeoutError:
+                pass
+
+    def _enqueue_sync(self, point_id: str, payload_json: str) -> None:
+        db = self._outbox_connection()
+        try:
+            db.execute(
+                """INSERT INTO room_archive_outbox
+                   (point_id,payload_json,attempts,next_attempt_at,created_at,last_error)
+                   VALUES(?,?,0,0,?,'')
+                   ON CONFLICT(point_id) DO NOTHING""",
+                (point_id, payload_json, time.time()),
+            )
+            db.commit()
+        finally:
+            db.close()
+
+    def _pending_sync(self, limit: int, force: bool) -> list[tuple[str, str, int]]:
+        db = self._outbox_connection()
+        try:
+            if force:
+                rows = db.execute(
+                    """SELECT point_id,payload_json,attempts FROM room_archive_outbox
+                       ORDER BY created_at ASC LIMIT ?""",
+                    (limit,),
+                ).fetchall()
+            else:
+                rows = db.execute(
+                    """SELECT point_id,payload_json,attempts FROM room_archive_outbox
+                       WHERE next_attempt_at<=? ORDER BY created_at ASC LIMIT ?""",
+                    (time.time(), limit),
+                ).fetchall()
+            return [(str(row[0]), str(row[1]), int(row[2])) for row in rows]
+        finally:
+            db.close()
+
+    def _ack_sync(self, point_id: str) -> None:
+        db = self._outbox_connection()
+        try:
+            db.execute("DELETE FROM room_archive_outbox WHERE point_id=?", (point_id,))
+            db.commit()
+        finally:
+            db.close()
+
+    def _retry_sync(self, point_id: str, attempts: int, error: str) -> None:
+        next_attempts = attempts + 1
+        delay = min(900, max(5, 2 ** min(next_attempts, 10)))
+        db = self._outbox_connection()
+        try:
+            db.execute(
+                """UPDATE room_archive_outbox
+                   SET attempts=?, next_attempt_at=?, last_error=?
+                   WHERE point_id=?""",
+                (next_attempts, time.time() + delay, str(error)[:80], point_id),
+            )
+            db.commit()
+        finally:
+            db.close()
+
+    async def enqueue_event(
+        self,
+        room_id: str,
+        event_type: str,
+        *,
+        event_time: Any = None,
+        source_event_id: str | None = None,
+        actor_uid: str | None = None,
+        actor_name: str | None = None,
+        message_id: str | None = None,
+        reply_to_message_id: str | None = None,
+        content: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> bool:
+        """Durably queue an event locally before acknowledging its webhook."""
+        room = str(room_id or "").strip()
+        kind = str(event_type or "").strip().casefold()
+        if not room or not kind:
+            return False
+        safe_metadata = _safe_snapshot(metadata or {})
+        if not isinstance(safe_metadata, dict):
+            safe_metadata = {"snapshot": safe_metadata}
+        safe_content = _safe_text(content) if content is not None else None
+        safe_source_id = str(source_event_id or "").strip()[:160]
+        safe_actor_uid = str(actor_uid or "").strip()[:160]
+        safe_actor_name = _safe_text(str(actor_name or ""))[:120]
+        safe_message_id = str(message_id or "").strip()[:160]
+        safe_reply_id = str(reply_to_message_id or "").strip()[:160]
+        identity = self._event_identity(
+            room, kind, safe_source_id or None, safe_message_id or None,
+            event_time, safe_actor_uid or None, safe_content, safe_metadata,
+        )
+        point_id = str(
+            uuid.uuid5(uuid.NAMESPACE_URL, f"stella-room-archive:{identity}")
+        )
+        queued = {
+            "room_id": room,
+            "event_type": kind,
+            "event_time": event_time,
+            "source_event_id": safe_source_id or None,
+            "actor_uid": safe_actor_uid or None,
+            "actor_name": safe_actor_name or None,
+            "message_id": safe_message_id or None,
+            "reply_to_message_id": safe_reply_id or None,
+            "content": safe_content,
+            "metadata": safe_metadata,
+        }
+        try:
+            encoded = json.dumps(
+                queued, ensure_ascii=False, separators=(",", ":"), default=str
+            )
+            await asyncio.to_thread(self._enqueue_sync, point_id, encoded)
+            self.events_enqueued += 1
+            self._worker_wakeup.set()
+            return True
+        except Exception as exc:
+            self._report_failure("outbox enqueue", exc)
+            return False
+
+    async def flush_pending(self, *, limit: int = 50, force: bool = False) -> int:
+        """Deliver queued events to Qdrant; failed writes remain retryable."""
+        if not self.enabled:
+            return 0
+        delivered = 0
+        async with self._outbox_lock:
+            rows = await asyncio.to_thread(
+                self._pending_sync, max(1, min(500, int(limit))), bool(force)
+            )
+            for point_id, payload_json, attempts in rows:
+                try:
+                    payload = json.loads(payload_json)
+                    if not isinstance(payload, dict):
+                        raise ValueError("invalid queued event")
+                    saved = await self.record_event(**payload)
+                    if not saved:
+                        raise RuntimeError("Qdrant write did not confirm success")
+                    await asyncio.to_thread(self._ack_sync, point_id)
+                    delivered += 1
+                    self.last_success_at = time.time()
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:
+                    await asyncio.to_thread(
+                        self._retry_sync, point_id, attempts, type(exc).__name__
+                    )
+            return delivered
 
     def _headers(self) -> dict[str, str]:
         return {"api-key": self.api_key, "Content-Type": "application/json"}
@@ -172,6 +407,14 @@ class RoomArchive:
         return self.client
 
     async def close(self) -> None:
+        self._worker_stop.set()
+        self._worker_wakeup.set()
+        task = self._worker_task
+        if task is not None and not task.done():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+        # Pending rows are already committed to SQLite; do not block shutdown
+        # on a remote Qdrant outage. The next process can resume the backlog.
         if self._owns_client and self.client is not None and not self.client.is_closed:
             await self.client.aclose()
 
@@ -374,6 +617,7 @@ class RoomArchive:
                     )
                     response.raise_for_status()
                     self.events_written += 1
+                    self.last_success_at = time.time()
                     return True
                 except (httpx.HTTPError, ValueError, RuntimeError) as exc:
                     last_error = exc

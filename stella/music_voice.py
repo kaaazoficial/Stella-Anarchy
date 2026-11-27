@@ -1837,13 +1837,31 @@ class MusicVoice:
         if state:
             state["tts_enabled"] = False
             queue = state.get("speech_queue")
-            if queue:
+            if queue is not None:
                 while not queue.empty():
                     try:
                         queue.get_nowait()
                         queue.task_done()
                     except asyncio.QueueEmpty:
                         break
+            task = state.get("speech_task")
+            current = asyncio.current_task()
+            if task is not None and task is not current and not task.done():
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+                except Exception:
+                    log.exception("Could not stop room TTS worker")
+            if state.get("speech_task") is task:
+                state["speech_task"] = None
+            active = state.get("tts_active")
+            if active is not None:
+                active.clear()
+            speech_done = state.get("speech_done")
+            if speech_done is not None:
+                speech_done.set()
         return True, "Lectura en voz alta desactivada."
 
     async def enqueue_speech(self, room_id: str, content: str) -> None:

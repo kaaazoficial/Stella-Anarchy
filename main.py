@@ -97,6 +97,10 @@ async def lifespan(_: FastAPI):
         _memory_maintenance_loop(),
         name="stella-memory-maintenance",
     )
+    archive = getattr(bot, "room_archive", None)
+    start_archive_worker = getattr(archive, "start_worker", None)
+    if callable(start_archive_worker):
+        start_archive_worker()
     try:
         # Resolve the bot ID before it joins any room; no chat command is required.
         identity = await platform.get_bot_identity()
@@ -301,6 +305,10 @@ async def health() -> JSONResponse:
             "vector_memory": vector_status,
             "vector_memory_diagnostics": vector_diagnostics,
             "room_archive": room_archive_status,
+            "room_archive_diagnostics": (
+                getattr(room_archive, "diagnostics", {})
+                if room_archive is not None else {}
+            ),
             "voice": voice_diagnostics,
         },
     }

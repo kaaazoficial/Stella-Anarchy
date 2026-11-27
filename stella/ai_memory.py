@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import functools
 import hashlib
 import json
 import logging
@@ -67,6 +68,28 @@ _STABLE_FACT_PATTERNS = (
 )
 
 
+def _serialize_identity_operation(method):
+    """Serialize read-modify-write operations for one room/member pair."""
+    @functools.wraps(method)
+    async def wrapped(self, room_id: str, uid: str, *args, **kwargs):
+        key = (str(room_id), str(uid))
+        lock = self._identity_locks.get(key)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._identity_locks[key] = lock
+        async with lock:
+            try:
+                return await method(self, room_id, uid, *args, **kwargs)
+            finally:
+                if len(self._identity_locks) > 5000:
+                    for stale_key, stale_lock in list(self._identity_locks.items()):
+                        if stale_lock is not lock and not stale_lock.locked():
+                            self._identity_locks.pop(stale_key, None)
+                            if len(self._identity_locks) <= 4000:
+                                break
+    return wrapped
+
+
 class QdrantConversationMemory:
     """Stores recent turns and durable, privacy-filtered facts per room/member."""
 
@@ -85,6 +108,7 @@ class QdrantConversationMemory:
         self._owns_client = client is None
         self._ready = False
         self._lock = asyncio.Lock()
+        self._identity_locks: dict[tuple[str, str], asyncio.Lock] = {}
 
     @property
     def enabled(self) -> bool:
@@ -372,6 +396,7 @@ class QdrantConversationMemory:
             log.warning("Persistent AI fact-memory load failed (%s).", type(exc).__name__)
             return []
 
+    @_serialize_identity_operation
     async def save(self, room_id: str, uid: str, turns: list[dict[str, Any]]) -> bool:
         if not self.enabled or not room_id or not uid:
             return False
@@ -392,6 +417,7 @@ class QdrantConversationMemory:
             log.warning("Persistent AI memory save failed (%s).", type(exc).__name__)
             return False
 
+    @_serialize_identity_operation
     async def remember_fact(
         self, room_id: str, uid: str, content: str, *, topic: str = "nota"
     ) -> str | None:
@@ -445,6 +471,7 @@ class QdrantConversationMemory:
                 saved.append(identifier)
         return saved
 
+    @_serialize_identity_operation
     async def forget_fact(self, room_id: str, uid: str, fact_id: str) -> bool:
         if not self.enabled or not room_id or not uid:
             return False
@@ -481,6 +508,7 @@ class QdrantConversationMemory:
             log.warning("Persistent AI memory preference read failed (%s).", type(exc).__name__)
             return False
 
+    @_serialize_identity_operation
     async def set_enabled(self, room_id: str, uid: str, enabled: bool) -> bool:
         if not self.enabled or not room_id or not uid:
             return False
@@ -502,6 +530,7 @@ class QdrantConversationMemory:
             )
             return False
 
+    @_serialize_identity_operation
     async def clear(self, room_id: str, uid: str) -> bool:
         """Erase recent conversation turns while preserving durable facts and opt-in."""
         if not self.enabled or not room_id or not uid:
@@ -517,6 +546,7 @@ class QdrantConversationMemory:
             log.warning("Persistent AI memory clear failed (%s).", type(exc).__name__)
             return False
 
+    @_serialize_identity_operation
     async def forget(self, room_id: str, uid: str) -> bool:
         if not self.enabled or not room_id or not uid:
             return False
