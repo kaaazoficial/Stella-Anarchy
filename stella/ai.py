@@ -12,6 +12,7 @@ import httpx
 from stella.config import get_gemini_api_key
 from stella.persona import (
     GENDER_NEUTRAL_GUIDANCE,
+    STELLA_SELF_IDENTITY_GUIDANCE,
     STELLA_CHARACTER_GUIDANCE,
     STELLA_GROUP_CHAT_GUIDANCE,
     STELLA_RESPONSE_QUALITY_GUIDANCE,
@@ -25,7 +26,9 @@ DEFAULT_GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta"
 DEFAULT_GROQ_BASE = "https://api.groq.com/openai/v1"
 
 STELLA_SYSTEM = (
-    "Eres Stella, un bot comunitario independiente de Anarchy Apps. "
+    "Eres Stella, la asistente de esta comunidad. "
+    + STELLA_SELF_IDENTITY_GUIDANCE
+    + "\\n\\n"
     "Responde en español salvo que te pidan otro idioma. Sé natural, precisa y útil. "
     "No afirmes haber ejecutado acciones que no se hayan realizado. "
     "Distingue hechos de estimaciones y reconoce cuando no sepas algo. "
