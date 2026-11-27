@@ -22,6 +22,7 @@ class SafetyFinding:
     notice: str
     staff_reason: str
     supportive: bool = False
+    staff_only: bool = False
 
 
 def _normalize(value: str) -> str:
@@ -138,7 +139,7 @@ def classify_safety_message(value: str) -> SafetyFinding | None:
             "Posible ideación suicida o autolesión; ofrecer apoyo, nunca sanción.",
             supportive=True,
         )
-    if _NONCONSENSUAL_SEX.search(text) and not (meta or support):
+    if _NONCONSENSUAL_SEX.search(text):
         return SafetyFinding(
             "violencia_sexual", "alta", 0.90,
             "No compartas detalles sexuales gráficos. Si esto describe algo que te ocurrió, mereces apoyo y puedes hablarlo sin dar detalles.",
