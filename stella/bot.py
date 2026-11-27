@@ -36,6 +36,7 @@ from stella.text import format_stella_text
 from stella.audit import audit_event
 from stella.utilities import calculate_expression, format_calculation_result
 from stella.link_analysis import extract_message_urls, inspect_link_signals, format_link_signals, classify_link_policy
+from stella.safety_monitor import SafetyMonitor, classify_safety_message
 
 log = logging.getLogger("stella.bot")
 
@@ -69,7 +70,7 @@ def archive_event_type(event_type: str) -> str:
 _PRIVATE_ADMIN_COMMANDS = AI_ADMIN_COMMANDS | frozenset({
     "status", "warn", "warnings", "unwarn", "idbot", "botid",
     "identidadbot", "salas", "silenciarchat", "hablarchat",
-    "despertar", "saludfuentes",
+    "despertar", "saludfuentes", "alertas",
 })
 
 
@@ -483,6 +484,7 @@ class StellaBot:
     def __init__(self, settings: Settings, store: Store, platform: AnarchyClient) -> None:
         self.settings = settings
         self.store = store
+        self.safety_monitor = SafetyMonitor(settings.database_path)
         self.platform = platform
         self.room_archive = RoomArchive()
         self.platform.room_archive = self.room_archive
@@ -1378,6 +1380,26 @@ class StellaBot:
                     await self._reply(room_id, f"⚠️ {name}, detecté actividad repetitiva. Se registró una advertencia #{warning_id}.", message)
             return
 
+        # Safety filters run on every received text message, not only direct calls.
+        # The incident register stores category metadata, never the message itself.
+        finding = classify_safety_message(content)
+        if finding is not None:
+            incident_id, notify = self.safety_monitor.record(room_id, uid, name, finding)
+            if notify:
+                if finding.supportive:
+                    await self._reply(room_id, finding.notice, message)
+                else:
+                    await self._reply(room_id, f"⚠️ {name}: {finding.notice}", message)
+                audit_event(
+                    "safety.incident.detected",
+                    room_id=room_id,
+                    incident_id=incident_id,
+                    category=finding.category,
+                    severity=finding.severity,
+                    confidence=finding.confidence,
+                )
+            return
+
         remember_match = re.match(
             r"^(?:stella[, ]*)?(?:recuerda(?:me)?|no olvides|ten en cuenta|ten presente|"
             r"guarda en tu memoria|acu[eé]rdate de)\b",
@@ -1749,7 +1771,7 @@ class StellaBot:
             "respuesta": self._auto_reply, "respuestas": self._auto_reply,
             "traducir": self._translate, "translate": self._translate,
             "ia": self._ai, "asistente": self._ai, "memoria": self._vector_memory_command,
-            "historial": self._room_history_command,
+            "historial": self._room_history_command, "alertas": self._safety_alerts,
             "presencia": self._stella_presence, "proactiva": self._stella_presence,
             "investigar": self._research, "investigate": self._research,
             "analizar": self._inspect,
@@ -2677,6 +2699,23 @@ class StellaBot:
             "Una comunidad se construye con la participación de quienes la cuidan.",
         ]
         await self._reply(room_id, random.choice(phrases), message)
+
+    async def _safety_alerts(self, room_id, requester_uid, name, args, message):
+        if not self._is_admin(requester_uid):
+            await self._reply(room_id, "Solo el equipo administrativo puede consultar las alertas de seguridad.", message)
+            return
+        records = self.safety_monitor.recent(room_id, 15)
+        if not records:
+            await self._reply(room_id, "No hay alertas de seguridad registradas en esta sala.", message)
+            return
+        lines = ["⚠️ ALERTAS DE SEGURIDAD · REGISTRO INTERNO"]
+        for row in records:
+            stamp = datetime.fromtimestamp(float(row["created_at"]), timezone.utc).strftime("%d/%m %H:%M UTC")
+            lines.append(
+                f"#{row['id']} · {row['user_name']} · {row['category']} · "
+                f"{row['severity']} · {stamp}\n{row['staff_reason']}"
+            )
+        await self._reply(room_id, "\n".join(lines)[:3500], message)
 
     async def _warn(self, room_id, moderator_uid, moderator_name, args, message):
         if not self._is_admin(moderator_uid):
