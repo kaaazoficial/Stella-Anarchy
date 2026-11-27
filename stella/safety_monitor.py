@@ -132,3 +132,87 @@ def classify_safety_message(value: str) -> SafetyFinding | None:
             "Posible acoso o intimidación dirigida.",
         )
     return None
+
+
+
+# Persistent incident tracking is intentionally separate from room transcript
+# and personal AI memory. Only category metadata is retained, never message text.
+import sqlite3
+import time
+from pathlib import Path
+from typing import Any
+
+
+class SafetyMonitor:
+    """Persistent, minimal incident register; never stores the offending text."""
+
+    def __init__(self, database_path: str | Path) -> None:
+        self.database_path = str(database_path)
+        Path(self.database_path).parent.mkdir(parents=True, exist_ok=True)
+        with self._connect() as db:
+            db.execute(
+                """CREATE TABLE IF NOT EXISTS safety_incidents (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    room_id TEXT NOT NULL,
+                    user_uid TEXT NOT NULL,
+                    user_name TEXT NOT NULL,
+                    category TEXT NOT NULL,
+                    severity TEXT NOT NULL,
+                    confidence REAL NOT NULL,
+                    staff_reason TEXT NOT NULL,
+                    created_at REAL NOT NULL,
+                    last_notified_at REAL
+                )"""
+            )
+            db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_safety_room_created "
+                "ON safety_incidents(room_id, created_at DESC)"
+            )
+
+    def _connect(self):
+        db = sqlite3.connect(self.database_path, timeout=10)
+        db.row_factory = sqlite3.Row
+        return db
+
+    def record(
+        self, room_id: str, uid: str, name: str, finding: SafetyFinding,
+        *, cooldown_seconds: int = 900,
+    ) -> tuple[int, bool]:
+        now = time.time()
+        with self._connect() as db:
+            row = db.execute(
+                """SELECT id,last_notified_at FROM safety_incidents
+                   WHERE room_id=? AND user_uid=? AND category=?
+                   ORDER BY id DESC LIMIT 1""",
+                (str(room_id), str(uid), finding.category),
+            ).fetchone()
+            should_notify = not row or not row["last_notified_at"] or (
+                now - float(row["last_notified_at"]) >= cooldown_seconds
+            )
+            if row and not should_notify:
+                db.execute(
+                    "UPDATE safety_incidents SET created_at=? WHERE id=?",
+                    (now, int(row["id"])),
+                )
+                return int(row["id"]), False
+            cursor = db.execute(
+                """INSERT INTO safety_incidents
+                   (room_id,user_uid,user_name,category,severity,confidence,staff_reason,created_at,last_notified_at)
+                   VALUES(?,?,?,?,?,?,?,?,?)""",
+                (
+                    str(room_id), str(uid), str(name)[:80], finding.category,
+                    finding.severity, float(finding.confidence),
+                    str(finding.staff_reason)[:240], now, now,
+                ),
+            )
+            return int(cursor.lastrowid), True
+
+    def recent(self, room_id: str, limit: int = 10) -> list[dict[str, Any]]:
+        with self._connect() as db:
+            rows = db.execute(
+                """SELECT id,user_name,category,severity,confidence,staff_reason,created_at
+                   FROM safety_incidents WHERE room_id=?
+                   ORDER BY created_at DESC,id DESC LIMIT ?""",
+                (str(room_id), max(1, min(25, int(limit)))),
+            ).fetchall()
+            return [dict(row) for row in rows]
