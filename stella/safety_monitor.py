@@ -59,7 +59,7 @@ _EXPLICIT_SEXUAL = re.compile(
     r"sexo oral|sexo anal|descripciones sexuales explicitas)\b"
 )
 _NONCONSENSUAL_SEX = re.compile(
-    r"\b(?:me obligo a tener sexo|me forzo a tener sexo|"
+    r"\b(?:me obligo a tener sexo|me obligaron a tener sexo|me forzo a tener sexo|"
     r"sexo sin consentimiento|violacion sexual|me violo|"
     r"me tocaron sin permiso|me obligaron a desnudarme)\b"
 )
@@ -79,7 +79,7 @@ _DOXXING = re.compile(
     r"esta es la direccion de|este es su numero)\b"
 )
 _HATE_SPEECH = re.compile(
-    r"\b(?:muerte a todos los|hay que exterminar a los|"
+    r"\b(?:muerte a todos los|hay que exterminar a (?:todos )?los|"
     r"deberian desaparecer todos los|no son personas|son una plaga|"
     r"raza inferior|limpiar el pais de|quememos a todos los)\b"
 )
@@ -94,7 +94,7 @@ _SELF_HARM_IMMINENT = re.compile(
     r"tengo un plan para suicidarme)\b"
 )
 _SELF_HARM_DISTRESS = re.compile(
-    r"\b(?:quiero suicidarme|quiero quitarme la vida|me quiero morir|"
+    r"\b(?:me quiero suicidar|quiero suicidarme|quiero quitarme la vida|me quiero morir|"
     r"no quiero seguir viviendo|quiero hacerme dano|me estoy haciendo dano|"
     r"pienso en suicidarme)\b"
 )
