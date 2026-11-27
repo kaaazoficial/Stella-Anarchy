@@ -69,7 +69,7 @@ AI_ADMIN_COMMANDS = frozenset({
     "laboratorio", "autotest", "admin", "saludfuentes",
     "respuestas", "respuesta", "advertir", "advertencias",
     "quitaradvertencia", "antispam", "perfilbot", "avatarbot",
-    "eliminarmensajes", "historial", "alertas",
+    "eliminarmensajes", "historial",
 })
 
 # Backwards-compatible public allowlist. Privileged tools are added only for
@@ -116,7 +116,6 @@ AI_COMMAND_CATALOG = {
     "autotest": "sin argumentos: ejecuta pruebas internas (solo administradores).",
     "admin": "[resumen|actividad|antispam|avisos|historial]: panel administrativo.",
     "historial": "[cantidad]|buscar <texto>|usuario <UID/nombre>|desde AAAA-MM-DD|anterior <cursor>|exportar [cantidad]|integridad: consulta el archivo cronológico de esta sala (solo administradores).",
-    "alertas": "sin argumentos: consulta alertas automáticas de seguridad de esta sala (solo administradores).",
     "respuesta": "añadir palabra | respuesta; lista; eliminar ID (administradores).",
     "advertir": "@usuario [motivo]: registra una advertencia (administradores).",
     "advertencias": "[@usuario]: consulta advertencias (administradores).",
