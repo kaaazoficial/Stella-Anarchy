@@ -305,6 +305,10 @@ async def health() -> JSONResponse:
             "vector_memory": vector_status,
             "vector_memory_diagnostics": vector_diagnostics,
             "room_archive": room_archive_status,
+            "room_archive_diagnostics": (
+                getattr(room_archive, "diagnostics", {})
+                if room_archive is not None else {}
+            ),
             "voice": voice_diagnostics,
         },
     }
