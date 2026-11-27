@@ -5,6 +5,9 @@ import pytest
 from stella.ai_core import (
     build_ai_instructions,
     classify_request_intent,
+    has_roleplay_format,
+    is_roleplay_exit_request,
+    is_roleplay_turn,
     clarification_for_unspecified_topic,
     is_contextual_followup_request,
     resolve_community_faq,
@@ -350,7 +353,10 @@ def test_assist_uses_previous_replies_only_as_anti_repetition_style_context(monk
     from stella.ai_core import StellaAICore
 
     core = StellaAICore()
-    monkeypatch.setattr(core, "is_enabled", True)
+    monkeypatch.setattr(core, "_primary_provider_config", lambda: {
+        "name": "Google Gemini", "key": "test-key",
+        "url": "https://generativelanguage.googleapis.com/v1beta", "model": "gemini-test",
+    })
     key = "room:user"
     core._append_history(key, "user", "Cuéntame un chiste.")
     core._append_history(key, "assistant", "¡Claro! Aquí tienes uno: ...")
@@ -397,3 +403,81 @@ def test_shared_generic_cache_is_not_used_for_natural_conversation():
     assert len(calls) == 1
     assert not core._simple_answer_cache
     assert not core._simple_request_inflight
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "*Stella se acomoda el cabello y sonríe.*",
+        "—¿Qué haces aquí?",
+        "Quiero rolear contigo.",
+        "Sigamos con la escena.",
+    ],
+)
+def test_roleplay_detector_recognizes_explicit_or_formatted_roleplay(message):
+    assert is_roleplay_turn(message)
+
+
+def test_roleplay_detector_does_not_switch_normal_chat_or_meta_questions():
+    assert not is_roleplay_turn("¿Qué significa roleplay en literatura?")
+    assert not is_roleplay_turn("¿Qué opinas de esta película?")
+    assert is_roleplay_exit_request("Dejemos el rol y hablemos normal.")
+    assert not is_roleplay_turn("Dejemos el rol y hablemos normal.")
+
+
+def test_roleplay_detector_keeps_a_scene_for_the_same_user_and_room():
+    history = [
+        {"role": "user", "content": "*Me acerco a Stella.*"},
+        {"role": "assistant", "content": "*Stella levanta la mirada.*\n—Buenas."},
+    ]
+
+    assert has_roleplay_format(history[-1]["content"])
+    assert is_roleplay_turn("No esperaba encontrarte aquí.", history)
+    assert not is_roleplay_turn("Cambiando de tema, ¿qué hora es?", history)
+
+
+def test_roleplay_instructions_apply_only_when_the_mode_is_active():
+    from stella.persona import STELLA_ROLEPLAY_GUIDANCE
+
+    normal = build_ai_instructions(frozenset(), "conversation")
+    roleplay = build_ai_instructions(frozenset(), "conversation", roleplay=True)
+
+    assert STELLA_ROLEPLAY_GUIDANCE not in normal
+    assert STELLA_ROLEPLAY_GUIDANCE in roleplay
+    assert "acciones" in STELLA_ROLEPLAY_GUIDANCE
+    assert "siempre Stella" in STELLA_ROLEPLAY_GUIDANCE
+    assert "Nunca escribas ni decidas" in STELLA_ROLEPLAY_GUIDANCE
+
+
+def test_assist_routes_roleplay_as_answer_only_and_keeps_same_scene_context(monkeypatch):
+    from stella.ai_core import StellaAICore
+
+    core = StellaAICore()
+    monkeypatch.setattr(core, "_primary_provider_config", lambda: {
+        "name": "Google Gemini", "key": "test-key",
+        "url": "https://generativelanguage.googleapis.com/v1beta", "model": "gemini-test",
+    })
+    key = "room:user"
+    core._append_history(key, "user", "*Me acerco a Stella.*")
+    core._append_history(key, "assistant", "*Stella levanta la mirada.*\n—Buenas.")
+    captured = {}
+
+    async def fake_request(instructions, messages, request_func, **kwargs):
+        captured["instructions"] = instructions
+        captured["messages"] = messages
+        captured["kwargs"] = kwargs
+        return {"kind": "answer", "answer": "*Stella sonríe.*\n—Me alegra verte."}
+
+    monkeypatch.setattr(core, "_request_assist_json", fake_request)
+    result = asyncio.run(core.assist(
+        "—No esperaba encontrarte aquí.", key, object(),
+        allowed_commands=frozenset({"ayuda"}),
+    ))
+
+    assert result["kind"] == "answer"
+    assert "FORMATO" in captured["instructions"]
+    assert "SIN HERRAMIENTAS." in captured["instructions"]
+    assert len(captured["messages"]) == 3
+    assert captured["messages"][-1]["content"] == "—No esperaba encontrarte aquí."
+    assert captured["kwargs"]["response_mode"] == "answer"
+
