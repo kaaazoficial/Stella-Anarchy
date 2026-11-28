@@ -60,3 +60,33 @@ def test_unbounded_balances_work_with_rewards_and_transfers(tmp_path):
     ok, balance = store.claim_reward("target", "daily", 100, 86400)
     assert ok is True
     assert balance == huge - 1 + 100
+
+def test_owner_command_accepts_arbitrarily_large_decimal_amount(tmp_path):
+    import asyncio
+    from types import SimpleNamespace
+
+    from stella.bot import StellaBot
+
+    store = Store(tmp_path / "owner-command.sqlite3")
+    store.initialize()
+    bot = object.__new__(StellaBot)
+    bot.store = store
+    bot.settings = SimpleNamespace(command_prefix="!")
+    bot._is_owner = lambda uid: uid == "owner"
+    bot._mentioned_user = lambda message: ("member", "Miembro")
+    replies = []
+
+    async def reply(room_id, content, message):
+        replies.append(content)
+
+    bot._reply = reply
+    amount = 10**120
+    asyncio.run(
+        bot._give_points(
+            "room", "owner", "Propietario", f"@Miembro {amount}", {}
+        )
+    )
+
+    assert store.points_balance("member") == amount
+    assert str(amount) in replies[-1]
+
