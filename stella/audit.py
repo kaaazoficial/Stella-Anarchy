@@ -108,6 +108,10 @@ def audit_event(event: str, **fields: Any) -> None:
         "event": str(event),
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
+    received_local, received_zone = _local_event_time(payload["timestamp"])
+    if received_local:
+        payload["timestamp_local"] = received_local
+        payload["timestamp_timezone"] = received_zone
     never_log = {
         "authorization", "headers", "api_key", "gemini_api_key",
         "google_api_key", "groq_api_key", "anarchy_bot_token",
@@ -147,6 +151,8 @@ def audit_event(event: str, **fields: Any) -> None:
             "reply_to_message_id", "replytomessageid", "reply_id",
         }:
             payload["has_reply"] = bool(value)
+            if keep_content:
+                payload["reply_to_message_id"] = redact_secrets(value)[:160]
             continue
         if normalized == "mentions":
             try:
