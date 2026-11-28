@@ -501,6 +501,8 @@ class StellaBot:
         self.consciousness = StellaConsciousness()
         self._proactive_cooldown: dict[str, float] = {}
         self._proactive_evaluation_cooldown: dict[str, float] = {}
+        self._social_room_activity: dict[str, dict[str, Any]] = {}
+        self._social_autonomy_global_last_sent = 0.0
         self._global_chat_silence_cache: tuple[float, bool] | None = None
         community_token = settings.community_bot_token or settings.bot_token
         self.voice_platform = (
@@ -680,6 +682,223 @@ class StellaBot:
         except Exception as exc:
             log.warning("Persistent AI fact capture failed (%s).", type(exc).__name__)
             return []
+
+
+    def _track_social_room_activity(self, room_id: str, uid: str) -> None:
+        """Track only transient room activity needed for autonomous social turns."""
+        room = str(room_id or "").strip()
+        member = str(uid or "").strip()
+        if not room or not member:
+            return
+        now = time.monotonic()
+        rooms = getattr(self, "_social_room_activity", None)
+        if rooms is None:
+            rooms = {}
+            self._social_room_activity = rooms
+        state = rooms.setdefault(
+            room,
+            {
+                "last_user_activity": now,
+                "member_uids": set(),
+                "last_evaluated_at": 0.0,
+                "last_spoke_at": 0.0,
+            },
+        )
+        state["last_user_activity"] = now
+        members = state.setdefault("member_uids", set())
+        if isinstance(members, set):
+            members.add(member)
+            if len(members) > 100:
+                members.pop()
+        if len(rooms) > 200:
+            oldest = min(
+                rooms,
+                key=lambda key: float(rooms[key].get("last_user_activity", 0.0)),
+            )
+            if oldest != room:
+                rooms.pop(oldest, None)
+
+    async def autonomous_social_step(self, *, now: float | None = None) -> bool:
+        """Give Stella a chance to start a conversation without a new mention or message."""
+        clock = time.monotonic() if now is None else float(now)
+        if await self._global_chat_silenced():
+            return False
+        if clock - float(getattr(self, "_social_autonomy_global_last_sent", 0.0)) < 35.0:
+            return False
+
+        rooms = getattr(self, "_social_room_activity", {})
+        if not isinstance(rooms, dict) or not rooms:
+            return False
+
+        candidates: list[tuple[float, str, dict[str, Any]]] = []
+        for room_id, state in list(rooms.items()):
+            if not isinstance(state, dict):
+                continue
+            age = clock - float(state.get("last_user_activity", 0.0))
+            if age < 90.0 or age > 3600.0:
+                continue
+            if clock - float(state.get("last_evaluated_at", 0.0)) < 75.0:
+                continue
+            if clock - float(state.get("last_spoke_at", 0.0)) < 240.0:
+                continue
+            if float(getattr(self, "_proactive_cooldown", {}).get(room_id, 0.0)) > clock:
+                continue
+            members = state.get("member_uids")
+            if not isinstance(members, set) or not members:
+                continue
+            candidates.append((
+                float(state.get("last_evaluated_at", 0.0)),
+                str(room_id),
+                state,
+            ))
+        if not candidates:
+            return False
+
+        # Evaluate one room per tick. Older unevaluated rooms get priority so a
+        # busy community cannot cause one room to monopolize the social scheduler.
+        _, room_id, state = min(candidates, key=lambda item: (item[0], item[1]))
+        state["last_evaluated_at"] = clock
+        activity_snapshot = float(state.get("last_user_activity", 0.0))
+
+        archive = getattr(self, "room_archive", None)
+        reader = getattr(archive, "recent_room_context", None)
+        if not callable(reader):
+            return False
+        try:
+            recent = await asyncio.wait_for(
+                reader(room_id, limit=24),
+                timeout=1.0,
+            )
+        except Exception as exc:
+            log.debug("Autonomous social context unavailable (%s).", type(exc).__name__)
+            return False
+        if not isinstance(recent, list) or not recent:
+            return False
+
+        now_ms = int(time.time() * 1000)
+        bot_identity = getattr(self.platform, "identity", {}) or {}
+        bot_uid = str(bot_identity.get("uid") or bot_identity.get("userId") or "").strip()
+        selected: list[dict[str, Any]] = []
+        human_messages = 0
+        for item in recent:
+            if not isinstance(item, dict):
+                continue
+            content = " ".join(str(item.get("content") or "").split())
+            event_kind = str(item.get("event_type") or "").casefold()
+            if not content or event_kind not in {
+                "chat.message.in", "chat.message.out", "chat.message.edited",
+                "message.created", "message.create", "message.edited",
+            }:
+                continue
+            if content.startswith(("!", "-", "/")):
+                continue
+            stamp = item.get("occurred_at_ms")
+            try:
+                age_ms = now_ms - int(stamp or 0)
+            except (TypeError, ValueError, OverflowError):
+                age_ms = 0
+            if age_ms > 45 * 60 * 1000:
+                continue
+            selected.append(item)
+            actor_uid = str(item.get("actor_uid") or "").strip()
+            is_stella_message = (
+                event_kind == "chat.message.out"
+                or bool(bot_uid and actor_uid == bot_uid)
+            )
+            if not is_stella_message and actor_uid:
+                human_messages += 1
+
+        if human_messages < 1 or not selected:
+            return False
+
+        selected.sort(
+            key=lambda item: int(item.get("occurred_at_ms") or 0)
+        )
+        transcript = []
+        for item in selected[-16:]:
+            speaker = str(item.get("actor_name") or "Participante").strip()[:48]
+            content = " ".join(str(item.get("content") or "").split())[:550]
+            if content:
+                transcript.append(f"{speaker}: {content}")
+        if not transcript:
+            return False
+
+        system = (
+            STELLA_IDENTITY_GUIDANCE
+            + "\\n\\n"
+            + "INICIATIVA SOCIAL AUTÓNOMA: eres una integrante real de la dinámica del grupo, "
+            "no una asistente que espera preguntas. Este turno no es una respuesta a nadie: "
+            "decide por iniciativa propia si ahora es buen momento para hablar. Puedes abrir "
+            "un tema nuevo, lanzar una pregunta que invite a varias personas, compartir una "
+            "observación, recuperar un asunto que quedó a medias o hacer un comentario que "
+            "despierte conversación. No necesitas que el último mensaje sea una invitación ni "
+            "que alguien haya escrito hace unos segundos. Cuando la sala tuvo actividad reciente "
+            "y un pequeño silencio deja espacio para otra voz, puedes tomar la iniciativa. "
+            "Sé concreta y variada; evita preguntas genéricas como «¿cómo están?» y no fuerces "
+            "conversación si la sala parece inactiva, el tema es delicado, hay un conflicto o "
+            "no tienes una aportación natural. En ese caso responde exactamente [NO_INTERVENIR]. "
+            "No inventes vivencias, recuerdos, relaciones ni hechos personales. No inicies "
+            "roleplay por tu cuenta, no ejecutes comandos y no menciones que estás evaluando "
+            "la sala o que eres una IA. Escribe como Stella, de forma breve y espontánea."
+        )
+        prompt = (
+            "CONTEXTO RECIENTE DE ESTA SALA (de más antiguo a más reciente):\\n"
+            + "\\n".join(transcript)
+            + "\\n\\nEs tu oportunidad de iniciar una intervención propia. "
+            "Puedes hablar o guardar silencio; decide según el contexto."
+        )
+        ai_client = getattr(self, "ai", None)
+        ask = getattr(ai_client, "ask", None)
+        if not callable(ask):
+            return False
+        try:
+            answer = await asyncio.wait_for(
+                ask(prompt, system=system),
+                timeout=25.0,
+            )
+        except Exception as exc:
+            log.warning("Autonomous social decision failed (%s).", type(exc).__name__)
+            return False
+        answer = str(answer or "").strip()
+        if not answer or answer.casefold() == "[no_intervenir]":
+            return False
+        if await self._global_chat_silenced():
+            return False
+        # Do not send a prepared opener over a conversation that restarted
+        # while the model was thinking.
+        current = self._social_room_activity.get(room_id, {})
+        if float(current.get("last_user_activity", 0.0)) > activity_snapshot:
+            return False
+
+        safe_text = re.sub(
+            r"(?:https?://|www\\.)[^\\s<>]+",
+            "[enlace omitido]",
+            answer,
+            flags=re.IGNORECASE,
+        )
+        sent = await self.platform.send_message(
+            room_id,
+            format_stella_text(safe_text)[:1800],
+        )
+        if not sent:
+            return False
+        spoke_at = time.monotonic()
+        current["last_spoke_at"] = spoke_at
+        current["last_evaluated_at"] = spoke_at
+        self._social_autonomy_global_last_sent = spoke_at
+        self._proactive_cooldown[room_id] = spoke_at + 240.0
+        return True
+
+    async def social_autonomy_loop(self) -> None:
+        """Run social initiative independently of incoming webhooks."""
+        while True:
+            try:
+                await self.autonomous_social_step()
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                log.warning("Social autonomy cycle failed (%s).", type(exc).__name__)
+            await asyncio.sleep(20.0)
 
     async def _maybe_proactive_reply(
         self, room_id: str, uid: str, name: str, content: str, message: dict[str, Any]
@@ -1575,6 +1794,8 @@ class StellaBot:
             return
         if not uid or not content.strip() or self._is_bot_message(message):
             return
+        if not content.lstrip().startswith(("!", "-", "/")):
+            self._track_social_room_activity(room_id, uid)
 
         direct_call = extract_stella_call(content)
         mentioned = self._is_stella_mentioned(message)
@@ -1911,6 +2132,7 @@ class StellaBot:
         for session_key in list(self.ai_core._memory):
             if session_key.startswith(str(room_id) + ":"):
                 self.ai_core._memory.pop(session_key, None)
+        getattr(self, "_social_room_activity", {}).pop(str(room_id), None)
         for mapping in (self._recent, self._warned_until, self._auto_reply_cooldown):
             for key in list(mapping):
                 if key[0] == room_id:
