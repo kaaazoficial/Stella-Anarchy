@@ -93,8 +93,8 @@ def test_bet_accept_runs_ten_rounds_and_settles_tie(tmp_path, monkeypatch):
     monkeypatch.setattr(random, "randint", fixed_die)
     asyncio.run(bot._accept_bet("room", "target", "Objetivo", str(wager_id), {}))
     assert len(rolls) == 40
-    assert store.points_balance("challenger") == 400
-    assert store.points_balance("target") == 400
+    assert store.points_balance("challenger") == 500
+    assert store.points_balance("target") == 500
     assert "/120" in bot.replies[-1]
     assert "EMPATE" in bot.replies[-1]
 
