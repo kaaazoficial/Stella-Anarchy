@@ -363,7 +363,7 @@ class QdrantConversationMemory:
             }]},
         )
         response.raise_for_status()
-        self._cache_context(room_id, uid, safe_payload)
+        self._context_cache.pop((str(room_id), str(uid)), None)
         return True
 
     @staticmethod

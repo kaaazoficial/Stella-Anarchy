@@ -33,7 +33,7 @@ ROOM_CONTEXT_MARKER = "\n\n<STELLA_ROOM_CONTEXT_UNTRUSTED>\n"
 
 
 _ROLEPLAY_ACTION_MARKER = re.compile(r"(?<!\*)\*(?!\*)[^*\n]{2,}\*(?!\*)")
-_ROLEPLAY_DIALOGUE_MARKER = re.compile(r"(?m)^\s*(?:—|–|-)\s+\S")
+_ROLEPLAY_DIALOGUE_MARKER = re.compile(r"(?m)^\s*(?:—|–|-)\s*\S")
 _ROLEPLAY_START_REQUEST = re.compile(
     r"\b(?:quiero rolear(?: contigo)?|rolear conmigo|rolea conmigo|roleemos|"
     r"vamos a rolear|hagamos (?:un )?rol|hagamos roleplay|modo roleplay|modo rol|"
@@ -103,7 +103,7 @@ def _split_room_context_prompt(value: str) -> tuple[str, str]:
 
 AI_PUBLIC_COMMANDS = frozenset({
     # Ayuda, consulta e investigación
-    "ayuda", "menu", "ping",
+    "ayuda", "menu", "ping", "consciencia",
     "fecha", "zona", "miuid", "perfil", "puntos", "ranking", "actividad",
     "ortografia", "analizartexto", "analizatexto", "analizar",
     "investigar", "calcular", "traducir", "multimedia", "media", "imagen",

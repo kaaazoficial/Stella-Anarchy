@@ -174,6 +174,21 @@ def test_memory_identity_does_not_expose_room_or_member_identifiers():
 
 
 @pytest.mark.asyncio
+async def test_durable_write_invalidates_short_context_cache(memory):
+    store, _ = memory
+    assert await store.set_enabled("room-a", "user-1", True)
+    assert await store.save("room-a", "user-1", [
+        {"role": "user", "content": "Primer turno."},
+    ])
+    assert (await store.load_context("room-a", "user-1"))[0]
+    assert await store.save("room-a", "user-1", [
+        {"role": "user", "content": "Turno actualizado."},
+    ])
+    turns, _ = await store.load_context("room-a", "user-1")
+    assert turns == [{"role": "user", "content": "Turno actualizado."}]
+
+
+@pytest.mark.asyncio
 async def test_expired_memory_is_not_restored_and_is_removed(memory):
     store, client = memory
     assert await store.set_enabled("room-a", "user-1", True) is True

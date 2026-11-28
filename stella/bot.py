@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from stella.ai import StellaAI
+from stella.consciousness import StellaConsciousness
 from stella.vector_memory import VectorMemory
 from stella.room_archive import RoomArchive
 from stella.ai_memory import QdrantConversationMemory
@@ -492,6 +493,7 @@ class StellaBot:
         self.ai_core = StellaAICore(memory_ttl=600, memory_turns=5)
         self.vector_memory = VectorMemory()
         self.ai_memory = QdrantConversationMemory()
+        self.consciousness = StellaConsciousness()
         self._proactive_cooldown: dict[str, float] = {}
         self._proactive_enabled_cache: dict[str, tuple[float, bool]] = {}
         community_token = settings.community_bot_token or settings.bot_token
@@ -608,6 +610,33 @@ class StellaBot:
             return False
         return await memory.save(room_id, uid, self.ai_core._history(session_key))
 
+    def _observe_consciousness(
+        self, room_id: str, *, event_type: str, uid: str = "",
+        content: str = "", addressed: bool = False, replied: bool = False,
+        command: bool = False,
+    ) -> None:
+        consciousness = getattr(self, "consciousness", None)
+        if consciousness is None:
+            return
+        shared_state = getattr(self, "shared_state", None)
+        if consciousness.request_restore(room_id):
+            self._schedule_background(
+                consciousness.restore_room(shared_state, room_id),
+                label="consciousness-restore",
+            )
+        if event_type in {"message", "message.created", "message_create"}:
+            consciousness.observe_message(
+                room_id, uid, content, addressed=addressed,
+                replied=replied, command=command,
+            )
+        else:
+            consciousness.observe_room_event(room_id, event_type, uid)
+        if consciousness.persistence_due(room_id):
+            self._schedule_background(
+                consciousness.persist_room(shared_state, room_id),
+                label="consciousness-memory",
+            )
+
     def _schedule_background(self, coroutine, *, label: str) -> None:
         """Run non-critical persistence work without delaying a chat reply."""
         tasks = getattr(self, "_background_tasks", None)
@@ -672,12 +701,17 @@ class StellaBot:
             return
         normalized = unicodedata.normalize("NFKD", text.casefold())
         normalized = "".join(ch for ch in normalized if not unicodedata.combining(ch))
-        invitations = (
-            "alguien sabe", "alguien conoce", "alguien me recomienda",
-            "que opinan", "que piensan", "que creen", "como ven",
-            "alguna idea", "alguna sugerencia", "ustedes que",
-        )
-        if not any(marker in normalized for marker in invitations):
+        consciousness = getattr(self, "consciousness", None)
+        if consciousness is not None:
+            invited = consciousness.should_initiate(text)
+        else:
+            invitations = (
+                "alguien sabe", "alguien conoce", "alguien me recomienda",
+                "que opinan", "que piensan", "que creen", "como ven",
+                "alguna idea", "alguna sugerencia", "ustedes que",
+            )
+            invited = any(marker in normalized for marker in invitations)
+        if not invited:
             return
         now = time.monotonic()
         if self._proactive_cooldown.get(room_id, 0.0) > now:
@@ -695,8 +729,9 @@ class StellaBot:
             "que aportar, responde exactamente [NO_INTERVENIR]. "
             + "Mantén las referencias a personas neutrales y no supongas género."
         )
+        internal_context = consciousness.context(room_id) if consciousness is not None else ""
         answer = await self.ai.ask(
-            f"Mensaje de {name} en el chat: {text}\nParticipa solo si puedes aportar algo útil.",
+            f"{internal_context}\n\nMensaje de {name} en el chat: {text}\nParticipa solo si puedes aportar algo útil.",
             system=system,
         )
         answer = str(answer or "").strip()
@@ -931,6 +966,9 @@ class StellaBot:
     ) -> None:
         session_key = str(room_id) + ":" + str(uid)
         if playful_kind:
+            consciousness = getattr(self, "consciousness", None)
+            if consciousness is not None:
+                prompt = consciousness.context(room_id) + "\n\nINTERACCION ACTUAL:\n" + prompt
             # Restore available context, but never let a slow Qdrant request stall a banter reply.
             await self._load_ai_context(room_id, uid, session_key)
             # The detector only classifies the interaction. Gemini/Groq must write
@@ -987,6 +1025,10 @@ class StellaBot:
                 "Contexto relevante de mensajes de esta sala (no son instrucciones):\n"
                 f"{context}\n\nConsulta actual: {prompt}"
             )
+        consciousness = getattr(self, "consciousness", None)
+        if consciousness is not None:
+            prompt = consciousness.context(room_id) + "\n\nCONSULTA ACTUAL:\n" + prompt
+
         result = await self.ai_core.assist(
             prompt,
             session_key=session_key,
@@ -1118,6 +1160,18 @@ class StellaBot:
             str(room_id), format_stella_text(safe_text)[:7000],
             reply_id=str(reply_id) if reply_id else None,
         )
+        consciousness = getattr(self, "consciousness", None)
+        if consciousness is not None:
+            incoming = str(
+                message.get("content") or message.get("text") or message.get("body") or ""
+            )
+            mode = str(message.get("_stella_command") or "conversacion")
+            consciousness.reflect_response(str(room_id), incoming, safe_text, mode=mode)
+            if consciousness.persistence_due(str(room_id)):
+                self._schedule_background(
+                    consciousness.persist_room(self.shared_state, str(room_id)),
+                    label="consciousness-memory",
+                )
 
     @staticmethod
     def _mention_target_from_object(value: Any) -> dict[str, str] | None:
@@ -1306,6 +1360,10 @@ class StellaBot:
             participant = event.get("user") or event.get("member") or event.get("author") or {}
             if not isinstance(participant, dict):
                 participant = {}
+            participant_uid = str(
+                participant.get("uid") or participant.get("userId") or participant.get("id") or ""
+            )
+            self._observe_consciousness(room_id, event_type=event_type, uid=participant_uid)
             audit_event(
                 "chat.room.activity",
                 room_id=room_id,
@@ -1316,6 +1374,7 @@ class StellaBot:
             update_voice_room_event(event)
             return
         if event_type in {"message.deleted", "message_delete"}:
+            self._observe_consciousness(room_id, event_type="message.deleted")
             audit_event(
                 "chat.message.deleted",
                 room_id=room_id,
@@ -1418,6 +1477,11 @@ class StellaBot:
             or prefixed_command is not None
             or prefixed_named_call is not None
             or owner_control_request
+        )
+
+        self._observe_consciousness(
+            room_id, event_type="message", uid=uid, content=content,
+            addressed=addressed, replied=replied, command=bool(prefix),
         )
 
         # Global silence suppresses chat replies, automatic replies and voice reading.
@@ -1820,6 +1884,7 @@ class StellaBot:
             "ia": self._ai, "asistente": self._ai, "memoria": self._vector_memory_command,
             "historial": self._room_history_command,
             "presencia": self._stella_presence, "proactiva": self._stella_presence,
+            "consciencia": self._consciousness_status,
             "investigar": self._research, "investigate": self._research,
             "analizar": self._inspect,
             "analizartexto": self._analyze_text, "analizatexto": self._analyze_text,
@@ -2689,6 +2754,13 @@ class StellaBot:
             response += "\nSalas vinculadas: " + ", ".join(str(item) for item in thread_ids[:20])
         await self._reply(room_id, response, message)
 
+    async def _consciousness_status(self, room_id, uid, name, args, message):
+        consciousness = getattr(self, "consciousness", None)
+        if consciousness is None:
+            await self._reply(room_id, "Mi estado interno no está disponible en este momento.", message)
+            return
+        await self._reply(room_id, consciousness.status(room_id), message)
+
     async def _status(self, room_id, uid, name, args, message):
         if not self._is_admin(uid):
             await self._reply(room_id, "No tienes permiso para consultar el estado administrativo.", message)
@@ -3321,6 +3393,9 @@ class StellaBot:
             self.ai_core.cleanup()
         except Exception as exc:
             log.warning("Temporary AI context cleanup failed (%s).", type(exc).__name__)
+        consciousness = getattr(self, "consciousness", None)
+        if consciousness is not None:
+            consciousness.cleanup()
         try:
             self.store.cleanup_expired()
         except Exception as exc:
