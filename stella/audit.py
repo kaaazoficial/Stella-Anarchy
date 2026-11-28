@@ -102,6 +102,62 @@ def _content_logging_enabled() -> bool:
     }
 
 
+
+def _one_line(value: Any, *, limit: int) -> str:
+    """Make a safe, compact value suitable for a single transcript log line."""
+    text = redact_secrets(value).replace("\r\n", "\n").replace("\r", "\n")
+    text = " ↵ ".join(part.strip() for part in text.split("\n"))
+    text = re.sub(r"[ \t]+", " ", text).strip()
+    return text[:limit]
+
+
+def _log_chat_message(
+    event: str, fields: dict[str, Any], *, keep_content: bool, fallback_time: str
+) -> None:
+    """Render chat activity as a readable transcript instead of a metadata-heavy JSON blob."""
+    source_time = (
+        fields.get("event_time")
+        or fields.get("occurred_at")
+        or fields.get("sent_at")
+        or fallback_time
+    )
+    local_time, _ = _local_event_time(source_time)
+    timestamp = local_time.replace("T", " ")[:19] if local_time else "hora desconocida"
+
+    room_name = _one_line(fields.get("room_name") or "", limit=80)
+    room_id = _one_line(fields.get("room_id") or "", limit=80)
+    if room_name:
+        room = f"{room_name} ({room_id})" if room_id else room_name
+    else:
+        room = f"Sala {room_id}" if room_id else "Sala desconocida"
+
+    if event == "chat.message.out":
+        author = "Stella"
+    elif keep_content:
+        author = _one_line(fields.get("actor_name") or fields.get("nickname") or "Usuario", limit=80)
+    else:
+        author = "Usuario"
+
+    if keep_content:
+        raw_content = str(fields.get("content") or fields.get("text") or "")
+        safe_content = redact_secrets(raw_content)
+        content = _one_line(safe_content, limit=_MAX_AUDIT_CONTENT_CHARS)
+        if not content:
+            content = "[mensaje sin texto]"
+        if len(safe_content) > _MAX_AUDIT_CONTENT_CHARS:
+            content += " … [recortado]"
+    else:
+        content = "[contenido omitido]"
+
+    if any(fields.get(key) for key in (
+        "reply_message_id", "reply_to_message_id", "reply_to_message_id",
+        "reply_id", "replymessageid", "replytomessageid",
+    )):
+        author += " ↪"
+
+    prefix = "[CHAT EDITADO]" if event == "chat.message.edited" else "[CHAT]"
+    log.info("%s %s | %s | %s: %s", prefix, timestamp, room, author, content)
+
 def audit_event(event: str, **fields: Any) -> None:
     """Write structured operational events without retaining raw chat or member identifiers."""
     payload: dict[str, Any] = {
@@ -119,6 +175,9 @@ def audit_event(event: str, **fields: Any) -> None:
         "token", "secret", "password",
     }
     keep_content = _content_logging_enabled()
+    if str(event) in {"chat.message.in", "chat.message.out", "chat.message.edited"}:
+        _log_chat_message(str(event), fields, keep_content=keep_content, fallback_time=payload["timestamp"])
+        return
     for key, value in fields.items():
         if value is None:
             continue
