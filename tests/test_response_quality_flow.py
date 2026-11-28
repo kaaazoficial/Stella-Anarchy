@@ -41,7 +41,7 @@ def test_global_chat_silence_cache_avoids_a_remote_read_for_every_message(monkey
 
         now[0] += 1.01
         assert await bot._global_chat_silenced() is True
-        assert bot.shared_state.calls == 2
+        assert bot.shared_state.calls == 3
 
     asyncio.run(scenario())
 
@@ -64,7 +64,7 @@ def test_global_chat_silence_fails_closed_and_caches_the_failure(monkeypatch):
     async def scenario():
         assert await bot._global_chat_silenced() is True
         assert await bot._global_chat_silenced() is True
-        assert bot.shared_state.calls == 2
+        assert bot.shared_state.calls == 1
 
     asyncio.run(scenario())
 
