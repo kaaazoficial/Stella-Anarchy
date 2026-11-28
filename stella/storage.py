@@ -243,23 +243,74 @@ class Store:
             return int(row["points"]) if row else 0
 
     def claim_reward(self, uid: str, action: str, amount: int, cooldown: float) -> tuple[bool, int]:
+        """Atomically claim a positive reward once per cooldown.
+
+        A missing profile returns (False, -1); an overflowing balance returns
+        (False, -2). Positive cooldowns and rewards are required.
+        """
+        try:
+            reward = int(amount)
+            wait = float(cooldown)
+        except (TypeError, ValueError, OverflowError):
+            return False, -1
+        if not str(uid).strip() or not str(action).strip() or reward <= 0 or wait <= 0:
+            return False, -1
+        if reward > 9223372036854775807:
+            return False, -2
         now = time.time()
         with self._session(self.connect()) as db:
             db.execute("BEGIN IMMEDIATE")
+            user = db.execute("SELECT points FROM users WHERE uid=?", (str(uid),)).fetchone()
+            if not user:
+                return False, -1
+            balance = int(user["points"])
+            if balance > 9223372036854775807 - reward:
+                return False, -2
             row = db.execute(
                 "SELECT claimed_at FROM reward_claims WHERE uid=? AND action=?",
                 (str(uid), str(action)),
             ).fetchone()
-            if row and now - float(row["claimed_at"]) < cooldown:
-                return False, max(1, int(cooldown - (now - float(row["claimed_at"]))))
+            if row and now - float(row["claimed_at"]) < wait:
+                return False, max(1, int(wait - (now - float(row["claimed_at"]))))
             db.execute(
                 """INSERT INTO reward_claims(uid,action,claimed_at) VALUES(?,?,?)
                    ON CONFLICT(uid,action) DO UPDATE SET claimed_at=excluded.claimed_at""",
                 (str(uid), str(action), now),
             )
-            db.execute("UPDATE users SET points=points+?,last_seen=? WHERE uid=?", (int(amount), now, str(uid)))
+            db.execute(
+                "UPDATE users SET points=points+?,last_seen=? WHERE uid=?",
+                (reward, now, str(uid)),
+            )
+            return True, balance + reward
+
+    def grant_points(self, uid: str, nickname: str, amount: int) -> tuple[str, int]:
+        """Atomically create/update a member balance with owner-granted points."""
+        try:
+            value = int(amount)
+        except (TypeError, ValueError, OverflowError):
+            return "invalid", 0
+        if not str(uid).strip() or value <= 0 or value > 9223372036854775807:
+            return "invalid", 0
+        now = time.time()
+        with self._session(self.connect()) as db:
+            db.execute("BEGIN IMMEDIATE")
             row = db.execute("SELECT points FROM users WHERE uid=?", (str(uid),)).fetchone()
-            return True, int(row["points"]) if row else 0
+            if row:
+                balance = int(row["points"])
+                if balance > 9223372036854775807 - value:
+                    return "overflow", balance
+                balance += value
+                db.execute(
+                    "UPDATE users SET points=?,nickname=?,last_seen=? WHERE uid=?",
+                    (balance, str(nickname)[:80] or "Usuario", now, str(uid)),
+                )
+                return "ok", balance
+            db.execute(
+                """INSERT INTO users(uid,nickname,points,created_at,last_seen)
+                   VALUES(?,?,?,?,?)""",
+                (str(uid), str(nickname)[:80] or "Usuario", value, now, now),
+            )
+            return "ok", value
 
     def transfer_points(self, sender_uid: str, target_uid: str, amount: int) -> str:
         if amount <= 0 or sender_uid == target_uid:

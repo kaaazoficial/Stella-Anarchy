@@ -87,6 +87,7 @@ _PRIVATE_ADMIN_COMMANDS = AI_ADMIN_COMMANDS | frozenset({
     "eliminarmensajes", "historial",
     "idbot", "botid", "identidadbot", "salas",
     "silenciarchat", "hablarchat", "despertar", "mencionar", "mention",
+    "regalarpuntos", "darpuntos",
 })
 
 
@@ -2430,6 +2431,7 @@ class StellaBot:
             "fecha": self._date_time, "zona": self._date_time,
             "perfil": self._profile, "bio": self._bio, "miestado": self._my_status,
             "puntos": self._points, "saldo": self._points, "ranking": self._ranking,
+            "regalarpuntos": self._give_points, "darpuntos": self._give_points,
             "ruleta": self._roulette, "apostar": self._bet_challenge,
             "aceptarapuesta": self._accept_bet, "rechazarapuesta": self._reject_bet,
             "misapuestas": self._bet_history,
@@ -3041,7 +3043,7 @@ class StellaBot:
 
     async def _bet_challenge(self, room_id, uid, name, args, message):
         target = self._mentioned_user(message)
-        amounts = re.findall(r"(?<!\\w)\\d+(?!\\w)", str(args or ""))
+        amounts = re.findall(r"\d+", str(args or ""))
         if not target or not amounts:
             await self._reply(room_id, "Uso: !apostar @usuario <puntos>. Reto de dados a 10 rondas; la otra persona debe aceptar.", message)
             return
@@ -3058,9 +3060,9 @@ class StellaBot:
             await self._reply(room_id, f"No tienes suficientes puntos. Saldo: {balance}.", message)
         else:
             await self._reply(room_id,
-                f"🎲 RETO DE DADOS · #{wager_id}\\n{name} reta a {target[1]} por {stake} puntos.\\n"
-                f"Ambos lanzarán dos dados; gana la suma más alta y se lleva el pozo de {stake * 2}.\\n"
-                f"{target[1]}, acepta con !aceptarapuesta {wager_id} o rechaza con !rechazarapuesta {wager_id}.\\n"
+                f"🎲 RETO DE DADOS · #{wager_id}\n{name} reta a {target[1]} por {stake} puntos.\n"
+                f"Cada participante lanza dos dados durante 10 rondas; gana la suma total más alta y se lleva el pozo de {stake * 2}.\n"
+                f"{target[1]}, acepta con !aceptarapuesta {wager_id} o rechaza con !rechazarapuesta {wager_id}.\n"
                 "El reto caduca en 10 minutos. Los puntos del retador quedan reservados.", message)
 
     async def _accept_bet(self, room_id, uid, name, args, message):
@@ -3069,7 +3071,12 @@ class StellaBot:
         except ValueError:
             await self._reply(room_id, "Uso: !aceptarapuesta <ID del reto>.", message)
             return
-        status, wager = self.store.accept_point_wager(room_id, wager_id, uid, sum(random.randint(1, 6) for _ in range(2)), sum(random.randint(1, 6) for _ in range(2)))
+        # Ten rounds, two six-sided dice per participant per round.
+        challenger_roll = sum(random.randint(1, 6) for _ in range(20))
+        target_roll = sum(random.randint(1, 6) for _ in range(20))
+        status, wager = self.store.accept_point_wager(
+            room_id, wager_id, uid, challenger_roll, target_roll
+        )
         if status == "not_target":
             await self._reply(room_id, "Solo la persona retada puede aceptar esta apuesta.", message)
         elif status == "insufficient":
@@ -3079,11 +3086,11 @@ class StellaBot:
         elif status != "ok":
             await self._reply(room_id, "No encontré ese reto en esta sala.", message)
         elif wager["status"] == "tie":
-            await self._reply(room_id, f"🎲 EMPATE · #{wager_id}\\n{wager['challenger_name']}: {wager['challenger_roll']} · {name}: {wager['target_roll']}\\nSe devolvieron los {wager['stake']} puntos a cada participante.", message)
+            await self._reply(room_id, f"🎲 EMPATE · #{wager_id}\n{wager['challenger_name']}: {wager['challenger_roll']}/120 · {name}: {wager['target_roll']}/120\nSe devolvieron los {wager['stake']} puntos a cada participante.", message)
         else:
             winner = wager["challenger_name"] if wager["winner_uid"] == wager["challenger_uid"] else name
             loser = name if wager["winner_uid"] == wager["challenger_uid"] else wager["challenger_name"]
-            await self._reply(room_id, f"🎲 RESULTADO · #{wager_id}\\n{wager['challenger_name']}: {wager['challenger_roll']} · {name}: {wager['target_roll']}\\n🏆 {winner} gana {wager['stake'] * 2} puntos. {loser} pierde su apuesta. ¡Bien jugado!", message)
+            await self._reply(room_id, f"🎲 RESULTADO · #{wager_id}\n{wager['challenger_name']}: {wager['challenger_roll']}/120 · {name}: {wager['target_roll']}/120\n🏆 {winner} gana {wager['stake'] * 2} puntos. {loser} pierde su apuesta. ¡Bien jugado!", message)
 
     async def _reject_bet(self, room_id, uid, name, args, message):
         try:
@@ -3111,25 +3118,72 @@ class StellaBot:
         lines = ["🎲 TUS APUESTAS · ÚLTIMOS 5"]
         for row in rows:
             lines.append(f"#{row['id']} · {row['challenger_name']} vs {row['target_name']} · {row['stake']} pts · {labels.get(row['status'], row['status'])}")
-        await self._reply(room_id, "\\n".join(lines), message)
+        await self._reply(room_id, "\n".join(lines), message)
 
     async def _daily(self, room_id, uid, name, args, message):
         ok, result = self.store.claim_reward(uid, "daily", 100, 86400)
         if ok:
             await self._reply(room_id, f"🎁 Recompensa diaria: +100 puntos. Saldo: {result}.", message)
+        elif result == -1:
+            await self._reply(room_id, "No pude encontrar tu perfil para entregar la recompensa. Vuelve a intentarlo.", message)
+        elif result == -2:
+            await self._reply(room_id, "Tu saldo alcanzó el límite técnico de almacenamiento; no se entregó la recompensa.", message)
         else:
             hours, remainder = divmod(result, 3600)
-            minutes = remainder // 60
-            await self._reply(room_id, f"Ya reclamaste tu recompensa. Vuelve en {hours} h {minutes} min.", message)
+            minutes, seconds = divmod(remainder, 60)
+            await self._reply(room_id, f"Ya reclamaste tu recompensa diaria. Vuelve en {hours} h {minutes} min {seconds} s.", message)
 
     async def _work(self, room_id, uid, name, args, message):
         amount = random.randint(15, 45)
         ok, result = self.store.claim_reward(uid, "work", amount, 3600)
         if ok:
             await self._reply(room_id, f"🧰 Trabajo completado: +{amount} puntos. Saldo: {result}.", message)
+        elif result == -1:
+            await self._reply(room_id, "No pude encontrar tu perfil para pagarte el trabajo. Vuelve a intentarlo.", message)
+        elif result == -2:
+            await self._reply(room_id, "Tu saldo alcanzó el límite técnico de almacenamiento; no se entregaron puntos.", message)
         else:
-            minutes = max(1, result // 60)
-            await self._reply(room_id, f"Necesitas descansar. Vuelve en aproximadamente {minutes} min.", message)
+            minutes, seconds = divmod(result, 60)
+            await self._reply(room_id, f"Necesitas descansar. Vuelve en {minutes} min {seconds} s.", message)
+
+    async def _give_points(self, room_id, uid, name, args, message):
+        """Grant virtual points to a member; strictly restricted to SINNER_UID."""
+        authorized = self._is_owner(uid)
+        _audit_admin_operation("grant_points", room_id, authorized)
+        if not authorized:
+            await self._reply(room_id, "Este comando está reservado al propietario de Stella.", message)
+            return
+        target = self._mentioned_user(message)
+        amount_match = re.search(r"(?:^|\s)(\d+)\s*$", str(args or ""))
+        if not target or not amount_match:
+            prefix = getattr(getattr(self, "settings", None), "command_prefix", "!")
+            await self._reply(
+                room_id,
+                f"Uso: {prefix}regalarpuntos @usuario <cantidad>. No tiene límite de economía; solo el máximo entero de la base de datos.",
+                message,
+            )
+            return
+        if target[0] == uid:
+            await self._reply(room_id, "No puedes regalarte puntos a ti mismo.", message)
+            return
+        amount = int(amount_match.group(1))
+        if amount <= 0:
+            await self._reply(room_id, "La cantidad debe ser mayor que cero.", message)
+            return
+        if amount > 9223372036854775807:
+            await self._reply(room_id, "La cantidad supera el máximo entero que admite el almacenamiento.", message)
+            return
+        status, balance = self.store.grant_points(target[0], target[1], amount)
+        if status == "overflow":
+            await self._reply(room_id, "El saldo de esa cuenta alcanzaría el límite técnico de almacenamiento.", message)
+        elif status != "ok":
+            await self._reply(room_id, "No pude entregar los puntos; no se modificó el saldo.", message)
+        else:
+            await self._reply(
+                room_id,
+                f"🎁 {name} entregó {amount} puntos a {target[1]}. Nuevo saldo: {balance} puntos.",
+                message,
+            )
 
     async def _pay(self, room_id, uid, name, args, message):
         target = self._mentioned_user(message)

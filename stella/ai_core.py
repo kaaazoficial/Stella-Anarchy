@@ -149,7 +149,7 @@ AI_ADMIN_COMMANDS = frozenset({
     "laboratorio", "autotest", "admin", "saludfuentes",
     "respuestas", "respuesta", "advertir", "advertencias",
     "quitaradvertencia", "antispam", "perfilbot", "avatarbot",
-    "eliminarmensajes", "historial",
+    "eliminarmensajes", "historial", "regalarpuntos", "darpuntos",
 })
 
 # Backwards-compatible public allowlist. Privileged tools are added only for
@@ -183,6 +183,8 @@ AI_COMMAND_CATALOG = {
     "menu": "sin argumentos: muestra el catálogo de comandos por categorías.",
     "centro": "sin argumentos: panel de administración (solo administradores).",
     "nexus": "sin argumentos: alias del panel administrativo (solo administradores).",
+    "regalarpuntos": "@usuario cantidad: entrega puntos virtuales (solo propietario).",
+    "darpuntos": "@usuario cantidad: alias de regalarpuntos (solo propietario).",
     "paneladmin": "sin argumentos: alias del panel administrativo (solo administradores).",
     "sistema": "sin argumentos: estado del sistema (solo administradores).",
     "diagnostico": "sin argumentos: diagnóstico operativo (solo administradores).",

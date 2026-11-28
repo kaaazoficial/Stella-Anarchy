@@ -16,7 +16,7 @@ def _normalize(value: str) -> str:
 COMMAND_ALIASES: dict[str, tuple[str, list[str]]] = {}
 NATURAL_COMMAND_NAMES = frozenset({
     "ayuda", "menu", "ping", "miuid", "perfil", "bio", "miestado",
-    "puntos", "ranking", "diario", "trabajar", "pagar", "regalo",
+    "puntos", "ranking", "diario", "daily", "trabajar", "pagar", "regalo", "regalarpuntos",
     "ruleta", "apostar", "aceptarapuesta", "rechazarapuesta", "misapuestas",
     "muro", "afinidad", "duelo", "azar", "frase", "chiste", "reto",
     "trivia", "responder", "adivina", "intento", "verdad", "8ball",
