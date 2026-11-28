@@ -976,7 +976,7 @@ class StellaAICore:
     """Provider client and temporary memory isolated per room/user."""
 
     provider_default_min_interval = {
-        "Google Gemini": 3.1,
+        "Google Gemini": 1.0,
         "Groq": 2.1,
     }
 
@@ -2132,6 +2132,16 @@ class StellaAICore:
             0.0,
             float(self.provider_default_min_interval.get(self.provider_name, 0.65)),
         )
+        if self.provider_name == "Google Gemini":
+            # The previous 3.1 s floor unnecessarily serialized bursts. Keep a
+            # conservative 1 s default and let the owner's quota override it.
+            try:
+                configured_interval = float(
+                    os.getenv("GEMINI_MIN_REQUEST_INTERVAL_SECONDS", "1.0")
+                )
+                base_interval = max(0.25, min(10.0, configured_interval))
+            except (TypeError, ValueError):
+                pass
 
         async def reserve_provider_slot() -> tuple[dict[str, Any], float]:
             """Reserve a rate-safe request start without holding the lock during HTTP."""

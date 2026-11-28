@@ -3,6 +3,7 @@ from types import SimpleNamespace
 
 from stella.bot import StellaBot
 from stella.services import StellaServices
+from stella.ai_core import StellaAICore
 
 
 def test_memory_capture_skips_remote_preference_lookup_for_ordinary_message():
@@ -43,6 +44,49 @@ def test_background_work_is_scheduled_without_waiting_for_completion():
     asyncio.run(scenario())
     assert completed == [True]
     assert bot._background_tasks == set()
+
+
+def test_personal_context_is_restored_in_one_fast_memory_read():
+    class Memory:
+        def __init__(self):
+            self.calls = 0
+
+        async def load_context(self, room_id, uid):
+            self.calls += 1
+            return (
+                [{"role": "user", "content": "Seguimos con el proyecto."}],
+                [{"topic": "proyecto", "content": "Atlas"}],
+            )
+
+    class Core:
+        def __init__(self):
+            self.turns = []
+
+        def _history(self, key):
+            return self.turns
+
+        def _append_history(self, key, role, content):
+            self.turns.append({"role": role, "content": content})
+
+    class Store:
+        def get_setting(self, room_id, key, default="0"):
+            return "0"
+
+    bot = object.__new__(StellaBot)
+    bot.ai_memory = Memory()
+    bot.ai_core = Core()
+    bot.store = Store()
+
+    facts = asyncio.run(bot._load_ai_context("room", "member", "room:member"))
+    assert facts == [{"topic": "proyecto", "content": "Atlas"}]
+    assert bot.ai_memory.calls == 1
+    assert bot.ai_core.turns == [
+        {"role": "user", "content": "Seguimos con el proyecto."}
+    ]
+
+
+def test_gemini_request_spacing_no_longer_adds_a_three_second_floor():
+    assert StellaAICore.provider_default_min_interval["Google Gemini"] == 1.0
 
 
 def test_ai_http_requests_reuse_one_keepalive_client(monkeypatch):

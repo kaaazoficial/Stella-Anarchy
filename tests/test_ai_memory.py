@@ -96,6 +96,35 @@ async def test_opt_in_memory_survives_reload_and_is_scoped_to_room_and_user(memo
 
 
 @pytest.mark.asyncio
+async def test_load_context_combines_turns_and_facts_and_caches_short_term(memory):
+    store, client = memory
+    assert await store.set_enabled("room-a", "user-1", True)
+    turns = [{"role": "user", "content": "Estoy creando un mundo."}]
+    assert await store.save("room-a", "user-1", turns)
+    assert await store.remember_fact(
+        "room-a", "user-1", "Mi proyecto se llama Atlas", topic="proyecto"
+    )
+
+    # A fresh reader must fetch both kinds of context with one point read.
+    reader = QdrantConversationMemory(client=client)
+    loaded_turns, facts = await reader.load_context("room-a", "user-1")
+    assert loaded_turns == turns
+    assert len(facts) == 1
+    point_reads = sum(
+        method == "GET" and "/points/" in url
+        for method, url in client.requests
+    )
+
+    again_turns, again_facts = await reader.load_context("room-a", "user-1")
+    assert again_turns == loaded_turns
+    assert again_facts == facts
+    assert sum(
+        method == "GET" and "/points/" in url
+        for method, url in client.requests
+    ) == point_reads
+
+
+@pytest.mark.asyncio
 async def test_clear_preserves_opt_in_and_disable_deletes_the_record(memory):
     store, client = memory
     assert await store.set_enabled("room-a", "user-1", True) is True

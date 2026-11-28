@@ -109,6 +109,12 @@ class QdrantConversationMemory:
         self._ready = False
         self._lock = asyncio.Lock()
         self._identity_locks: dict[tuple[str, str], asyncio.Lock] = {}
+        # Brief RAM-only cache avoids repeated Qdrant reads during rapid chat turns.
+        self._context_cache_ttl_seconds = 8.0
+        self._context_cache: dict[
+            tuple[str, str],
+            tuple[float, list[dict[str, str]], list[dict[str, Any]]],
+        ] = {}
 
     @property
     def enabled(self) -> bool:
@@ -357,6 +363,7 @@ class QdrantConversationMemory:
             }]},
         )
         response.raise_for_status()
+        self._cache_context(room_id, uid, safe_payload)
         return True
 
     @staticmethod
@@ -368,33 +375,74 @@ class QdrantConversationMemory:
                 return []
         return value if isinstance(value, list) else []
 
-    async def load(self, room_id: str, uid: str) -> list[dict[str, str]]:
+    def _cached_context(
+        self, room_id: str, uid: str
+    ) -> tuple[list[dict[str, str]], list[dict[str, Any]]] | None:
+        key = (str(room_id), str(uid))
+        cached = self._context_cache.get(key)
+        if cached is None:
+            return None
+        expires_at, turns, facts = cached
+        if expires_at <= time.monotonic():
+            self._context_cache.pop(key, None)
+            return None
+        return (
+            [dict(item) for item in turns],
+            [dict(item) for item in facts],
+        )
+
+    def _cache_context(
+        self, room_id: str, uid: str, payload: dict[str, Any] | None
+    ) -> None:
+        key = (str(room_id), str(uid))
+        enabled = isinstance(payload, dict) and payload.get("enabled") is True
+        turns = (
+            self._clean_turns(self._parse_list(payload.get("turns")), self.max_turns)
+            if enabled else []
+        )
+        facts = (
+            self._clean_facts(self._parse_list(payload.get("facts")), self.max_facts)
+            if enabled else []
+        )
+        now = time.monotonic()
+        self._context_cache[key] = (
+            now + self._context_cache_ttl_seconds,
+            turns,
+            facts,
+        )
+        if len(self._context_cache) > 2000:
+            for old_key, (expires_at, _, _) in list(self._context_cache.items()):
+                if expires_at <= now:
+                    self._context_cache.pop(old_key, None)
+            while len(self._context_cache) > 2000:
+                self._context_cache.pop(next(iter(self._context_cache)), None)
+
+    async def load_context(
+        self, room_id: str, uid: str
+    ) -> tuple[list[dict[str, str]], list[dict[str, Any]]]:
+        """Load recent turns and confirmed facts with one Qdrant read."""
         if not self.enabled or not room_id or not uid:
-            return []
+            return [], []
+        cached = self._cached_context(room_id, uid)
+        if cached is not None:
+            return cached
         try:
             await self.ensure_collection()
             await self._cleanup_expired_if_due()
             payload = await self._read_payload(room_id, uid)
-            if not payload or payload.get("enabled") is not True:
-                return []
-            return self._clean_turns(self._parse_list(payload.get("turns")), self.max_turns)
+            self._cache_context(room_id, uid, payload)
+            return self._cached_context(room_id, uid) or ([], [])
         except Exception as exc:
-            log.warning("Persistent AI memory load failed (%s).", type(exc).__name__)
-            return []
+            log.warning("Persistent AI context load failed (%s).", type(exc).__name__)
+            return [], []
+
+    async def load(self, room_id: str, uid: str) -> list[dict[str, str]]:
+        turns, _ = await self.load_context(room_id, uid)
+        return turns
 
     async def load_facts(self, room_id: str, uid: str) -> list[dict[str, Any]]:
-        if not self.enabled or not room_id or not uid:
-            return []
-        try:
-            await self.ensure_collection()
-            await self._cleanup_expired_if_due()
-            payload = await self._read_payload(room_id, uid)
-            if not payload or payload.get("enabled") is not True:
-                return []
-            return self._clean_facts(self._parse_list(payload.get("facts")), self.max_facts)
-        except Exception as exc:
-            log.warning("Persistent AI fact-memory load failed (%s).", type(exc).__name__)
-            return []
+        _, facts = await self.load_context(room_id, uid)
+        return facts
 
     @_serialize_identity_operation
     async def save(self, room_id: str, uid: str, turns: list[dict[str, Any]]) -> bool:
@@ -561,6 +609,7 @@ class QdrantConversationMemory:
                 json={"points": [point_id]},
             )
             response.raise_for_status()
+            self._context_cache.pop((str(room_id), str(uid)), None)
             return True
         except Exception as exc:
             log.warning("Persistent AI memory deletion failed (%s).", type(exc).__name__)
