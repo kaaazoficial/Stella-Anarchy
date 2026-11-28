@@ -1,6 +1,6 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "anarchy-worker",
+  "name": "stella-anarchy",
   "main": "src/index.js",
   "compatibility_date": "2026-11-28",
   "workers_dev": true,
