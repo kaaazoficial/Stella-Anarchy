@@ -149,6 +149,22 @@ def test_autonomous_social_step_discards_a_prepared_message_if_people_resume_cha
     asyncio.run(scenario())
 
 
+def test_autonomous_social_step_discards_a_prepared_message_if_room_closes():
+    async def scenario():
+        bot = None
+
+        def close_room():
+            bot._social_room_activity.pop("room-1", None)
+
+        bot = make_bot(recent_events(), "Abramos un tema nuevo para el grupo.", on_call=close_room)
+        sent = await bot.autonomous_social_step()
+
+        assert sent is False
+        assert bot.platform.sent == []
+
+    asyncio.run(scenario())
+
+
 def test_autonomous_social_step_honors_the_global_chat_silence_control():
     async def scenario():
         bot = make_bot(recent_events(), "¿Qué actividad les gustaría organizar?")
