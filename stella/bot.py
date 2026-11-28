@@ -514,6 +514,7 @@ class StellaBot:
         # Only hashes and timestamps are held here. Message text is not retained.
         self._recent: dict[tuple[str, str], deque[tuple[float, str]]] = defaultdict(deque)
         self._warned_until: dict[tuple[str, str], float] = {}
+        self._last_antispam_prune = 0.0
         self._auto_reply_cooldown: dict[tuple[str, int], float] = {}
         # Game sessions exist only in RAM and expire automatically.
         self._game_sessions: dict[str, dict[str, Any]] = {}
@@ -740,8 +741,8 @@ class StellaBot:
             return prompt
         try:
             events = await asyncio.wait_for(
-                reader(str(room_id), limit=60),
-                timeout=0.95,
+                reader(str(room_id), limit=24),
+                timeout=0.75,
             )
         except Exception as exc:
             log.warning("Room history context unavailable (%s).", type(exc).__name__)
@@ -1853,19 +1854,26 @@ class StellaBot:
         if not config["enabled"]:
             return False, None
         now = time.monotonic()
-        for tracked, queue in list(self._recent.items()):
-            window = int(self._antispam_config(tracked[0])["window_seconds"])
-            while queue and now - queue[0][0] > window:
-                queue.popleft()
-            if not queue:
-                self._recent.pop(tracked, None)
-                self._warned_until.pop(tracked, None)
-        for tracked, expiry in list(self._warned_until.items()):
-            if expiry <= now:
-                self._warned_until.pop(tracked, None)
-        for tracked, expiry in list(self._auto_reply_cooldown.items()):
-            if expiry <= now:
-                self._auto_reply_cooldown.pop(tracked, None)
+        # Per-message work stays O(1): only the current member's queue uses its
+        # exact configured window. Global memory housekeeping runs at most once
+        # every 15 seconds and uses the maximum supported 60-second window,
+        # avoiding thousands of SQLite setting reads during a busy chat.
+        last_prune = float(getattr(self, "_last_antispam_prune", 0.0) or 0.0)
+        if now - last_prune >= 15.0:
+            self._last_antispam_prune = now
+            stale_before = now - 60.0
+            for tracked, tracked_queue in list(self._recent.items()):
+                while tracked_queue and tracked_queue[0][0] < stale_before:
+                    tracked_queue.popleft()
+                if not tracked_queue:
+                    self._recent.pop(tracked, None)
+                    self._warned_until.pop(tracked, None)
+            for tracked, expiry in list(self._warned_until.items()):
+                if expiry <= now:
+                    self._warned_until.pop(tracked, None)
+            for tracked, expiry in list(self._auto_reply_cooldown.items()):
+                if expiry <= now:
+                    self._auto_reply_cooldown.pop(tracked, None)
         key = (room_id, uid)
         if key not in self._recent and len(self._recent) >= MAX_TRACKED_USERS:
             oldest = min(self._recent, key=lambda item: self._recent[item][0][0] if self._recent[item] else now)

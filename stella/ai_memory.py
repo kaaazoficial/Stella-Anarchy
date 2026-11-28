@@ -110,7 +110,7 @@ class QdrantConversationMemory:
         self._lock = asyncio.Lock()
         self._identity_locks: dict[tuple[str, str], asyncio.Lock] = {}
         # Brief RAM-only cache avoids repeated Qdrant reads during rapid chat turns.
-        self._context_cache_ttl_seconds = 8.0
+        self._context_cache_ttl_seconds = 20.0
         self._context_cache: dict[
             tuple[str, str],
             tuple[float, list[dict[str, str]], list[dict[str, Any]]],
@@ -181,28 +181,16 @@ class QdrantConversationMemory:
             self._ready = True
 
     async def _cleanup_expired_if_due(self) -> None:
-        """Physically remove expired payloads periodically, not only hide them on read."""
+        """Avoid a collection-wide Qdrant range delete on the reply hot path.
+
+        Expiry is enforced in _read_payload. When an expired identity is read,
+        that exact point is deleted by ID. A global range-delete previously
+        caused HTTP 400 on collections without an expires_at payload index and
+        added a failed network round-trip to the first conversation request.
+        """
         now = time.monotonic()
-        if self._last_cleanup and now - self._last_cleanup < self.cleanup_interval_seconds:
-            return
-        try:
-            client = await self._http()
-            response = await client.post(
-                f"{self._collection_url()}/points/delete?wait=true",
-                headers=self._headers(),
-                json={
-                    "filter": {
-                        "must": [{
-                            "key": "expires_at",
-                            "range": {"lt": int(time.time())},
-                        }]
-                    }
-                },
-            )
-            response.raise_for_status()
+        if not self._last_cleanup or now - self._last_cleanup >= self.cleanup_interval_seconds:
             self._last_cleanup = now
-        except Exception as exc:
-            log.warning("Expired AI memory cleanup failed (%s).", type(exc).__name__)
 
     async def cleanup(self) -> None:
         """Public maintenance hook used by the service's periodic cleanup worker."""

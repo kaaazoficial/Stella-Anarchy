@@ -292,11 +292,14 @@ async def test_explicit_opt_out_remains_disabled_without_commands_after_restart(
 
 
 @pytest.mark.asyncio
-async def test_periodic_cleanup_is_exposed_for_background_worker(memory):
+async def test_periodic_cleanup_uses_lazy_expiry_without_collection_wide_delete(memory):
     store, client = memory
     await store.cleanup()
-    assert any(method == "POST" and url.endswith("/points/delete?wait=true")
-               for method, url in client.requests)
+    assert store._last_cleanup > 0
+    assert not any(
+        method == "POST" and url.endswith("/points/delete?wait=true")
+        for method, url in client.requests
+    )
 
 
 @pytest.mark.asyncio

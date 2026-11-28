@@ -157,6 +157,8 @@ class RoomArchive:
         self._recent_context_cache: OrderedDict[str, list[dict[str, Any]]] = OrderedDict()
         self._recent_context_cache_limit = 120
         self._recent_context_cache_rooms = 200
+        self._recent_context_snapshot: OrderedDict[str, tuple[float, list[dict[str, Any]]]] = OrderedDict()
+        self._recent_context_snapshot_ttl_seconds = 10.0
 
     @property
     def enabled(self) -> bool:
@@ -806,7 +808,7 @@ class RoomArchive:
     async def recent_room_context(
         self, room_id: str, *, limit: int = 24
     ) -> list[dict[str, Any]]:
-        """Return room context from the immediate cache plus durable Qdrant history."""
+        """Return room context from RAM and a briefly cached durable Qdrant snapshot."""
         room = str(room_id or "").strip()
         safe_limit = max(1, min(120, int(limit)))
         cached = [
@@ -815,11 +817,28 @@ class RoomArchive:
         if len(cached) >= safe_limit:
             return cached[:safe_limit]
 
-        stored = await self.list_room_events(
-            room,
-            reverse=True,
-            limit=max(safe_limit, min(120, safe_limit * 2)),
-        )
+        now = time.monotonic()
+        snapshot_entry = self._recent_context_snapshot.get(room)
+        stored: list[dict[str, Any]] = []
+        if (
+            snapshot_entry is not None
+            and 0.0 <= now - snapshot_entry[0] < self._recent_context_snapshot_ttl_seconds
+        ):
+            stored = [dict(item) for item in snapshot_entry[1]]
+            self._recent_context_snapshot.move_to_end(room)
+        else:
+            stored = await self.list_room_events(
+                room,
+                reverse=True,
+                limit=max(safe_limit, min(120, safe_limit * 2)),
+            )
+            self._recent_context_snapshot[room] = (
+                now, [dict(item) for item in stored[:120]]
+            )
+            self._recent_context_snapshot.move_to_end(room)
+            while len(self._recent_context_snapshot) > self._recent_context_cache_rooms:
+                self._recent_context_snapshot.popitem(last=False)
+
         merged: dict[str, dict[str, Any]] = {}
         anonymous: list[dict[str, Any]] = []
         for event in [*cached, *stored]:
@@ -832,8 +851,11 @@ class RoomArchive:
                 continue
             message_id = str(event.get("message_id") or "").strip()
             if message_id:
-                # Prefer local data, which may already include a normalized reply parent.
-                merged.setdefault(message_id, dict(event))
+                # Local data takes precedence over the durable snapshot, e.g. an
+                # edit already received but not yet visible in the Qdrant query.
+                merged[message_id] = dict(event) if message_id not in merged else merged[message_id]
+                if event in cached:
+                    merged[message_id] = dict(event)
             else:
                 anonymous.append(dict(event))
         combined = list(merged.values()) + anonymous

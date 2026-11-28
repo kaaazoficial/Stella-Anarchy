@@ -242,6 +242,7 @@ def test_global_silence_blocks_commands_chat_replies_and_voice():
     b=bot()
     b.voice.enabled=True
     b.shared_state.values["chat_silence"] = "1"
+    b.shared_state.values["chat_silence_until"] = "4102444800"
     b.store.set_setting("__stella_global__", "chat_silence", "1")
 
     asyncio.run(b.handle_event(_message("!ping", "u")))
@@ -256,6 +257,7 @@ def test_global_silence_blocks_commands_chat_replies_and_voice():
 def test_owner_can_restore_chat_with_natural_phrase_while_silenced():
     b=bot()
     b.shared_state.values["chat_silence"] = "1"
+    b.shared_state.values["chat_silence_until"] = "4102444800"
 
     asyncio.run(b.handle_event(_message("Ya puedes volver a hablar", "owner")))
 
@@ -266,6 +268,7 @@ def test_owner_can_restore_chat_with_natural_phrase_while_silenced():
 def test_owner_can_restore_chat_with_reversible_command_while_silenced():
     b=bot()
     b.shared_state.values["chat_silence"] = "1"
+    b.shared_state.values["chat_silence_until"] = "4102444800"
 
     asyncio.run(b.handle_event(_message("!hablarchat", "owner")))
 
@@ -754,6 +757,7 @@ def test_owner_can_activate_and_resume_global_silence_with_natural_language():
 def test_global_silence_blocks_voice_button_interactions():
     b = bot()
     b.shared_state.values["chat_silence"] = "1"
+    b.shared_state.values["chat_silence_until"] = "4102444800"
 
     asyncio.run(
         b.handle_event({
