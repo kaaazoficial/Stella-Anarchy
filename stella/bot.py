@@ -2420,6 +2420,7 @@ class StellaBot:
             "fecha": self._date_time, "zona": self._date_time,
             "perfil": self._profile, "bio": self._bio, "miestado": self._my_status,
             "puntos": self._points, "saldo": self._points, "ranking": self._ranking,
+            "ruleta": self._roulette, "apostar": self._roulette, "apuesta": self._roulette,
             "diario": self._daily, "trabajar": self._work, "pagar": self._pay,
             "regalo": self._gift, "muro": self._wall, "afinidad": self._affinity,
             "duelo": self._duel,
@@ -2954,6 +2955,73 @@ class StellaBot:
         lines = ["🏆 RANKING DE PUNTOS"]
         lines.extend(f"{i}. {row['nickname']} · {row['points']} pts" for i, row in enumerate(rows, 1))
         await self._reply(room_id, "\n".join(lines), message)
+
+    async def _roulette(self, room_id, uid, name, args, message):
+        """European roulette using community points only; no real-money wagering."""
+        parts = str(args or "").strip().casefold().split()
+        prefix = getattr(getattr(self, "settings", None), "command_prefix", "!")
+        if len(parts) != 2:
+            await self._reply(
+                room_id,
+                "🎰 RULETA EUROPEA · 0–36\n"
+                f"Uso: {prefix}ruleta <cantidad> <apuesta>\n"
+                "Apuestas: rojo, negro, par, impar, bajo (1–18), alto (19–36) "
+                "o un número del 0 al 36.\n"
+                "Pagos: número 35:1 · demás apuestas 1:1. Solo puntos virtuales.",
+                message,
+            )
+            return
+        if not re.fullmatch(r"\d+", parts[0]):
+            await self._reply(room_id, f"Indica una cantidad válida. Ejemplo: {prefix}ruleta 25 rojo.", message)
+            return
+        wager = int(parts[0])
+        if not 1 <= wager <= 100000:
+            await self._reply(room_id, "La apuesta debe estar entre 1 y 100.000 puntos.", message)
+            return
+        bet = parts[1]
+        valid = {"rojo", "negro", "par", "impar", "bajo", "alto"}
+        if bet not in valid and not (re.fullmatch(r"\d{1,2}", bet) and 0 <= int(bet) <= 36):
+            await self._reply(room_id, "Apuesta no válida. Usa rojo, negro, par, impar, bajo, alto o un número del 0 al 36.", message)
+            return
+        number = random.randint(0, 36)
+        red = {1,3,5,7,9,12,14,16,18,19,21,23,25,27,30,32,34,36}
+        if bet.isdigit():
+            won = number == int(bet)
+            payout = wager * 36 if won else 0
+            label = f"el número {bet}"
+            odds = "35:1"
+        else:
+            won = (
+                (bet == "rojo" and number in red)
+                or (bet == "negro" and number != 0 and number not in red)
+                or (bet == "par" and number != 0 and number % 2 == 0)
+                or (bet == "impar" and number % 2 == 1)
+                or (bet == "bajo" and 1 <= number <= 18)
+                or (bet == "alto" and 19 <= number <= 36)
+            )
+            payout = wager * 2 if won else 0
+            label = bet
+            odds = "1:1"
+        status, balance = self.store.settle_roulette(uid, wager, payout)
+        if status == "insufficient":
+            await self._reply(room_id, f"No tienes suficientes puntos. Saldo: {balance}; apuesta: {wager}.", message)
+            return
+        if status != "ok":
+            await self._reply(room_id, "No pude procesar la apuesta. No se modificó tu saldo.", message)
+            return
+        color = "🟢 VERDE" if number == 0 else ("🔴 ROJO" if number in red else "⚫ NEGRO")
+        if won:
+            net = payout - wager
+            outcome = f"GANASTE +{net} puntos (pago total: {payout})."
+        else:
+            outcome = f"Perdiste {wager} puntos."
+        await self._reply(
+            room_id,
+            f"🎰 RULETA · {number} {color}\n"
+            f"Apuesta: {label} · cuota {odds} · {wager} puntos\n"
+            f"{outcome}\nSaldo: {balance} puntos.",
+            message,
+        )
 
     async def _daily(self, room_id, uid, name, args, message):
         ok, result = self.store.claim_reward(uid, "daily", 100, 86400)

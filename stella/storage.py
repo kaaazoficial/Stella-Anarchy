@@ -259,6 +259,25 @@ class Store:
             db.execute("UPDATE users SET points=points+? WHERE uid=?", (amount, str(target_uid)))
             return "ok"
 
+    def settle_roulette(self, uid: str, wager: int, payout: int) -> tuple[str, int]:
+        """Atomically debit a roulette stake and credit its gross payout."""
+        if wager <= 0 or payout < 0 or wager > 100000 or payout > 3600000:
+            return "invalid", self.points_balance(uid)
+        with self._session(self.connect()) as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute("SELECT points FROM users WHERE uid=?", (str(uid),)).fetchone()
+            if not row:
+                return "missing", 0
+            balance = int(row["points"])
+            if balance < wager:
+                return "insufficient", balance
+            new_balance = balance - wager + payout
+            db.execute(
+                "UPDATE users SET points=?,last_seen=? WHERE uid=?",
+                (new_balance, time.time(), str(uid)),
+            )
+            return "ok", new_balance
+
     def points_ranking(self, limit: int = 10) -> list[dict[str, Any]]:
         with self._session(self.connect()) as db:
             rows = db.execute(
