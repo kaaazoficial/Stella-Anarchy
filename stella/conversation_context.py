@@ -231,15 +231,12 @@ def select_conversation_events(
     if not scored:
         return []
 
-    selected_indices: set[int] = set()
-    for _, index in sorted(
-        scored, key=lambda pair: (pair[0], pair[1]), reverse=True
-    )[:maximum]:
-        selected_indices.add(index)
-        if index > 0:
-            selected_indices.add(index - 1)
-        if index + 1 < len(chronological):
-            selected_indices.add(index + 1)
+    selected_indices = {
+        index
+        for _, index in sorted(
+            scored, key=lambda pair: (pair[0], pair[1]), reverse=True
+        )[:maximum]
+    }
     return [
         chronological[index]
         for index in sorted(selected_indices)
