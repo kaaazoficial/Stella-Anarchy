@@ -2406,7 +2406,7 @@ class StellaAICore:
                     *recent_messages,
                 ],
                 "response_format": {"type": "json_object"},
-                "max_completion_tokens": provider_output_limit,
+                ("max_completion_tokens" if self.is_cloudflare else "max_tokens"): provider_output_limit,
                 "temperature": 0.6,
             }
         else:
