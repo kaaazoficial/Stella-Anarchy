@@ -17,7 +17,7 @@ from collections import OrderedDict
 from datetime import datetime, timezone
 from typing import Any
 
-from stella.conversation_context import is_clear_invitation
+from stella.conversation_context import is_clear_invitation, is_socially_engageable
 
 log = logging.getLogger("stella.consciousness")
 SCHEMA_VERSION = 1
@@ -288,13 +288,13 @@ class StellaConsciousness:
         )
 
     def should_initiate(self, content: str) -> bool:
-        """Recognize natural group openings without joining every conversation."""
+        """Recognize ordinary chat worth considering, not only direct invitations."""
         text = " ".join(str(content or "").split())
-        if not is_clear_invitation(text):
+        if not (is_clear_invitation(text) or is_socially_engageable(text)):
             return False
         normalized = _normalize(text)
-        # Personal distress and active conflict are not openings for an
-        # unsolicited bot reply. Direct calls use the addressed-message path.
+        # Personal distress and active conflict need care, not an unsolicited
+        # bot entrance. A direct call still follows the addressed-message path.
         if DISTRESS.search(normalized) or TENSION.search(normalized):
             return False
         return True
