@@ -1755,6 +1755,14 @@ class StellaBot:
         )
         if not isinstance(archive_author, dict):
             archive_author = {}
+        archive_thread = event.get("thread") or event.get("room") or {}
+        if not isinstance(archive_thread, dict):
+            archive_thread = {}
+        archive_room_name = (
+            event.get("threadName") or event.get("thread_name")
+            or event.get("roomName") or event.get("room_name")
+            or archive_thread.get("name") or archive_thread.get("title")
+        )
         archive_uid = (
             archive_author.get("uid")
             or archive_author.get("userId")
@@ -1797,6 +1805,14 @@ class StellaBot:
                 )
                 if archive_reply_id:
                     break
+        archive_event_time = (
+            event.get("eventTime")
+            or event.get("timestamp")
+            or message_data.get("createdAt")
+            or message_data.get("created_at")
+            or message_data.get("editedTime")
+            or message_data.get("deletedAt")
+        )
         archive_type = archive_event_type(event_type)
         archive = getattr(self, "room_archive", None)
         enqueue_archive_event = getattr(archive, "enqueue_event", None)
@@ -1806,14 +1822,7 @@ class StellaBot:
             await archive_writer(
                 room_id,
                 archive_type,
-                event_time=(
-                    event.get("eventTime")
-                    or event.get("timestamp")
-                    or message_data.get("createdAt")
-                    or message_data.get("created_at")
-                    or message_data.get("editedTime")
-                    or message_data.get("deletedAt")
-                ),
+                event_time=archive_event_time,
                 source_event_id=event.get("eventId") or event.get("event_id"),
                 actor_uid=str(archive_uid) if archive_uid is not None else None,
                 actor_name=str(archive_name) if archive_name is not None else None,
@@ -1902,9 +1911,13 @@ class StellaBot:
         audit_event(
             "chat.message.edited" if event_type == "message.edited" else "chat.message.in",
             room_id=room_id,
-            message_id=message.get("messageId") or message.get("id"),
+            room_name=archive_room_name,
+            message_id=archive_message_id,
+            actor_uid=uid or archive_uid or author.get("userId") or author.get("id"),
+            actor_name=name or archive_name,
             uid=uid or author.get("userId") or author.get("id"),
             nickname=name,
+            reply_to_message_id=archive_reply_id,
             author_role=author.get("role"),
             author_level=author.get("level"),
             content=content,
@@ -1917,7 +1930,7 @@ class StellaBot:
             trigger=event.get("trigger"),
             command=event.get("command"),
             event_id=event.get("eventId"),
-            event_time=event.get("eventTime"),
+            event_time=archive_event_time,
             edited_time=message.get("editedTime"),
             is_bot=self._is_bot_message(message),
         )

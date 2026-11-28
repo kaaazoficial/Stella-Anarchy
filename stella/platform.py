@@ -260,11 +260,20 @@ class AnarchyClient:
                 )
                 if result.get("ok"):
                     message_id = self._extract_message_id(result.get("data"))
+                    identity = getattr(self, "identity", {}) or {}
                     audit_event(
                         "chat.message.out",
                         room_id=room_id,
                         message_id=message_id,
-                        reply_id=reply_id,
+                        actor_uid=(
+                            identity.get("uid") or identity.get("userId")
+                            or identity.get("botId")
+                        ),
+                        actor_name=(
+                            identity.get("nickname") or identity.get("displayName")
+                            or identity.get("name") or "Stella"
+                        ),
+                        reply_to_message_id=reply_id,
                         content=body.get("content", ""),
                     )
                     if message_id:

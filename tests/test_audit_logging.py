@@ -19,6 +19,8 @@ def test_audit_event_omits_raw_chat_and_member_identifiers_by_default(caplog, mo
             room_id="room-1",
             uid="user-1",
             nickname="Nombre visible",
+            actor_uid="actor-1",
+            actor_name="Nombre visible",
             message_id="message-1",
             content=message,
             mentions=[{"uid": "mentioned-user"}],
@@ -32,6 +34,8 @@ def test_audit_event_omits_raw_chat_and_member_identifiers_by_default(caplog, mo
     assert "uid" not in payload
     assert "nickname" not in payload
     assert "message_id" not in payload
+    assert "actor_uid" not in payload
+    assert "actor_name" not in payload
     assert "content" not in payload
     assert payload["content_length"] == len(message)
     assert payload["content_logged"] is False
@@ -49,7 +53,17 @@ def test_audit_event_allows_explicit_opt_in_with_redaction(caplog, monkeypatch):
         "correo persona@example.com y teléfono +56912345678"
     )
     with caplog.at_level(logging.INFO, logger="stella.audit"):
-        audit_event("chat.message.in", content=message)
+        audit_event(
+            "chat.message.in",
+            room_id="room-191",
+            room_name="General",
+            message_id="message-456",
+            actor_uid="member-123",
+            actor_name="Jean",
+            reply_to_message_id="parent-455",
+            event_time="2026-11-28T09:00:00Z",
+            content=message,
+        )
 
     payload = _last_audit_payload(caplog)
     assert "Hola" in payload["content"]
@@ -59,6 +73,17 @@ def test_audit_event_allows_explicit_opt_in_with_redaction(caplog, monkeypatch):
     assert "+56912345678" not in payload["content"]
     assert payload["content_logged"] is True
     assert payload["content_redacted"] is True
+    assert payload["room_id"] == "room-191"
+    assert payload["room_name"] == "General"
+    assert payload["message_id"] == "message-456"
+    assert payload["actor_uid"] == "member-123"
+    assert payload["actor_name"] == "Jean"
+    assert payload["reply_to_message_id"] == "parent-455"
+    assert payload["timestamp_local"]
+    assert payload["timestamp_timezone"] == "America/Santiago"
+    assert payload["event_time"] == "2026-11-28T09:00:00Z"
+    assert payload["event_time_local"].startswith("2026-11-28T06:00:00")
+    assert payload["event_timezone"] == "America/Santiago"
 
 
 def test_audit_logs_redact_common_api_credentials_and_contact_details():
@@ -86,3 +111,14 @@ def test_audit_event_keeps_multiline_opt_in_content_in_one_json_record(caplog, m
     assert payload["content"] == message
     assert "primera línea" in record
     assert "segunda línea" in record
+
+
+def test_audit_content_is_capped_without_losing_original_length(caplog, monkeypatch):
+    monkeypatch.setenv("STELLA_AUDIT_LOG_CONTENT", "1")
+    message = "x" * 2500
+    with caplog.at_level(logging.INFO, logger="stella.audit"):
+        audit_event("chat.message.in", content=message)
+    payload = _last_audit_payload(caplog)
+    assert len(payload["content"]) == 2000
+    assert payload["content_length"] == 2500
+    assert payload["content_truncated"] is True
