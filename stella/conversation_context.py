@@ -122,8 +122,8 @@ def is_clear_invitation(content: str) -> bool:
 _LOW_SIGNAL_RE = re.compile(
     r"^(?:ok(?:ay)?|vale|dale|si|sí|no|claro|exacto|ya|jaja+|jeje+|"
     r"xd+|lmao|gracias|de nada|buenas|hola|buen dia|buenos dias)[.!?¡¿ ]*$"
-    r"|^(?:hoy|ayer)\\s+(?:estuve|he estado)\\s+(?:jugando|trabajando|estudiando)"
-    r"\\s+(?:toda la tarde|todo el dia|todo el día|un rato)[.!? ]*$",
+    r"|^(?:hoy|ayer)\s+(?:estuve|he estado)\s+(?:jugando|trabajando|estudiando)"
+    r"\s+(?:toda la tarde|todo el dia|todo el día|un rato)[.!? ]*$",
     re.IGNORECASE,
 )
 _SOCIAL_REACTION_RE = re.compile(
