@@ -25,6 +25,8 @@ DEFAULT_GEMINI_MODEL = "gemini-3.5-flash-lite"
 DEFAULT_GROQ_MODEL = "openai/gpt-oss-20b"
 DEFAULT_GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta"
 DEFAULT_GROQ_BASE = "https://api.groq.com/openai/v1"
+DEFAULT_ZAI_MODEL = "glm-4.7-flash"
+DEFAULT_ZAI_BASE = "https://api.z.ai/api/paas/v4"
 
 STELLA_SYSTEM = (
     "Eres Stella, la asistente de esta comunidad. "
@@ -54,13 +56,20 @@ class StellaAI:
         self.groq_key = os.getenv("GROQ_API_KEY", "").strip()
         self.groq_model = os.getenv("GROQ_MODEL", DEFAULT_GROQ_MODEL).strip()
         self.groq_base = os.getenv("GROQ_API_URL", DEFAULT_GROQ_BASE).rstrip("/")
+        self.zai_key = os.getenv("ZAI_API_KEY", "").strip()
+        self.zai_model = os.getenv("ZAI_MODEL", DEFAULT_ZAI_MODEL).strip()
+        self.zai_base = os.getenv("ZAI_API_URL", DEFAULT_ZAI_BASE).rstrip("/")
         # Gemini stays primary whenever its key exists; legacy Groq overrides
         # are ignored so utility calls follow the same provider policy as chat.
-        self.primary = "gemini" if self.gemini_key else "groq"
+        self.primary = (
+            "gemini" if self.gemini_key
+            else "groq" if self.groq_key
+            else "zai"
+        )
         self.timeout = httpx.Timeout(35.0, connect=8.0)
         self._client: httpx.AsyncClient | None = None
-        self.calls = {"gemini": 0, "groq": 0}
-        self.failures = {"gemini": 0, "groq": 0}
+        self.calls = {"gemini": 0, "groq": 0, "zai": 0}
+        self.failures = {"gemini": 0, "groq": 0, "zai": 0}
         # Bounded in-memory context only; never written to SQLite or files.
         self.memory_ttl = 300
         self.memory_turns = 2
@@ -94,9 +103,11 @@ class StellaAI:
         primary = self.primary.capitalize()
         gemini_state = "configurado" if self.gemini_key else "sin clave"
         groq_state = "configurado" if self.groq_key else "sin clave"
+        zai_state = "configurado" if self.zai_key else "sin clave"
         return (
             f"IA principal: {primary}. Gemini: {gemini_state} "
             f"({self.gemini_model}). Groq: {groq_state} ({self.groq_model}). "
+            f"Z.AI: {zai_state} ({self.zai_model}). "
             "La memoria persistente de conversación es opcional y se gestiona aparte en Qdrant; "
             "se guarda automáticamente por persona y sala, salvo que la persona la desactive o solicite que olvides sus datos."
         )
@@ -187,6 +198,46 @@ class StellaAI:
         self.calls["groq"] += 1
         return self._extract_groq(response.json())
 
+    @staticmethod
+    def _extract_zai(payload: dict[str, Any]) -> str:
+        choices = payload.get("choices") or []
+        if not choices or not isinstance(choices[0], dict):
+            raise RuntimeError("Z.AI no devolvió ninguna opción.")
+        message = choices[0].get("message") or {}
+        content = message.get("content", "")
+        if isinstance(content, str):
+            return content.strip()
+        if isinstance(content, list):
+            return "\n".join(
+                str(part.get("text") or "")
+                for part in content
+                if isinstance(part, dict) and part.get("type") in {"text", "output_text"}
+            ).strip()
+        raise RuntimeError("Z.AI devolvió contenido vacío.")
+
+    async def _ask_zai(self, prompt: str, system: str) -> str:
+        if not self.zai_key:
+            raise RuntimeError("Z.AI no está configurado.")
+        client = await self._http()
+        response = await client.post(
+            f"{self.zai_base}/chat/completions",
+            headers={"Authorization": f"Bearer {self.zai_key}"},
+            json={
+                "model": self.zai_model,
+                "messages": [
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": prompt},
+                ],
+                "max_tokens": 1200,
+                "temperature": 0.6,
+            },
+        )
+        if not response.is_success:
+            log.warning("Z.AI request failed with HTTP %s", response.status_code)
+            raise RuntimeError(f"Z.AI HTTP {response.status_code}")
+        self.calls["zai"] += 1
+        return self._extract_zai(response.json())
+
     async def ask(
         self, prompt: str, *, system: str | None = None, session_key: str | None = None
     ) -> str:
@@ -227,14 +278,25 @@ class StellaAI:
                     + "\n".join(f"- {reply}" for reply in previous_replies)
                     + "\nEvita repetir esas aperturas o estructuras; no continúes sus temas por aparecer aquí."
                 )
+        methods = {
+            "gemini": self._ask_gemini,
+            "groq": self._ask_groq,
+            "zai": self._ask_zai,
+        }
         providers = (
-            [("gemini", self._ask_gemini), ("groq", self._ask_groq)]
+            [("gemini", methods["gemini"]), ("groq", methods["groq"]), ("zai", methods["zai"])]
             if self.primary == "gemini"
-            else [("groq", self._ask_groq), ("gemini", self._ask_gemini)]
+            else [("groq", methods["groq"]), ("gemini", methods["gemini"]), ("zai", methods["zai"])]
+            if self.primary == "groq"
+            else [("zai", methods["zai"]), ("gemini", methods["gemini"]), ("groq", methods["groq"])]
         )
         errors = []
         for name, method in providers:
-            if (name == "gemini" and not self.gemini_key) or (name == "groq" and not self.groq_key):
+            if (
+                (name == "gemini" and not self.gemini_key)
+                or (name == "groq" and not self.groq_key)
+                or (name == "zai" and not self.zai_key)
+            ):
                 continue
             try:
                 answer = await method(provider_prompt, instructions)
@@ -253,8 +315,8 @@ class StellaAI:
                 errors.append(name)
                 log.warning("%s provider failed (%s); trying fallback if available", name, type(exc).__name__)
         if not errors:
-            return "No hay proveedor de IA configurado. Añade Gemini o Groq en las variables privadas de Render."
-        return "No pude obtener respuesta de Gemini ni de Groq. Revisa los modelos, las claves y los límites de ambas cuentas."
+            return "No hay proveedor de IA configurado. Añade Gemini, Groq o Z.AI en las variables privadas de Render."
+        return "No pude obtener respuesta de Gemini, Groq ni Z.AI. Revisa los modelos, las claves y los límites de las cuentas."
 
     async def translate(self, language: str, content: str) -> str:
         target = str(language or "").strip()[:60]
