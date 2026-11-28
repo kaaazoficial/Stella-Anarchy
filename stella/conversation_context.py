@@ -118,6 +118,35 @@ def is_clear_invitation(content: str) -> bool:
     )
 
 
+
+_LOW_SIGNAL_RE = re.compile(
+    r"^(?:ok(?:ay)?|vale|dale|si|sí|no|claro|exacto|ya|jaja+|jeje+|"
+    r"xd+|lmao|gracias|de nada|buenas|hola|buen dia|buenos dias)[.!?¡¿ ]*$",
+    re.IGNORECASE,
+)
+_SOCIAL_REACTION_RE = re.compile(
+    r"\b(?:me encanta|me gusto|me gustó|me fascina|que bonito|qué bonito|"
+    r"que genial|qué genial|que locura|qué locura|no me lo esperaba|"
+    r"me dio risa|me hizo gracia|estoy feliz|que buena|qué buena)\b",
+    re.IGNORECASE,
+)
+
+
+def is_socially_engageable(content: str) -> bool:
+    """Identify substantive, ordinary chat messages worth an optional social read."""
+    text = " ".join(str(content or "").split())
+    if not text or len(text) > 700 or text.startswith(("!", "-", "/")):
+        return False
+    if _LOW_SIGNAL_RE.fullmatch(text):
+        return False
+    if _ROLEPLAY_RE.search(text):
+        return False
+    normalized = _normalize(text)
+    if len(text) >= 12 and _SOCIAL_REACTION_RE.search(normalized):
+        return True
+    return len(_tokens(text)) >= 3
+
+
 def _message_id(event: dict[str, Any]) -> str:
     return str(event.get("message_id") or event.get("messageId") or "").strip()
 
