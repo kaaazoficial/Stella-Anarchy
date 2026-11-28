@@ -181,3 +181,18 @@ async def test_concurrent_collection_initialization_is_serialized(monkeypatch):
     await asyncio.gather(first, second)
     assert calls == 1
     await memory.close()
+
+
+
+def test_vector_memory_prefers_dedicated_embedding_key(monkeypatch):
+    monkeypatch.setenv("QDRANT_URL", "https://qdrant.example")
+    monkeypatch.setenv("QDRANT_API_KEY", "qdrant-test")
+    monkeypatch.setenv("GOOGLE_API_KEY", "stale-general-key")
+    monkeypatch.setenv("GEMINI_API_KEY", "chat-key")
+    monkeypatch.setenv("GEMINI_EMBEDDING_API_KEY", "dedicated-embedding-key")
+
+    memory = VectorMemory()
+
+    assert memory.gemini_key == "dedicated-embedding-key"
+    assert memory.gemini_key_source == "GEMINI_EMBEDDING_API_KEY"
+    assert "dedicated-embedding-key" not in str(memory.diagnostics)

@@ -17,7 +17,7 @@ from urllib.parse import quote
 
 import httpx
 
-from stella.config import get_gemini_api_key
+from stella.config import get_gemini_embedding_api_key
 
 log = logging.getLogger("stella.vector_memory")
 
@@ -46,7 +46,16 @@ class VectorMemory:
         self.url = os.getenv("QDRANT_URL", "").strip().rstrip("/")
         self.api_key = os.getenv("QDRANT_API_KEY", "").strip()
         self.collection = os.getenv("QDRANT_COLLECTION", "stella_messages").strip()
-        self.gemini_key = get_gemini_api_key()
+        self.gemini_key = get_gemini_embedding_api_key()
+        self.gemini_key_source = (
+            "GEMINI_EMBEDDING_API_KEY"
+            if os.getenv("GEMINI_EMBEDDING_API_KEY", "").strip()
+            else "GOOGLE_API_KEY"
+            if os.getenv("GOOGLE_API_KEY", "").strip()
+            else "GEMINI_API_KEY"
+            if os.getenv("GEMINI_API_KEY", "").strip()
+            else "none"
+        )
         self.model = os.getenv("GEMINI_EMBEDDING_MODEL", "gemini-embedding-2").strip()
         self.dimensions = max(128, min(3072, int(os.getenv("GEMINI_EMBEDDING_DIMENSIONS", "768"))))
         self.retention_days = max(1, min(90, int(os.getenv("MEMORY_RETENTION_DAYS", "30"))))
@@ -132,6 +141,7 @@ class VectorMemory:
             "collection": self.collection,
             "embedding_model": self.model,
             "embedding_dimensions": self.dimensions,
+            "embedding_key_source": self.gemini_key_source,
             "retention_days": self.retention_days,
             "gemini_blocked_status": self.embedding_blocked_status,
             "gemini_retry_seconds": max(0, int(self.embedding_retry_after - time.monotonic())),

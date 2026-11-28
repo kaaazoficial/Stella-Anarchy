@@ -481,3 +481,71 @@ def test_assist_routes_roleplay_as_answer_only_and_keeps_same_scene_context(monk
     assert captured["messages"][-1]["content"] == "—No esperaba encontrarte aquí."
     assert captured["kwargs"]["response_mode"] == "answer"
 
+
+
+
+def test_provider_context_compaction_preserves_latest_request_and_recent_context():
+    from stella.ai_core import compact_provider_messages, estimate_prompt_tokens
+
+    messages = [
+        {"role": "user", "content": "Proyecto anterior: " + "A" * 2600},
+        {"role": "assistant", "content": "Respuesta anterior: " + "B" * 2200},
+        {"role": "user", "content": "Detalle reciente: " + "C" * 900},
+        {"role": "assistant", "content": "Resumen reciente: " + "D" * 500},
+        {"role": "user", "content": "Mi petición actual debe llegar íntegra: " + "E" * 600},
+    ]
+    compacted = compact_provider_messages(
+        "Instrucciones completas, herramientas y permisos.",
+        messages,
+        provider="Groq",
+        max_input_tokens=700,
+    )
+
+    assert compacted[-1] == messages[-1]
+    assert compacted[-1]["role"] == "user"
+    assert len(compacted) >= 2
+    assert "Detalle reciente" in str(compacted)
+    assert sum(estimate_prompt_tokens(item["content"]) for item in compacted) < sum(
+        estimate_prompt_tokens(item["content"]) for item in messages
+    )
+    assert all(item["role"] in {"user", "assistant"} for item in compacted)
+
+
+def test_gpt_oss_20b_uses_json_object_instead_of_rejected_strict_schema():
+    from stella.ai_core import StellaAICore
+
+    core = StellaAICore()
+    token = core._provider_override.set({
+        "name": "Groq",
+        "key": "test-key",
+        "url": "https://api.groq.com/openai/v1/responses",
+        "model": "openai/gpt-oss-20b",
+    })
+    try:
+        assert core.is_groq
+        assert not core.uses_groq_strict_schema
+    finally:
+        core._provider_override.reset(token)
+
+
+def test_groq_token_window_guard_blocks_an_over_budget_request(monkeypatch):
+    import time
+    from collections import deque
+    from stella.ai_core import StellaAICore
+
+    monkeypatch.setenv("GROQ_TPM_BUDGET", "7000")
+    core = StellaAICore()
+    token = core._provider_override.set({
+        "name": "Groq",
+        "key": "test-key",
+        "url": "https://api.groq.com/openai/v1/responses",
+        "model": "openai/gpt-oss-20b",
+    })
+    try:
+        now = time.monotonic()
+        state = {"token_reservations": deque([(now, 6500)])}
+        with pytest.raises(RuntimeError, match="IA_GROQ_TPM_GUARD"):
+            core._reserve_provider_tokens(state, 900, now=now)
+        assert state["cooldown_until"] > now
+    finally:
+        core._provider_override.reset(token)
