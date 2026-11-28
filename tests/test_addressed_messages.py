@@ -878,7 +878,7 @@ def test_proactive_participation_reacts_to_social_updates_as_a_peer():
 
     assert len(calls) == 1
     assert len(b.platform.sent) == 1
-    assert "participante más" in calls[0][1].casefold() or "integrante más" in calls[0][1].casefold()
+    assert "integrante más" in calls[0][1].casefold() or "integrante más" in calls[0][1].casefold()
 
 
 
