@@ -97,6 +97,10 @@ async def lifespan(_: FastAPI):
         _memory_maintenance_loop(),
         name="stella-memory-maintenance",
     )
+    social_autonomy_task = asyncio.create_task(
+        bot.social_autonomy_loop(),
+        name="stella-social-autonomy",
+    )
     archive = getattr(bot, "room_archive", None)
     start_archive_worker = getattr(archive, "start_worker", None)
     if callable(start_archive_worker):
@@ -107,12 +111,16 @@ async def lifespan(_: FastAPI):
         log_bot_identity(identity)
         yield
     finally:
+        social_autonomy_task.cancel()
         maintenance_task.cancel()
         try:
-            await maintenance_task
-        except asyncio.CancelledError:
-            pass
-        await bot.close()
+            await asyncio.gather(
+                social_autonomy_task,
+                maintenance_task,
+                return_exceptions=True,
+            )
+        finally:
+            await bot.close()
 
 
 docs_enabled = os.getenv("API_DOCS_ENABLED", "").strip().casefold() in {"1", "true", "yes", "on"}
