@@ -1199,25 +1199,19 @@ class StellaAICore:
         }
 
     def _primary_provider_config(self) -> dict[str, str]:
-        """Prefer the private Cloudflare gateway when configured; preserve explicit overrides."""
+        """Keep Gemini -> Groq -> Z.AI as the normal order; Cloudflare is optional last."""
         primary_setting = (
             os.getenv("STELLA_AI_PRIMARY_PROVIDER") or ""
         ).strip().casefold()
         cloudflare = self._cloudflare_provider_config()
-        cloudflare_ready = bool(
-            cloudflare["key"] and cloudflare["url"] and cloudflare["model"]
-        )
-        explicit_non_cloudflare = primary_setting in {
-            "gemini", "google", "google-gemini", "groq", "zai", "z.ai"
-        }
+
+        # Cloudflare can be selected explicitly for testing or operator preference,
+        # but its mere presence must not displace the existing primary providers.
         if primary_setting in {"cloudflare", "workers-ai", "workers ai"}:
-            return cloudflare
-        if cloudflare_ready and not explicit_non_cloudflare:
             return cloudflare
 
         gemini = self._gemini_provider_config()
         if gemini["key"] and gemini["url"] and gemini["model"]:
-            # Keep Gemini as the primary when explicitly selected.
             return gemini
         if primary_setting in {"gemini", "google", "google-gemini"}:
             return gemini
@@ -1229,6 +1223,10 @@ class StellaAICore:
         zai = self._zai_provider_config()
         if primary_setting in {"zai", "z.ai"} or zai["key"]:
             return zai
+
+        # Cloudflare is the final available option when no earlier provider is configured.
+        if cloudflare["key"] and cloudflare["url"] and cloudflare["model"]:
+            return cloudflare
 
         # Backward compatibility for deployments with one legacy STELLA_AI_* provider.
         legacy_url = (
@@ -1274,7 +1272,7 @@ class StellaAICore:
         elif primary["name"] == "Google Gemini":
             candidates = [groq, zai, cloudflare]
         else:
-            candidates = [cloudflare, gemini, groq, zai]
+            candidates = [gemini, groq, zai, cloudflare]
         configured: list[dict[str, str]] = []
         seen = {primary["name"]}
         for config in candidates:
