@@ -79,6 +79,8 @@ def test_audit_event_allows_explicit_opt_in_with_redaction(caplog, monkeypatch):
     assert payload["actor_uid"] == "member-123"
     assert payload["actor_name"] == "Jean"
     assert payload["reply_to_message_id"] == "parent-455"
+    assert payload["timestamp_local"]
+    assert payload["timestamp_timezone"] == "America/Santiago"
     assert payload["event_time"] == "2026-11-28T09:00:00Z"
     assert payload["event_time_local"].startswith("2026-11-28T06:00:00")
     assert payload["event_timezone"] == "America/Santiago"
