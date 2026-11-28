@@ -3055,7 +3055,7 @@ class StellaBot:
         except ValueError:
             await self._reply(room_id, "Uso: !aceptarapuesta <ID del reto>.", message)
             return
-        status, wager = self.store.accept_point_wager(room_id, wager_id, uid, random.randint(1, 12), random.randint(1, 12))
+        status, wager = self.store.accept_point_wager(room_id, wager_id, uid, sum(random.randint(1, 6) for _ in range(2)), sum(random.randint(1, 6) for _ in range(2)))
         if status == "not_target":
             await self._reply(room_id, "Solo la persona retada puede aceptar esta apuesta.", message)
         elif status == "insufficient":
