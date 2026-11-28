@@ -17,8 +17,11 @@ def test_global_chat_silence_cache_avoids_a_remote_read_for_every_message(monkey
             self.calls = 0
 
         async def get_setting(self, key):
-            assert key == "chat_silence"
             self.calls += 1
+            if key == "chat_silence_until":
+                import time
+                return str(int(time.time()) + 600)
+            assert key == "chat_silence"
             return self.value
 
     bot = object.__new__(StellaBot)
@@ -61,7 +64,7 @@ def test_global_chat_silence_fails_closed_and_caches_the_failure(monkeypatch):
     async def scenario():
         assert await bot._global_chat_silenced() is True
         assert await bot._global_chat_silenced() is True
-        assert bot.shared_state.calls == 1
+        assert bot.shared_state.calls == 2
 
     asyncio.run(scenario())
 
