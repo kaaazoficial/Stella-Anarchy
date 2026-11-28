@@ -802,7 +802,7 @@ def compact_provider_messages(
     """Compact request history only; preserve the current user turn and all tools."""
     is_groq = str(provider or "").casefold() == "groq"
     env_name = "GROQ_MAX_INPUT_TOKENS" if is_groq else "GEMINI_MAX_INPUT_TOKENS"
-    default_budget = 2400 if is_groq else 5200
+    default_budget = 3600 if is_groq else 5200
     try:
         budget = int(max_input_tokens or os.getenv(env_name, str(default_budget)))
     except (TypeError, ValueError):
