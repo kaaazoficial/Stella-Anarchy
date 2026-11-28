@@ -134,7 +134,7 @@ AI_PUBLIC_COMMANDS = frozenset({
     "evento", "roast",
     # Juegos y economía personal
     "trivia", "responder", "adivina", "intento", "diario", "daily", "trabajar",
-    "pagar", "transferir", "ruleta", "apostar", "apuesta", "encuesta", "elige", "duelo", "ship", "azar",
+    "pagar", "transferir", "ruleta", "apostar", "aceptarapuesta", "rechazarapuesta", "misapuestas", "encuesta", "elige", "duelo", "ship", "azar",
     "verdad", "8ball", "chiste", "frase", "reto",
     # Música, voz y sala
     "dj", "reproducir", "pausa", "pausar", "reanudar", "continuar", "saltar",
@@ -212,8 +212,10 @@ AI_COMMAND_CATALOG = {
     "miestado": "texto|borrar: actualiza o elimina tu estado (hasta 80 caracteres).",
     "puntos": "sin argumentos: consulta tu saldo.",
     "ruleta": "cantidad apuesta: apuesta puntos virtuales en ruleta europea.",
-    "apostar": "alias de ruleta.",
-    "apuesta": "alias de ruleta.",
+    "aceptarapuesta": "ID: acepta un reto de dados pendiente dirigido a ti.",
+    "rechazarapuesta": "ID: rechaza un reto pendiente y devuelve la apuesta.",
+    "misapuestas": "sin argumentos: muestra tus últimas apuestas y resultados.",
+    "apostar": "@usuario puntos: reta a un miembro a un duelo de dados con apuesta; requiere aceptación.
     "ranking": "sin argumentos: tabla de puntos de la sala.",
     "actividad": "[hoy|semana]: actividad agregada de la sala.",
     "afinidad": "@usuario: consulta afinidad.",
