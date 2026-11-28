@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Independent Anarchy community bot Worker powered by Cloudflare Workers AI.",
+  "description": "Private Cloudflare Workers AI inference gateway for Stella.",
   "scripts": {
     "check": "node --check src/index.js && node --check src/signature.js && node --check src/ai.js && node --check src/platform.js",
     "test": "node --test",
