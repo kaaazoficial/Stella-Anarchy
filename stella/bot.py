@@ -825,7 +825,7 @@ class StellaBot:
 
         system = (
             STELLA_IDENTITY_GUIDANCE
-            + "\\n\\n"
+            + "\n\n"
             + "INICIATIVA SOCIAL AUTÓNOMA: eres una integrante real de la dinámica del grupo, "
             "no una asistente que espera preguntas. Este turno no es una respuesta a nadie: "
             "decide por iniciativa propia si ahora es buen momento para hablar. Puedes abrir "
@@ -842,9 +842,9 @@ class StellaBot:
             "la sala o que eres una IA. Escribe como Stella, de forma breve y espontánea."
         )
         prompt = (
-            "CONTEXTO RECIENTE DE ESTA SALA (de más antiguo a más reciente):\\n"
-            + "\\n".join(transcript)
-            + "\\n\\nEs tu oportunidad de iniciar una intervención propia. "
+            "CONTEXTO RECIENTE DE ESTA SALA (de más antiguo a más reciente):\n"
+            + "\n".join(transcript)
+            + "\n\nEs tu oportunidad de iniciar una intervención propia. "
             "Puedes hablar o guardar silencio; decide según el contexto."
         )
         ai_client = getattr(self, "ai", None)
@@ -871,7 +871,7 @@ class StellaBot:
             return False
 
         safe_text = re.sub(
-            r"(?:https?://|www\\.)[^\\s<>]+",
+            r"(?:https?://|www\.)[^\s<>]+",
             "[enlace omitido]",
             answer,
             flags=re.IGNORECASE,
