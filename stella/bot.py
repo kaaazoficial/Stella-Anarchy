@@ -866,7 +866,9 @@ class StellaBot:
             return False
         # Do not send a prepared opener over a conversation that restarted
         # while the model was thinking.
-        current = self._social_room_activity.get(room_id, {})
+        current = self._social_room_activity.get(room_id)
+        if current is not state:
+            return False
         if float(current.get("last_user_activity", 0.0)) > activity_snapshot:
             return False
 
