@@ -33,7 +33,7 @@ def _sections(p: str):
             f"▸ {p}trivia · {p}responder <1-4> · {p}adivina · {p}intento <número> · {p}duelo @usuario.",
             f"▸ {p}ship <persona1> + <persona2> · {p}azar <mín> <máx>|dado|moneda.",
             f"▸ {p}verdad · {p}8ball <pregunta> · {p}elige <opciones> · {p}chiste · {p}frase · {p}reto.",
-            f"▸ {p}puntos · {p}ranking · {p}diario · {p}trabajar · {p}pagar @usuario <cantidad> (o responde y escribe la cantidad).",
+            f"▸ {p}puntos · {p}ranking · {p}daily|diario · {p}trabajar · {p}pagar @usuario <cantidad> (o responde y escribe la cantidad).",
             f"▸ {p}ruleta <cantidad> <rojo|negro|par|impar|bajo|alto|0-36> — Ruleta europea.",
             f"▸ {p}apostar @usuario <puntos> · {p}aceptarapuesta <ID> · {p}rechazarapuesta <ID> · {p}misapuestas — Retos de dados entre miembros.",
             f"▸ {p}encuesta <pregunta> | <opción 1> | <opción 2> — votar, resultados, cerrar, lista.",
@@ -85,6 +85,7 @@ def build_admin_commands_help_text(prefix: str = "!") -> str:
         f"▸ {p}eliminarmensajes — Elimina mensajes propios de Stella cuando la API lo permite.",
         f"▸ {p}mencionar @usuario — Prueba de mención del usuario.",
         f"▸ {p}silenciarchat · {p}hablarchat — Control global de conversación (solo propietario).",
+        f"▸ {p}regalarpuntos @usuario <cantidad> — Entrega puntos sin límite de economía (solo propietario).",
         f"▸ {p}miuid — Consulta tu UID para verificar la autorización.",
         "▸ Los resultados administrativos se muestran en la sala donde se ejecuta el comando. Los intentos no autorizados no reciben respuesta.",
     ]
