@@ -738,7 +738,8 @@ class StellaBot:
             age = clock - float(state.get("last_user_activity", 0.0))
             if age < 90.0 or age > 3600.0:
                 continue
-            if clock - float(state.get("last_evaluated_at", 0.0)) < 75.0:
+            last_evaluated_at = float(state.get("last_evaluated_at", 0.0))
+            if last_evaluated_at > 0.0 and clock - last_evaluated_at < 75.0:
                 continue
             last_spoke_at = float(state.get("last_spoke_at", 0.0))
             if last_spoke_at > 0.0 and clock - last_spoke_at < 240.0:
