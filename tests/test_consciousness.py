@@ -102,3 +102,12 @@ def test_restore_is_requested_once_per_room_until_finished():
         assert mind.request_restore("room-1") is False
 
     asyncio.run(scenario())
+
+
+
+def test_initiative_accepts_natural_opinion_openings():
+    mind = StellaConsciousness()
+    assert mind.should_initiate("¿Qué les parece esta propuesta para la comunidad?")
+    assert mind.should_initiate("Necesito algunas ideas para organizar la actividad.")
+    assert not mind.should_initiate("Hoy jugué Minecraft con mis amigos.")
+    assert not mind.should_initiate("Estoy muy triste y no sé qué hacer.")
