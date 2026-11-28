@@ -26,9 +26,10 @@ Crea un secreto de Worker llamado `STELLA_GATEWAY_TOKEN`. En Render configura:
 
 - `CLOUDFLARE_AI_GATEWAY_URL=https://anarchy-worker.jeanblanco774.workers.dev/internal/infer`
 - `CLOUDFLARE_AI_GATEWAY_TOKEN`: exactamente el mismo valor del secreto del Worker.
-- `STELLA_AI_PRIMARY_PROVIDER=cloudflare` para usar Cloudflare como proveedor principal.
+- Normalmente no cambies `STELLA_AI_PRIMARY_PROVIDER`: Stella probará Gemini, Groq y Z.AI antes de Cloudflare.
+- Para forzar Cloudflare manualmente durante una prueba, configura `STELLA_AI_PRIMARY_PROVIDER=cloudflare` en Render.
 
-No uses una API key de Cloudflare ni publiques este token en GitHub. Conserva Gemini, Groq y Z.AI como proveedores de respaldo.
+No uses una API key de Cloudflare ni publiques este token en GitHub. El orden normal de Stella sigue siendo Gemini → Groq → Z.AI → Cloudflare; el Worker solo se consulta si los proveedores anteriores no están disponibles.
 
 ## Rutas
 
