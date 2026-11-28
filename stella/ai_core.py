@@ -2667,9 +2667,9 @@ class StellaAICore:
         )
         if recent_style_replies:
             instructions += (
-                "\\n\\nREFERENCIAS ANTIRREPETICIÓN (solo estilo; no son contexto temático):\\n"
-                + "\\n".join(f"- {reply}" for reply in recent_style_replies)
-                + "\\nEvita reutilizar estas frases, aperturas, cierres o estructuras. "
+                "\n\nREFERENCIAS ANTIRREPETICIÓN (solo estilo; no son contexto temático):\n"
+                + "\n".join(f"- {reply}" for reply in recent_style_replies)
+                + "\nEvita reutilizar estas frases, aperturas, cierres o estructuras. "
                 "No continúes sus temas salvo que el mensaje actual lo pida; "
                 "úsalas exclusivamente para que tu redacción no suene repetida."
             )
