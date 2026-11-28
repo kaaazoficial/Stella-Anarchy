@@ -289,7 +289,14 @@ async def health() -> JSONResponse:
         log.warning("Voice diagnostics failed (%s).", type(exc).__name__)
         voice_diagnostics = {"status": "diagnostics_unavailable"}
     ai_configured = bool(
-        get_gemini_api_key()
+        (
+            os.getenv("CLOUDFLARE_AI_GATEWAY_TOKEN", "").strip()
+            and (
+                os.getenv("CLOUDFLARE_AI_GATEWAY_URL")
+                or "https://anarchy-worker.jeanblanco774.workers.dev/internal/infer"
+            ).strip()
+        )
+        or get_gemini_api_key()
         or os.getenv("GROQ_API_KEY", "").strip()
         or os.getenv("ZAI_API_KEY", "").strip()
     )
