@@ -882,6 +882,89 @@ def test_proactive_participation_reacts_to_social_updates_as_a_peer():
 
 
 
+def test_proactive_reply_does_not_enter_a_two_person_reply_chain():
+    b = bot()
+    b._proactive_cooldown = {}
+    b._proactive_evaluation_cooldown = {}
+    calls = []
+
+    class Archive:
+        async def recent_room_context(self, room, *, limit=24):
+            return [{
+                "message_id": "root",
+                "actor_uid": "member-a",
+                "content": "Estoy pensando en cambiar el nombre del proyecto.",
+                "reply_to_message_id": "",
+                "occurred_at_ms": 1_800_000_000_000,
+            }]
+
+    async def fake_ask(prompt, *, system=None):
+        calls.append(prompt)
+        return "[NO_INTERVENIR]"
+
+    b.room_archive = Archive()
+    b.ai = SimpleNamespace(ask=fake_ask)
+
+    asyncio.run(b._maybe_proactive_reply(
+        "room-a", "member-b", "Alex",
+        "La verdad, yo mantendría el nombre actual.",
+        {"messageId": "reply-1", "replyMessageId": "root"},
+    ))
+
+    assert calls == []
+    assert b.platform.sent == []
+
+
+def test_proactive_reply_can_consider_a_reply_chain_with_three_members():
+    b = bot()
+    b._proactive_cooldown = {}
+    b._proactive_evaluation_cooldown = {}
+    calls = []
+
+    class Archive:
+        async def recent_room_context(self, room, *, limit=24):
+            return [
+                {
+                    "message_id": "reply-2",
+                    "actor_uid": "member-a",
+                    "content": "Yo elegiría la segunda opción.",
+                    "reply_to_message_id": "reply-1",
+                    "occurred_at_ms": 1_800_000_000_002,
+                },
+                {
+                    "message_id": "reply-1",
+                    "actor_uid": "member-b",
+                    "content": "La primera alternativa tiene más limitaciones.",
+                    "reply_to_message_id": "root",
+                    "occurred_at_ms": 1_800_000_000_001,
+                },
+                {
+                    "message_id": "root",
+                    "actor_uid": "member-a",
+                    "content": "¿Qué opción les parece mejor?",
+                    "reply_to_message_id": "",
+                    "occurred_at_ms": 1_800_000_000_000,
+                },
+            ]
+
+    async def fake_ask(prompt, *, system=None):
+        calls.append((prompt, system))
+        return "[NO_INTERVENIR]"
+
+    b.room_archive = Archive()
+    b.ai = SimpleNamespace(ask=fake_ask)
+
+    asyncio.run(b._maybe_proactive_reply(
+        "room-a", "member-c", "Sam",
+        "Yo también creo que la segunda es más práctica.",
+        {"messageId": "reply-3", "replyMessageId": "reply-2"},
+    ))
+
+    assert len(calls) == 1
+    assert b.platform.sent == []
+
+
+
 def test_presence_command_is_only_an_explanatory_compatibility_alias():
     b = bot()
     asyncio.run(b._stella_presence("room-a", "member", "Persona", "activar", {}))
