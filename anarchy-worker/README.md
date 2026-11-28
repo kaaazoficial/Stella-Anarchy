@@ -17,13 +17,13 @@ La capa de autenticación es configurable, pero los siguientes detalles deben co
 
 ## Cloudflare Workers Builds desde este monorepo
 
-Después de fusionar este cambio, conecta el repositorio `kaaazoficial/Stella-Anarchy` en Cloudflare Workers y configura:
+Conecta el repositorio `kaaazoficial/Stella-Anarchy` en Cloudflare Workers y configura:
 
-- **Worker name:** `anarchy-worker`
+- **Worker name:** `stella-anarchy` (debe coincidir con el nombre actual del Worker en Cloudflare).
 - **Root directory:** `anarchy-worker`
-- **Build command:** vacío (no hay compilación requerida)
+- **Build command:** vacío (no hay compilación requerida).
 - **Deploy command:** `npx wrangler deploy`
-- **Branch:** `main`
+- **Branch:** `main` después de fusionar el PR.
 
 El archivo `wrangler.jsonc` se encuentra dentro de esta carpeta. La configuración define el binding de Workers AI como `AI`.
 
