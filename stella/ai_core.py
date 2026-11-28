@@ -2091,7 +2091,7 @@ class StellaAICore:
         if isinstance(content, str):
             return content.strip()
         if isinstance(content, list):
-            return "\\n".join(
+            return "\n".join(
                 str(part.get("text") or "")
                 for part in content
                 if isinstance(part, dict) and part.get("type") in {"text", "output_text"}
