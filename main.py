@@ -27,7 +27,7 @@ logging.basicConfig(
     level=os.getenv("LOG_LEVEL", "INFO").upper(),
     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
 )
-for noisy_http_logger in ("httpx", "httpcore"):
+for noisy_http_logger in ("httpx", "httpcore", "uvicorn.access"):
     logging.getLogger(noisy_http_logger).setLevel(logging.WARNING)
 
 log = logging.getLogger("stella")
