@@ -2484,11 +2484,16 @@ class StellaBot:
         # the command lacks explicit arguments.
         target_commands = social_actions | {
             "roast", "afinidad", "amistad", "reputacion", "duelo",
-            "pagar", "transferir", "regalo",
+            "pagar", "transferir", "regalo", "regalarpuntos", "darpuntos",
         }
-        if command in target_commands and (
-            not args or (command in {"pagar", "transferir"} and not self._mentioned_user(message))
-        ):
+        needs_reply_target = (
+            not args
+            or (
+                command in {"pagar", "transferir", "regalarpuntos", "darpuntos"}
+                and not self._mentioned_user(message)
+            )
+        )
+        if command in target_commands and needs_reply_target:
             reply_target = await self._resolve_reply_target(room_id, message, uid)
             if reply_target:
                 message["_stella_reply_target"] = reply_target
