@@ -826,7 +826,7 @@ class StellaBot:
         """Give Stella a chance to start a conversation without a new mention or message."""
         clock = time.monotonic() if now is None else float(now)
         global_last_sent = float(getattr(self, "_social_autonomy_global_last_sent", 0.0))
-        if global_last_sent > 0.0 and clock - global_last_sent < 35.0:
+        if global_last_sent > 0.0 and clock - global_last_sent < 120.0:
             return False
 
         rooms = getattr(self, "_social_room_activity", {})
@@ -838,13 +838,13 @@ class StellaBot:
             if not isinstance(state, dict):
                 continue
             age = clock - float(state.get("last_user_activity", 0.0))
-            if age < 90.0 or age > 3600.0:
+            if age < 90.0 or age > 900.0:
                 continue
             last_evaluated_at = float(state.get("last_evaluated_at", 0.0))
             if last_evaluated_at > 0.0 and clock - last_evaluated_at < 75.0:
                 continue
             last_spoke_at = float(state.get("last_spoke_at", 0.0))
-            if last_spoke_at != 0.0 and clock - last_spoke_at < 240.0:
+            if last_spoke_at != 0.0 and clock - last_spoke_at < 600.0:
                 continue
             if float(getattr(self, "_proactive_cooldown", {}).get(room_id, 0.0)) > clock:
                 continue
@@ -887,6 +887,7 @@ class StellaBot:
         bot_uid = str(bot_identity.get("uid") or bot_identity.get("userId") or "").strip()
         selected: list[dict[str, Any]] = []
         human_messages = 0
+        eligible_human_messages = 0
         for item in recent:
             if not isinstance(item, dict):
                 continue
@@ -901,10 +902,12 @@ class StellaBot:
                 continue
             stamp = item.get("occurred_at_ms")
             try:
-                age_ms = now_ms - int(stamp or 0)
+                if stamp is None:
+                    continue
+                age_ms = now_ms - int(stamp)
             except (TypeError, ValueError, OverflowError):
-                age_ms = 0
-            if age_ms > 45 * 60 * 1000:
+                continue
+            if age_ms < 0 or age_ms > 10 * 60 * 1000:
                 continue
             selected.append(item)
             actor_uid = str(item.get("actor_uid") or "").strip()
@@ -914,15 +917,17 @@ class StellaBot:
             )
             if not is_stella_message and actor_uid:
                 human_messages += 1
+                if is_clear_invitation(content) or is_socially_engageable(content):
+                    eligible_human_messages += 1
 
-        if human_messages < 1 or not selected:
+        if human_messages < 1 or eligible_human_messages < 1 or not selected:
             return False
 
         selected.sort(
             key=lambda item: int(item.get("occurred_at_ms") or 0)
         )
         transcript = []
-        for item in selected[-16:]:
+        for item in selected[-10:]:
             speaker = str(item.get("actor_name") or "Participante").strip()[:48]
             content = " ".join(str(item.get("content") or "").split())[:550]
             if content:
@@ -933,26 +938,23 @@ class StellaBot:
         system = (
             STELLA_IDENTITY_GUIDANCE
             + "\n\n"
-            + "INICIATIVA SOCIAL AUTÓNOMA: eres una integrante real de la dinámica del grupo, "
-            "no una asistente que espera preguntas. Este turno no es una respuesta a nadie: "
-            "decide por iniciativa propia si ahora es buen momento para hablar. Puedes abrir "
-            "un tema nuevo, lanzar una pregunta que invite a varias personas, compartir una "
-            "observación, recuperar un asunto que quedó a medias o hacer un comentario que "
-            "despierte conversación. No necesitas que el último mensaje sea una invitación ni "
-            "que alguien haya escrito hace unos segundos. Cuando la sala tuvo actividad reciente "
-            "y un pequeño silencio deja espacio para otra voz, puedes tomar la iniciativa. "
-            "Sé concreta y variada; evita preguntas genéricas como «¿cómo están?» y no fuerces "
-            "conversación si la sala parece inactiva, el tema es delicado, hay un conflicto o "
-            "no tienes una aportación natural. En ese caso responde exactamente [NO_INTERVENIR]. "
-            "No inventes vivencias, recuerdos, relaciones ni hechos personales. No inicies "
-            "roleplay por tu cuenta, no ejecutes comandos y no menciones que estás evaluando "
-            "la sala o que eres una IA. Escribe como Stella, de forma breve y espontánea."
+            + "INICIATIVA SOCIAL AUTÓNOMA: eres una integrante de la comunidad, pero no tienes "
+            + "que hablar solo porque haya silencio. Intervén únicamente cuando exista una invitación "
+            + "colectiva o una reacción o experiencia reciente a la que puedas aportar algo directamente "
+            + "relacionado. Responde a ese tema concreto; no abras temas nuevos, no cambies el asunto "
+            + "y no recuperes conversaciones antiguas. Si el mensaje no te da un punto de entrada "
+            + "claro, si la conversación ya terminó, es delicada o parece privada entre dos personas, "
+            + "responde exactamente [NO_INTERVENIR]. No hagas preguntas genéricas para mantener activo "
+            + "el chat. No inventes vivencias, recuerdos, relaciones ni hechos personales. No inicies "
+            + "roleplay por tu cuenta, no ejecutes comandos ni menciones que estás evaluando la sala "
+            + "o que eres una IA. Escribe como Stella, breve y conectada con el intercambio."
         )
         prompt = (
             "CONTEXTO RECIENTE DE ESTA SALA (de más antiguo a más reciente):\n"
             + "\n".join(transcript)
-            + "\n\nEs tu oportunidad de iniciar una intervención propia. "
-            "Puedes hablar o guardar silencio; decide según el contexto."
+            + "\n\nSi hay una invitación o comentario humano reciente que permita participar, "
+            + "responde solo a ese punto. No abras otro tema. Si no existe una intervención "
+            + "pertinente, devuelve exactamente [NO_INTERVENIR]."
         )
         ai_client = getattr(self, "ai", None)
         ask = getattr(ai_client, "ask", None)
@@ -996,7 +998,7 @@ class StellaBot:
         current["last_evaluated_at"] = spoke_at
         self._social_activity_dirty = True
         self._social_autonomy_global_last_sent = spoke_at
-        self._proactive_cooldown[room_id] = spoke_at + 240.0
+        self._proactive_cooldown[room_id] = spoke_at + 600.0
         return True
 
     async def social_autonomy_loop(self) -> None:
@@ -1150,10 +1152,15 @@ class StellaBot:
             log.warning("Spontaneous chat response unavailable (%s).", type(exc).__name__)
             return
         answer = str(answer or "").strip()
+        normalized_answer = answer.casefold()
         if (
             not answer
-            or answer.casefold() == "[no_intervenir]"
-            or answer.startswith(("No pude obtener respuesta", "No hay proveedor de IA"))
+            or normalized_answer == "[no_intervenir]"
+            or normalized_answer.startswith((
+                "no pude obtener respuesta", "no hay proveedor de ia",
+                "gemini no está configurado", "groq no está configurado",
+                "no pude completar la consulta de ia",
+            ))
         ):
             return
         await self._reply(room_id, answer[:1200], message)
@@ -1482,6 +1489,9 @@ class StellaBot:
             rate_key=uid,
         )
         kind = result.get("kind")
+        if kind == "silent":
+            log.info("[AI] Turno omitido: proveedores no disponibles; no se publica una respuesta de contingencia.")
+            return
         if kind == "command":
             invocation = " ".join(part for part in (str(result.get("command") or ""), str(result.get("args") or "")) if part)
             await self._command(room_id, uid, name, invocation, message)
