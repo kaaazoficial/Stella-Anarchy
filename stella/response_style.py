@@ -34,11 +34,12 @@ _PATTERNS = {
         r"vale la pena|que opinas|tu opinion|que harias)\b"
     ),
     "creative": re.compile(
-        r"\b(?:inventa|inventar|crea|crear|escribe|redacta|"
-        r"disena|disena|ideas para|dame ideas|personaje|biografia|"
+        r"\b(?:inventa(?:me|r)?|crea(?:me|r)?|escribe(?:me)?|redacta(?:me)?|"
+        r"disena(?:me)?|ideas para|dame ideas|personaje|biografia|"
         r"historia|relato|poema|escena|dialogo|nombre para|"
         r"concepto creativo|worldbuilding)\b"
     ),
+
     "explanation": re.compile(
         r"\b(?:explica|explicame|que es|quien fue|quien es|"
         r"como funciona|por que|porque|significa|define|"
@@ -47,9 +48,10 @@ _PATTERNS = {
     ),
     "social": re.compile(
         r"^(?:hola|buenas|buenos dias|buenas tardes|buenas noches|"
-        r"que tal|como estas|gracias|muchas gracias|jaja+|jeje+|"
+        r"que tal|como estas|gracias|muchas gracias|(?:ja){2,}|(?:je){2,}|"
         r"xd+|lmao|te quiero|buen dia)[.!?¡¿ ]*$"
     ),
+
 }
 
 _GUIDANCE = {
@@ -114,10 +116,11 @@ _GUIDANCE = {
 def classify_response_style(value: str, *, intent: str = "conversation", roleplay: bool = False) -> str:
     """Select a lightweight response mode from the current request, not old history."""
     text = str(value or "").strip()
-    if roleplay or re.search(r"\*[^*\n]{2,}\*|^\s*[—–-]\s*\S|\b(?:roleplay|rolear|hagamos rol)\b", text, re.I | re.M):
+    requested_intent = str(intent or "conversation").casefold()
+    if roleplay or re.search(r"\\*[^*\\n]{2,}\\*|^\\s*[—–-]\\s*\\S|\\b(?:roleplay|rolear|hagamos rol)\\b", text, re.I | re.M):
         return "roleplay"
-    if str(intent or "").casefold() == "playful":
-        return "playful"
+    if requested_intent in {"playful", "research"}:
+        return requested_intent
     folded = _fold(text)
     for style in ("emotional", "troubleshooting", "comparison", "advice", "creative", "explanation"):
         if _PATTERNS[style].search(folded):
