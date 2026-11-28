@@ -4,15 +4,14 @@ import logging
 from stella.audit import audit_event, redact_secrets
 
 
-def _last_audit_payload(caplog):
+def _last_record(caplog):
     records = [record.message for record in caplog.records if record.name == "stella.audit"]
     assert records
-    return json.loads(records[-1])
+    return records[-1]
 
 
-def test_audit_event_omits_raw_chat_and_member_identifiers_by_default(caplog, monkeypatch):
+def test_chat_log_is_readable_and_hides_identifiers_by_default(caplog, monkeypatch):
     monkeypatch.delenv("STELLA_AUDIT_LOG_CONTENT", raising=False)
-    message = "Hola Stella, ¿cómo estás?"
     with caplog.at_level(logging.INFO, logger="stella.audit"):
         audit_event(
             "chat.message.in",
@@ -22,31 +21,24 @@ def test_audit_event_omits_raw_chat_and_member_identifiers_by_default(caplog, mo
             actor_uid="actor-1",
             actor_name="Nombre visible",
             message_id="message-1",
-            content=message,
+            content="Hola Stella, ¿cómo estás?",
             mentions=[{"uid": "mentioned-user"}],
             reply_message_id="parent-message",
-            addressed=False,
         )
 
-    payload = _last_audit_payload(caplog)
-    assert payload["event"] == "chat.message.in"
-    assert payload["room_id"] == "room-1"
-    assert "uid" not in payload
-    assert "nickname" not in payload
-    assert "message_id" not in payload
-    assert "actor_uid" not in payload
-    assert "actor_name" not in payload
-    assert "content" not in payload
-    assert payload["content_length"] == len(message)
-    assert payload["content_logged"] is False
-    assert payload["mention_count"] == 1
-    assert payload["has_reply"] is True
-    assert payload["message_reference_present"] is True
-    assert payload["addressed"] is False
-    assert payload["timestamp"]
+    record = _last_record(caplog)
+    assert record.startswith("[CHAT] ")
+    assert "Sala room-1" in record
+    assert "Usuario: [contenido omitido]" in record
+    assert "Nombre visible" not in record
+    assert "Hola Stella" not in record
+    assert "actor-1" not in record
+    assert "message-1" not in record
+    assert "content_length" not in record
+    assert record.startswith("[CHAT] ")
 
 
-def test_audit_event_allows_explicit_opt_in_with_redaction(caplog, monkeypatch):
+def test_chat_log_is_concise_and_redacts_sensitive_content(caplog, monkeypatch):
     monkeypatch.setenv("STELLA_AUDIT_LOG_CONTENT", "true")
     message = (
         "Hola, mi api_key=secret-value, token gsk_abcdefghijklmnop123456, "
@@ -65,25 +57,17 @@ def test_audit_event_allows_explicit_opt_in_with_redaction(caplog, monkeypatch):
             content=message,
         )
 
-    payload = _last_audit_payload(caplog)
-    assert "Hola" in payload["content"]
-    assert "secret-value" not in payload["content"]
-    assert "gsk_abcdefghijklmnop123456" not in payload["content"]
-    assert "persona@example.com" not in payload["content"]
-    assert "+56912345678" not in payload["content"]
-    assert payload["content_logged"] is True
-    assert payload["content_redacted"] is True
-    assert payload["room_id"] == "room-191"
-    assert payload["room_name"] == "General"
-    assert payload["message_id"] == "message-456"
-    assert payload["actor_uid"] == "member-123"
-    assert payload["actor_name"] == "Jean"
-    assert payload["reply_to_message_id"] == "parent-455"
-    assert payload["timestamp_local"]
-    assert payload["timestamp_timezone"] == "America/Santiago"
-    assert payload["event_time"] == "2026-11-28T09:00:00Z"
-    assert payload["event_time_local"].startswith("2026-11-28T06:00:00")
-    assert payload["event_timezone"] == "America/Santiago"
+    record = _last_record(caplog)
+    assert record.startswith("[CHAT] 2026-11-28 06:00:00 | General (room-191) | Jean ↪: ")
+    assert "Hola" in record
+    assert "secret-value" not in record
+    assert "gsk_abcdefghijklmnop123456" not in record
+    assert "persona@example.com" not in record
+    assert "+56912345678" not in record
+    assert "message-456" not in record
+    assert "member-123" not in record
+    assert "content_length" not in record
+    assert "content_logged" not in record
 
 
 def test_audit_logs_redact_common_api_credentials_and_contact_details():
@@ -101,24 +85,31 @@ def test_audit_logs_redact_common_api_credentials_and_contact_details():
     assert "[TELEFONO_OMITIDO]" in cleaned
 
 
-def test_audit_event_keeps_multiline_opt_in_content_in_one_json_record(caplog, monkeypatch):
+def test_multiline_chat_is_kept_on_one_readable_log_line(caplog, monkeypatch):
     monkeypatch.setenv("STELLA_AUDIT_LOG_CONTENT", "1")
-    message = "primera línea\nsegunda línea"
     with caplog.at_level(logging.INFO, logger="stella.audit"):
-        audit_event("chat.message.in", content=message)
-    payload = _last_audit_payload(caplog)
-    record = next(record.message for record in caplog.records if record.name == "stella.audit")
-    assert payload["content"] == message
-    assert "primera línea" in record
-    assert "segunda línea" in record
+        audit_event("chat.message.in", content="primera línea\nsegunda línea")
+
+    record = _last_record(caplog)
+    assert "primera línea ↵ segunda línea" in record
+    assert "\n" not in record
 
 
-def test_audit_content_is_capped_without_losing_original_length(caplog, monkeypatch):
+def test_long_chat_content_is_capped(caplog, monkeypatch):
     monkeypatch.setenv("STELLA_AUDIT_LOG_CONTENT", "1")
-    message = "x" * 2500
     with caplog.at_level(logging.INFO, logger="stella.audit"):
-        audit_event("chat.message.in", content=message)
-    payload = _last_audit_payload(caplog)
-    assert len(payload["content"]) == 2000
-    assert payload["content_length"] == 2500
-    assert payload["content_truncated"] is True
+        audit_event("chat.message.in", content="x" * 2500)
+
+    record = _last_record(caplog)
+    assert len(record.split(": ", 1)[1].removesuffix(" … [recortado]")) == 2000
+    assert record.endswith(" … [recortado]")
+
+
+def test_non_chat_audit_events_keep_structured_metadata(caplog):
+    with caplog.at_level(logging.INFO, logger="stella.audit"):
+        audit_event("admin.command", command="diagnostico", authorized=True)
+
+    payload = json.loads(_last_record(caplog))
+    assert payload["event"] == "admin.command"
+    assert payload["command"] == "diagnostico"
+    assert payload["authorized"] is True
