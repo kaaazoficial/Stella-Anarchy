@@ -2420,7 +2420,9 @@ class StellaBot:
             "fecha": self._date_time, "zona": self._date_time,
             "perfil": self._profile, "bio": self._bio, "miestado": self._my_status,
             "puntos": self._points, "saldo": self._points, "ranking": self._ranking,
-            "ruleta": self._roulette, "apostar": self._roulette, "apuesta": self._roulette,
+            "ruleta": self._roulette, "apostar": self._bet_challenge,
+            "aceptarapuesta": self._accept_bet, "rechazarapuesta": self._reject_bet,
+            "misapuestas": self._bet_history,
             "diario": self._daily, "trabajar": self._work, "pagar": self._pay,
             "regalo": self._gift, "muro": self._wall, "afinidad": self._affinity,
             "duelo": self._duel,
@@ -3022,6 +3024,80 @@ class StellaBot:
             f"{outcome}\nSaldo: {balance} puntos.",
             message,
         )
+
+    async def _bet_challenge(self, room_id, uid, name, args, message):
+        target = self._mentioned_user(message)
+        amounts = re.findall(r"(?<!\\w)\\d+(?!\\w)", str(args or ""))
+        if not target or not amounts:
+            await self._reply(room_id, "Uso: !apostar @usuario <puntos>. Reto de dados a 10 rondas; la otra persona debe aceptar.", message)
+            return
+        stake = int(amounts[-1])
+        if target[0] == uid:
+            await self._reply(room_id, "No puedes retarte a ti mismo.", message)
+            return
+        status, wager_id, balance = self.store.create_point_wager(room_id, uid, name, target[0], target[1], stake)
+        if status == "invalid":
+            await self._reply(room_id, "La apuesta debe ser de 10 a 100.000 puntos.", message)
+        elif status == "missing":
+            await self._reply(room_id, "Ambas personas necesitan tener un perfil y saldo registrado. Usa !puntos primero.", message)
+        elif status == "insufficient":
+            await self._reply(room_id, f"No tienes suficientes puntos. Saldo: {balance}.", message)
+        else:
+            await self._reply(room_id,
+                f"🎲 RETO DE DADOS · #{wager_id}\\n{name} reta a {target[1]} por {stake} puntos.\\n"
+                f"Ambos lanzarán dos dados; gana la suma más alta y se lleva el pozo de {stake * 2}.\\n"
+                f"{target[1]}, acepta con !aceptarapuesta {wager_id} o rechaza con !rechazarapuesta {wager_id}.\\n"
+                "El reto caduca en 10 minutos. Los puntos del retador quedan reservados.", message)
+
+    async def _accept_bet(self, room_id, uid, name, args, message):
+        try:
+            wager_id = int(str(args or "").strip())
+        except ValueError:
+            await self._reply(room_id, "Uso: !aceptarapuesta <ID del reto>.", message)
+            return
+        status, wager = self.store.accept_point_wager(room_id, wager_id, uid, sum(random.randint(1, 6) for _ in range(2)), sum(random.randint(1, 6) for _ in range(2)))
+        if status == "not_target":
+            await self._reply(room_id, "Solo la persona retada puede aceptar esta apuesta.", message)
+        elif status == "insufficient":
+            await self._reply(room_id, f"No tienes puntos suficientes para cubrir {wager.get('stake', 0)}.", message)
+        elif status == "closed":
+            await self._reply(room_id, "Ese reto ya fue resuelto, rechazado o caducó.", message)
+        elif status != "ok":
+            await self._reply(room_id, "No encontré ese reto en esta sala.", message)
+        elif wager["status"] == "tie":
+            await self._reply(room_id, f"🎲 EMPATE · #{wager_id}\\n{wager['challenger_name']}: {wager['challenger_roll']} · {name}: {wager['target_roll']}\\nSe devolvieron los {wager['stake']} puntos a cada participante.", message)
+        else:
+            winner = wager["challenger_name"] if wager["winner_uid"] == wager["challenger_uid"] else name
+            loser = name if wager["winner_uid"] == wager["challenger_uid"] else wager["challenger_name"]
+            await self._reply(room_id, f"🎲 RESULTADO · #{wager_id}\\n{wager['challenger_name']}: {wager['challenger_roll']} · {name}: {wager['target_roll']}\\n🏆 {winner} gana {wager['stake'] * 2} puntos. {loser} pierde su apuesta. ¡Bien jugado!", message)
+
+    async def _reject_bet(self, room_id, uid, name, args, message):
+        try:
+            wager_id = int(str(args or "").strip())
+        except ValueError:
+            await self._reply(room_id, "Uso: !rechazarapuesta <ID del reto>.", message)
+            return
+        status, wager = self.store.reject_point_wager(room_id, wager_id, uid)
+        if status == "not_target":
+            reply = "Solo la persona retada puede rechazar esta apuesta."
+        elif status == "closed":
+            reply = "Ese reto ya no está pendiente."
+        elif status != "ok":
+            reply = "No encontré ese reto en esta sala."
+        else:
+            reply = f"🚫 Reto #{wager_id} rechazado. Se devolvieron {wager['stake']} puntos a {wager['challenger_name']}."
+        await self._reply(room_id, reply, message)
+
+    async def _bet_history(self, room_id, uid, name, args, message):
+        rows = self.store.point_wager_history(uid)
+        if not rows:
+            await self._reply(room_id, "Todavía no tienes apuestas registradas. ¡Puedes iniciar una con !apostar @usuario <puntos>!", message)
+            return
+        labels = {"pending": "pendiente", "settled": "resuelta", "tie": "empate", "rejected": "rechazada", "expired": "caducada"}
+        lines = ["🎲 TUS APUESTAS · ÚLTIMOS 5"]
+        for row in rows:
+            lines.append(f"#{row['id']} · {row['challenger_name']} vs {row['target_name']} · {row['stake']} pts · {labels.get(row['status'], row['status'])}")
+        await self._reply(room_id, "\\n".join(lines), message)
 
     async def _daily(self, room_id, uid, name, args, message):
         ok, result = self.store.claim_reward(uid, "daily", 100, 86400)

@@ -174,6 +174,23 @@ class Store:
                     enabled INTEGER NOT NULL DEFAULT 1
                 );
                 CREATE INDEX IF NOT EXISTS idx_auto_replies_room ON auto_replies(room_id, enabled);
+                CREATE TABLE IF NOT EXISTS point_wagers (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    room_id TEXT NOT NULL,
+                    challenger_uid TEXT NOT NULL,
+                    challenger_name TEXT NOT NULL,
+                    target_uid TEXT NOT NULL,
+                    target_name TEXT NOT NULL,
+                    stake INTEGER NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'pending',
+                    challenger_roll INTEGER,
+                    target_roll INTEGER,
+                    winner_uid TEXT,
+                    created_at REAL NOT NULL,
+                    expires_at REAL NOT NULL,
+                    settled_at REAL
+                );
+                CREATE INDEX IF NOT EXISTS idx_point_wagers_pending ON point_wagers(room_id,status,expires_at);
                 """
             )
 
@@ -258,6 +275,106 @@ class Store:
             db.execute("UPDATE users SET points=points-? WHERE uid=?", (amount, str(sender_uid)))
             db.execute("UPDATE users SET points=points+? WHERE uid=?", (amount, str(target_uid)))
             return "ok"
+
+    @staticmethod
+    def _expire_point_wagers(db: sqlite3.Connection, now: float) -> int:
+        rows = db.execute(
+            "SELECT id,challenger_uid,stake FROM point_wagers WHERE status='pending' AND expires_at<=?",
+            (now,),
+        ).fetchall()
+        for row in rows:
+            db.execute("UPDATE users SET points=points+? WHERE uid=?", (int(row["stake"]), row["challenger_uid"]))
+            db.execute("UPDATE point_wagers SET status='expired',settled_at=? WHERE id=?", (now, int(row["id"])))
+        return len(rows)
+
+    def create_point_wager(self, room_id: str, challenger_uid: str, challenger_name: str,
+                           target_uid: str, target_name: str, stake: int) -> tuple[str, int, int]:
+        if stake < 10 or stake > 100000 or str(challenger_uid) == str(target_uid):
+            return "invalid", 0, self.points_balance(challenger_uid)
+        now = time.time()
+        with self._session(self.connect()) as db:
+            db.execute("BEGIN IMMEDIATE")
+            self._expire_point_wagers(db, now)
+            challenger = db.execute("SELECT points FROM users WHERE uid=?", (str(challenger_uid),)).fetchone()
+            target = db.execute("SELECT uid FROM users WHERE uid=?", (str(target_uid),)).fetchone()
+            if not challenger or not target:
+                return "missing", 0, int(challenger["points"]) if challenger else 0
+            balance = int(challenger["points"])
+            if balance < stake:
+                return "insufficient", 0, balance
+            db.execute("UPDATE users SET points=points-?,last_seen=? WHERE uid=?", (stake, now, str(challenger_uid)))
+            cursor = db.execute(
+                """INSERT INTO point_wagers(room_id,challenger_uid,challenger_name,target_uid,target_name,stake,created_at,expires_at)
+                   VALUES(?,?,?,?,?,?,?,?)""",
+                (str(room_id), str(challenger_uid), str(challenger_name)[:80], str(target_uid),
+                 str(target_name)[:80], stake, now, now + 600),
+            )
+            return "ok", int(cursor.lastrowid), balance - stake
+
+    def accept_point_wager(self, room_id: str, wager_id: int, target_uid: str,
+                           challenger_roll: int, target_roll: int) -> tuple[str, dict[str, Any]]:
+        now = time.time()
+        with self._session(self.connect()) as db:
+            db.execute("BEGIN IMMEDIATE")
+            self._expire_point_wagers(db, now)
+            row = db.execute("SELECT * FROM point_wagers WHERE id=? AND room_id=?", (int(wager_id), str(room_id))).fetchone()
+            if not row:
+                return "missing", {}
+            wager = dict(row)
+            if wager["status"] != "pending":
+                return "closed", wager
+            if str(wager["target_uid"]) != str(target_uid):
+                return "not_target", wager
+            target = db.execute("SELECT points FROM users WHERE uid=?", (str(target_uid),)).fetchone()
+            if not target:
+                return "missing_user", wager
+            if int(target["points"]) < int(wager["stake"]):
+                return "insufficient", wager
+            stake = int(wager["stake"])
+            db.execute("UPDATE users SET points=points-?,last_seen=? WHERE uid=?", (stake, now, str(target_uid)))
+            if challenger_roll == target_roll:
+                db.execute("UPDATE users SET points=points+? WHERE uid IN (?,?)",
+                           (stake, str(wager["challenger_uid"]), str(target_uid)))
+                winner_uid = None
+                status = "tie"
+            else:
+                winner_uid = str(wager["challenger_uid"] if challenger_roll > target_roll else target_uid)
+                db.execute("UPDATE users SET points=points+? WHERE uid=?", (stake * 2, winner_uid))
+                status = "settled"
+            db.execute(
+                """UPDATE point_wagers SET status=?,challenger_roll=?,target_roll=?,winner_uid=?,settled_at=? WHERE id=?""",
+                (status, int(challenger_roll), int(target_roll), winner_uid, now, int(wager_id)),
+            )
+            wager.update({"status": status, "challenger_roll": int(challenger_roll),
+                          "target_roll": int(target_roll), "winner_uid": winner_uid})
+            return "ok", wager
+
+    def reject_point_wager(self, room_id: str, wager_id: int, target_uid: str) -> tuple[str, dict[str, Any]]:
+        now = time.time()
+        with self._session(self.connect()) as db:
+            db.execute("BEGIN IMMEDIATE")
+            self._expire_point_wagers(db, now)
+            row = db.execute("SELECT * FROM point_wagers WHERE id=? AND room_id=?", (int(wager_id), str(room_id))).fetchone()
+            if not row:
+                return "missing", {}
+            wager = dict(row)
+            if wager["status"] != "pending":
+                return "closed", wager
+            if str(wager["target_uid"]) != str(target_uid):
+                return "not_target", wager
+            db.execute("UPDATE users SET points=points+? WHERE uid=?", (int(wager["stake"]), wager["challenger_uid"]))
+            db.execute("UPDATE point_wagers SET status='rejected',settled_at=? WHERE id=?", (now, int(wager_id)))
+            wager["status"] = "rejected"
+            return "ok", wager
+
+    def point_wager_history(self, uid: str, limit: int = 5) -> list[dict[str, Any]]:
+        with self._session(self.connect()) as db:
+            rows = db.execute(
+                """SELECT id,challenger_name,target_name,stake,status,challenger_roll,target_roll,winner_uid,created_at
+                   FROM point_wagers WHERE challenger_uid=? OR target_uid=? ORDER BY id DESC LIMIT ?""",
+                (str(uid), str(uid), max(1, min(10, int(limit)))),
+            ).fetchall()
+            return [dict(row) for row in rows]
 
     def settle_roulette(self, uid: str, wager: int, payout: int) -> tuple[str, int]:
         """Atomically debit a roulette stake and credit its gross payout."""
