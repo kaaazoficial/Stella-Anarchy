@@ -215,7 +215,7 @@ AI_COMMAND_CATALOG = {
     "aceptarapuesta": "ID: acepta un reto de dados pendiente dirigido a ti.",
     "rechazarapuesta": "ID: rechaza un reto pendiente y devuelve la apuesta.",
     "misapuestas": "sin argumentos: muestra tus últimas apuestas y resultados.",
-    "apostar": "@usuario puntos: reta a un miembro a un duelo de dados con apuesta; requiere aceptación.
+    "apostar": "@usuario puntos: reta a un miembro a un duelo de dados con apuesta; requiere aceptación.",
     "ranking": "sin argumentos: tabla de puntos de la sala.",
     "actividad": "[hoy|semana]: actividad agregada de la sala.",
     "afinidad": "@usuario: consulta afinidad.",
