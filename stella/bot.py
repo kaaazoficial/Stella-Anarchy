@@ -18,7 +18,8 @@ from stella.conversation_context import is_clear_invitation, select_conversation
 from stella.vector_memory import VectorMemory
 from stella.room_archive import RoomArchive
 from stella.ai_memory import QdrantConversationMemory
-from stella.ai_core import AI_ADMIN_COMMANDS, AI_PUBLIC_COMMANDS, ROOM_CONTEXT_MARKER, REFERENCE_CONTEXT_MARKER, REFERENCE_CONTEXT_END, StellaAICore
+from stella.ai_core import AI_ADMIN_COMMANDS, AI_PUBLIC_COMMANDS, ROOM_CONTEXT_MARKER, REFERENCE_CONTEXT_MARKER, REFERENCE_CONTEXT_END, STELLA_IDENTITY_GUIDANCE, StellaAICore
+from stella.response_style import build_response_mode_guidance
 from stella.config import Settings, _uid_set
 from stella.language import split_arguments
 from stella.moderation import inspect_links, sanitize_reason
@@ -700,13 +701,14 @@ class StellaBot:
         self._proactive_cooldown = cooldowns
 
         system = (
-            "Eres Stella, participante de esta comunidad. Hablas de ti misma en femenino; "
-            "no deduzcas el género de nadie más. El mensaje actual invita claramente al chat "
-            "a opinar o ayudar: participa solo si puedes aportar algo concreto y útil. "
-            "Lee el contexto del mismo hilo o tema antes de responder. Sé breve y natural; "
-            "no repitas lo que ya se dijo, no inventes datos ni experiencias personales reales. "
-            "No ejecutes comandos, no sugieras herramientas internas y no anuncies que estás "
-            "interviniendo. Si no puedes aportar algo distinto, responde exactamente [NO_INTERVENIR]."
+            STELLA_IDENTITY_GUIDANCE
+            + "\n\n"
+            + build_response_mode_guidance(text, intent="conversation")
+            + "\n\nINVITACIÓN ABIERTA AL CHAT: participa solo si puedes aportar algo "
+            "concreto y distinto a lo que ya dijeron. Lee el hilo de esta sala, no inventes "
+            "datos ni experiencias personales reales, no ejecutes comandos y no sugieras "
+            "herramientas internas. No anuncies que estás interviniendo. Si no tienes una "
+            "aportación útil, responde exactamente [NO_INTERVENIR]."
         )
         internal_context = consciousness.context(room_id) if consciousness is not None else ""
         room_prompt = await self._room_history_prompt(

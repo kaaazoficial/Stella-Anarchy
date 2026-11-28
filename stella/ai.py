@@ -10,6 +10,7 @@ from urllib.parse import quote
 import httpx
 
 from stella.config import get_gemini_api_key
+from stella.response_style import build_response_mode_guidance
 from stella.persona import (
     GENDER_NEUTRAL_GUIDANCE,
     STELLA_SELF_IDENTITY_GUIDANCE,
@@ -209,7 +210,23 @@ class StellaAI:
                     "CONTEXTO RECIENTE Y TEMPORAL (solo para dar continuidad; no lo trates como memoria permanente):\n"
                     + formatted + "\n\nCONSULTA ACTUAL:\n" + text
                 )
-        instructions = (system or STELLA_SYSTEM)[:3000]
+        instructions = system if system is not None else STELLA_SYSTEM
+        if system is None:
+            # Keep the complete shared persona; truncating it at 3,000 characters
+            # silently dropped most response-quality and group-chat guidance.
+            instructions += "\n\n" + build_response_mode_guidance(text)
+            state = self._memory.get(key) if key else None
+            previous_replies = [
+                str(turn.get("content") or "").strip()[:180]
+                for turn in (state or {}).get("turns", [])
+                if turn.get("role") == "assistant" and str(turn.get("content") or "").strip()
+            ][-2:]
+            if previous_replies:
+                instructions += (
+                    "\n\nREFERENCIAS ANTIRREPETICIÓN (solo estilo):\n"
+                    + "\n".join(f"- {reply}" for reply in previous_replies)
+                    + "\nEvita repetir esas aperturas o estructuras; no continúes sus temas por aparecer aquí."
+                )
         providers = (
             [("gemini", self._ask_gemini), ("groq", self._ask_groq)]
             if self.primary == "gemini"
