@@ -291,6 +291,7 @@ async def health() -> JSONResponse:
     ai_configured = bool(
         get_gemini_api_key()
         or os.getenv("GROQ_API_KEY", "").strip()
+        or os.getenv("ZAI_API_KEY", "").strip()
     )
     ai_core = getattr(bot, "ai_core", None)
     ai_diagnostics = {}
