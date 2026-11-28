@@ -122,3 +122,24 @@ def test_owner_grant_rejects_invalid_amount_without_changing_balance(tmp_path):
     asyncio.run(bot._give_points("room", "owner", "Dueño", "@Objetivo 0", {"target": ("target", "Objetivo")}))
     assert store.points_balance("target") == 500
     assert "mayor que cero" in bot.replies[-1]
+
+
+def test_owner_can_grant_points_to_replied_message_target(tmp_path):
+    store = make_store(tmp_path, (("owner", "Dueño", 0),))
+    bot = make_bot(store)
+
+    async def resolve_reply_target(room_id, message, requester_uid):
+        assert room_id == "room"
+        assert requester_uid == "owner"
+        return {"uid": "reply-target", "name": "Persona citada"}
+
+    bot._resolve_reply_target = resolve_reply_target
+    message = {"replyMessageId": "message-123"}
+    asyncio.run(
+        bot._command(
+            "room", "owner", "Dueño", "regalarpuntos 900000000", message
+        )
+    )
+
+    assert store.points_balance("reply-target") == 900000000
+    assert "900000000 puntos" in bot.replies[-1]
