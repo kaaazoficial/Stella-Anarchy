@@ -3154,7 +3154,7 @@ class StellaBot:
             await self._reply(room_id, "Este comando está reservado al propietario de Stella.", message)
             return
         target = self._mentioned_user(message)
-        amount_match = re.search(r"(?:^|\\s)(\\d+)\\s*$", str(args or ""))
+        amount_match = re.search(r"(?:^|\s)(\d+)\s*$", str(args or ""))
         if not target or not amount_match:
             prefix = getattr(getattr(self, "settings", None), "command_prefix", "!")
             await self._reply(
