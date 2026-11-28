@@ -89,9 +89,9 @@ def test_cloudflare_gateway_uses_bearer_secret_and_chat_completion_shape(monkeyp
     assert captured["url"].endswith("/internal/infer")
     assert captured["headers"]["Authorization"] == "Bearer shared-gateway-secret"
     assert captured["json"]["model"] == "@cf/zai-org/glm-4.7-flash"
-    assert captured["json"]["messages"][0] == {
-        "role": "system", "content": "Instrucciones de Stella"
-    }
+    assert captured["json"]["messages"][0]["role"] == "system"
+    assert captured["json"]["messages"][0]["content"].startswith("Instrucciones de Stella")
+    assert "objeto JSON válido" in captured["json"]["messages"][0]["content"]
     assert captured["json"]["max_completion_tokens"] == 256
     assert captured["json"]["response_format"] == {"type": "json_object"}
 
