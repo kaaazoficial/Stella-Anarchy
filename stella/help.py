@@ -70,6 +70,33 @@ def _sections(p: str):
         ]),
     ]
 
+def build_admin_commands_help_text(prefix: str = "!") -> str:
+    p = str(prefix or "!").strip() or "!"
+    entries = [
+        f"▸ {p}admin|centro [resumen|actividad|antispam|avisos|historial] — Centro de administración.",
+        f"▸ {p}estado|sistema|diagnostico — Estado operativo de Stella.",
+        f"▸ {p}fuentes|saludfuentes — Estado de proveedores y servicios externos.",
+        f"▸ {p}metricas|rendimiento — Métricas del proceso.",
+        f"▸ {p}autotest|laboratorio — Ejecuta las pruebas internas.",
+        f"▸ {p}advertir <UID> | <motivo> · {p}advertencias [UID] · {p}quitaradvertencia <ID>.",
+        f"▸ {p}antispam [estado|activar|desactivar|limite <n>|ventana <seg>|repeticiones <n>|enlaces <n>|menciones <n>].",
+        f"▸ {p}respuestas — Gestiona respuestas automáticas de la sala.",
+        f"▸ {p}perfilbot <texto> · {p}avatarbot <acción> — Perfil del bot.",
+        f"▸ {p}eliminarmensajes — Elimina mensajes propios de Stella cuando la API lo permite.",
+        f"▸ {p}mencionar @usuario — Prueba de mención del usuario.",
+        f"▸ {p}silenciarchat · {p}hablarchat — Control global de conversación (solo propietario).",
+        f"▸ {p}miuid — Consulta tu UID para verificar la autorización.",
+        "▸ Los resultados administrativos se muestran en la sala donde se ejecuta el comando. Los intentos no autorizados no reciben respuesta.",
+    ]
+    return "\n".join([
+        "[CB] ✦ STELLA · ADMINISTRACIÓN ✦",
+        "[C] Solo visible para UIDs autorizados.",
+        SEPARATOR,
+        "[C]",
+        *[f"[C] {entry}" for entry in entries],
+    ])
+
+
 def _intro(p: str):
     return ["[CB] ✦ STELLA · GUÍA DE COMANDOS ✦",
             f"[C] Prefijos aceptados: {' / '.join(dict.fromkeys((p, '!', '-')))}",
