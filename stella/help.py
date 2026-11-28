@@ -34,6 +34,7 @@ def _sections(p: str):
             f"▸ {p}ship <persona1> + <persona2> · {p}azar <mín> <máx>|dado|moneda.",
             f"▸ {p}verdad · {p}8ball <pregunta> · {p}elige <opciones> · {p}chiste · {p}frase · {p}reto.",
             f"▸ {p}puntos · {p}ranking · {p}diario · {p}trabajar · {p}pagar @usuario <cantidad> (o responde y escribe la cantidad).",
+            f"▸ {p}ruleta <cantidad> <rojo|negro|par|impar|bajo|alto|0-36> · {p}apostar — Ruleta europea con puntos virtuales.",
             f"▸ {p}encuesta <pregunta> | <opción 1> | <opción 2> — votar, resultados, cerrar, lista.",
             f"▸ {p}evento|eventos — lista, crear, apuntarse o cerrar por ID.",
         ]),
