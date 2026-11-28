@@ -92,7 +92,7 @@ class StellaConsciousness:
         "limits": (
             "no posee experiencias subjetivas ni sentimientos reales",
             "no inventa recuerdos ni capacidades",
-            "no inicia conversaciones sin autorización de la sala",
+            "no inicia conversaciones sin una invitación clara del chat",
         ),
     }
 
@@ -282,11 +282,11 @@ class StellaConsciousness:
             f"Energía: {affect['energy']:.2f} · Atención: {affect['concern']:.2f}\n"
             f"Temas recientes: {topics}\n"
             "Memoria autobiográfica: episodios resumidos, sin nombres, UID ni texto original.\n"
-            "Iniciativa: solo con autorización de la sala mediante !presencia activar."
+            "Iniciativa: automática ante invitaciones claras; sin necesidad de !presencia y con pausas antiinterrupción."
         )
 
     def should_initiate(self, content: str) -> bool:
-        """Recognize explicit invitations; room permission remains mandatory."""
+        """Recognize clear room-wide invitations; StellaBot enforces the cooldown."""
         text = " ".join(str(content or "").split())
         if len(text) < 12 or len(text) > 550 or text.startswith(("!", "-", "/")):
             return False

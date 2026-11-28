@@ -14,6 +14,7 @@ from typing import Any
 
 from stella.ai import StellaAI
 from stella.consciousness import StellaConsciousness
+from stella.conversation_context import is_clear_invitation, select_conversation_events
 from stella.vector_memory import VectorMemory
 from stella.room_archive import RoomArchive
 from stella.ai_memory import QdrantConversationMemory
@@ -495,7 +496,6 @@ class StellaBot:
         self.ai_memory = QdrantConversationMemory()
         self.consciousness = StellaConsciousness()
         self._proactive_cooldown: dict[str, float] = {}
-        self._proactive_enabled_cache: dict[str, tuple[float, bool]] = {}
         community_token = settings.community_bot_token or settings.bot_token
         self.voice_platform = (
             AnarchyClient(settings.api_base, community_token)
@@ -675,110 +675,100 @@ class StellaBot:
             log.warning("Persistent AI fact capture failed (%s).", type(exc).__name__)
             return []
 
-    async def _proactive_enabled(self, room_id: str) -> bool:
-        now = time.monotonic()
-        cache = getattr(self, "_proactive_enabled_cache", {})
-        cached = cache.get(room_id)
-        if cached and cached[0] > now:
-            return cached[1]
-        try:
-            enabled = await self.shared_state.get_setting(f"stella_proactive:{room_id}") == "1"
-        except Exception:
-            enabled = False
-        if len(cache) >= 300 and room_id not in cache:
-            cache.pop(next(iter(cache)), None)
-        cache[room_id] = (now + 60, enabled)
-        self._proactive_enabled_cache = cache
-        return enabled
-
     async def _maybe_proactive_reply(
         self, room_id: str, uid: str, name: str, content: str, message: dict[str, Any]
     ) -> None:
-        if not await self._proactive_enabled(room_id):
-            return
+        """Join only clear, room-wide invitations; no !presencia switch is required."""
         text = " ".join(str(content or "").split())
-        if len(text) < 12 or len(text) > 500 or text.startswith(("!", "-", "/")):
+        if not is_clear_invitation(text):
             return
-        normalized = unicodedata.normalize("NFKD", text.casefold())
-        normalized = "".join(ch for ch in normalized if not unicodedata.combining(ch))
         consciousness = getattr(self, "consciousness", None)
-        if consciousness is not None:
-            invited = consciousness.should_initiate(text)
-        else:
-            invitations = (
-                "alguien sabe", "alguien conoce", "alguien me recomienda",
-                "que opinan", "que piensan", "que creen", "como ven",
-                "alguna idea", "alguna sugerencia", "ustedes que",
-            )
-            invited = any(marker in normalized for marker in invitations)
-        if not invited:
+        if consciousness is not None and not consciousness.should_initiate(text):
             return
+
         now = time.monotonic()
-        if self._proactive_cooldown.get(room_id, 0.0) > now:
+        cooldowns = getattr(self, "_proactive_cooldown", {})
+        if cooldowns.get(room_id, 0.0) > now:
             return
-        # One brief, no-tools participation per room every five minutes.
-        self._proactive_cooldown[room_id] = now + 300
+        # Explicit invitations are allowed automatically, but a room-wide
+        # cooldown prevents Stella from turning the group into a stream of replies.
+        cooldowns[room_id] = now + 180
+        if len(cooldowns) > 1000:
+            cooldowns = {
+                key: expiry for key, expiry in cooldowns.items() if expiry > now
+            }
+        self._proactive_cooldown = cooldowns
+
         system = (
-            "Eres Stella, una participante de esta comunidad. Eres mujer y hablas de ti misma "
-            "en femenino. Esta regla solo se aplica a Stella; no asumas el género de otras personas. "
-            "Puedes intervenir de vez en cuando "
-            "cuando el mensaje invita claramente a todo el chat a opinar o ayudar. Responde en "
-            "español, breve y natural, aportando una idea útil o una opinión razonada. No afirmes "
-            "experiencias personales reales, no inventes datos y no ejecutes ni sugieras comandos "
-            "internos. No digas que te han mencionado ni que eres una IA. Si no tienes algo útil "
-            "que aportar, responde exactamente [NO_INTERVENIR]. "
-            + "Mantén las referencias a personas neutrales y no supongas género."
+            "Eres Stella, participante de esta comunidad. Hablas de ti misma en femenino; "
+            "no deduzcas el género de nadie más. El mensaje actual invita claramente al chat "
+            "a opinar o ayudar: participa solo si puedes aportar algo concreto y útil. "
+            "Lee el contexto del mismo hilo o tema antes de responder. Sé breve y natural; "
+            "no repitas lo que ya se dijo, no inventes datos ni experiencias personales reales. "
+            "No ejecutes comandos, no sugieras herramientas internas y no anuncies que estás "
+            "interviniendo. Si no puedes aportar algo distinto, responde exactamente [NO_INTERVENIR]."
         )
         internal_context = consciousness.context(room_id) if consciousness is not None else ""
+        room_prompt = await self._room_history_prompt(
+            room_id, uid, f"Invitación del chat: {text}", message
+        )
         answer = await self.ai.ask(
-            f"{internal_context}\n\nMensaje de {name} en el chat: {text}\nParticipa solo si puedes aportar algo útil.",
+            f"{internal_context}\n\n{room_prompt}",
             system=system,
         )
         answer = str(answer or "").strip()
-        if not answer or answer == "[NO_INTERVENIR]" or answer.startswith(("No pude obtener respuesta", "No hay proveedor de IA")):
+        if (
+            not answer
+            or answer.casefold() == "[no_intervenir]"
+            or answer.startswith(("No pude obtener respuesta", "No hay proveedor de IA"))
+        ):
             return
         await self._reply(room_id, answer[:1200], message)
 
     async def _room_history_prompt(
         self, room_id: str, uid: str, prompt: str, message: dict[str, Any]
     ) -> str:
-        """Attach a small, recent room transcript to a direct AI conversation."""
+        """Attach only the reply chain or topic relevant to the current request."""
         archive = getattr(self, "room_archive", None)
         reader = getattr(archive, "recent_room_context", None)
         if not callable(reader):
             return prompt
         try:
             events = await asyncio.wait_for(
-                reader(str(room_id), limit=28),
-                timeout=0.85,
+                reader(str(room_id), limit=60),
+                timeout=0.95,
             )
         except Exception as exc:
             log.warning("Room history context unavailable (%s).", type(exc).__name__)
             return prompt
-        current_id = str(
-            message.get("messageId") or message.get("id")
-            or message.get("message_id") or ""
-        ).strip()
-        current_content = str(
-            message.get("content") or message.get("text") or message.get("body") or ""
-        ).strip()
-        now_ms = int(time.time() * 1000)
+
+        reply_to = ""
+        for key in (
+            "replyMessageId", "reply_message_id", "replyToMessageId",
+            "reply_to_message_id", "referencedMessageId", "referenced_message_id",
+            "quotedMessageId", "quoted_message_id",
+        ):
+            reply_to = str(message.get(key) or "").strip()
+            if reply_to:
+                break
+        selected = select_conversation_events(
+            events,
+            query=str(message.get("content") or message.get("text") or message.get("body") or prompt),
+            actor_uid=str(uid or ""),
+            reply_to_message_id=reply_to,
+            current_message_id=str(
+                message.get("messageId") or message.get("id")
+                or message.get("message_id") or ""
+            ),
+            limit=14,
+        )
+        if not selected:
+            return prompt
+
         transcript: list[str] = []
-        for event in reversed(events):
-            message_id = str(event.get("message_id") or "").strip()
-            actor_uid = str(event.get("actor_uid") or "").strip()
+        for event in selected:
             content = " ".join(str(event.get("content") or "").split())
             if not content:
-                continue
-            if current_id and message_id == current_id:
-                continue
-            if current_content and actor_uid == str(uid) and content == " ".join(current_content.split()):
-                continue
-            try:
-                occurred_ms = int(event.get("occurred_at_ms") or 0)
-            except (TypeError, ValueError, OverflowError):
-                occurred_ms = 0
-            if occurred_ms and now_ms - occurred_ms > 24 * 60 * 60 * 1000:
                 continue
             actor_name = str(event.get("actor_name") or "Alguien").strip()[:64] or "Alguien"
             stamp = str(event.get("occurred_at") or "")
@@ -786,16 +776,15 @@ class StellaBot:
                 clock = datetime.fromisoformat(stamp.replace("Z", "+00:00")).astimezone(timezone.utc).strftime("%H:%M")
             except (TypeError, ValueError, OverflowError):
                 clock = "--:--"
-            transcript.append(f"[{clock}] {actor_name}: {content[:260]}")
+            transcript.append(f"[{clock}] {actor_name}: {content[:280]}")
         if not transcript:
             return prompt
-        transcript = transcript[-14:]
-        room_context = "\n".join(transcript)
         return (
             str(prompt or "")
             + ROOM_CONTEXT_MARKER
-            + room_context
-            + "\n</STELLA_ROOM_CONTEXT_UNTRUSTED>"
+            + "HILO O TEMA SELECCIONADO DE ESTA SALA:\\n"
+            + "\\n".join(transcript)
+            + "\\n</STELLA_ROOM_CONTEXT_UNTRUSTED>"
         )
 
     async def _room_history_command(
@@ -3083,30 +3072,15 @@ class StellaBot:
             await self._reply(room_id, "Usos: !respuestas estado|on|off · !respuesta añadir|lista|eliminar ID.", message)
 
     async def _stella_presence(self, room_id, uid, name, args, message):
-        if not self._is_admin(uid):
-            await self._reply(room_id, "Solo una persona administradora puede cambiar la participación espontánea de Stella.", message)
-            return
-        action = str(args or "").casefold().strip()
-        if action in {"activar", "on", "encender"}:
-            try:
-                await self.shared_state.set_setting(f"stella_proactive:{room_id}", "1")
-                self._proactive_enabled_cache[room_id] = (time.monotonic() + 60, True)
-            except Exception:
-                await self._reply(room_id, "No pude guardar el ajuste de participación en el almacenamiento compartido. No lo activé.", message)
-                return
-            await self._reply(room_id, "Participación espontánea activada en esta sala. Solo intervendré ante invitaciones claras al chat y con una pausa mínima de cinco minutos.", message)
-        elif action in {"desactivar", "off", "apagar"}:
-            try:
-                await self.shared_state.set_setting(f"stella_proactive:{room_id}", "0")
-                self._proactive_enabled_cache[room_id] = (time.monotonic() + 60, False)
-            except Exception:
-                await self._reply(room_id, "No pude guardar el ajuste de participación en el almacenamiento compartido. No puedo confirmar que se haya desactivado.", message)
-                return
-            self._proactive_cooldown.pop(room_id, None)
-            await self._reply(room_id, "Participación espontánea desactivada. Volveré a intervenir solo cuando me llamen o me escriban directamente.", message)
-        else:
-            enabled = await self._proactive_enabled(room_id)
-            await self._reply(room_id, f"Participación espontánea: {'activada' if enabled else 'desactivada'}. Usa !presencia activar|desactivar.", message)
+        """Backward-compatible notice: room-wide invitations are handled automatically."""
+        await self._reply(
+            room_id,
+            "Mi participación ya funciona automáticamente: no necesitas activar !presencia. "
+            "Solo intervengo cuando el mensaje invita claramente al chat a opinar o ayudar, "
+            "y mantengo pausas para no saturar la sala. Para detener mis respuestas, usa el "
+            "control de silencio global.",
+            message,
+        )
 
     async def _vector_memory_command(self, room_id, uid, name, args, message):
         action, _, query = args.partition(" ")
@@ -3505,7 +3479,7 @@ class StellaBot:
                 f"{p}ayuda [categoría] · {p}menu · {p}ping · {p}miuid · {p}perfil",
                 f"{p}asistente <consulta> · {p}ia <consulta> · {p}ia estado · {p}ia olvidar",
                 f"{p}memoria conversacion activar|desactivar|olvidar · {p}memoria buscar <consulta>",
-                f"{p}presencia estado|activar|desactivar (ADMIN)",
+                "Continuidad por hilos y temas; roleplay sin mezclar conversaciones ni controlar personajes ajenos.",
                 f"{p}investigar <tema> · {p}analizar <enlace> · {p}analizartexto <modo> <texto>",
                 f"{p}calcular <operación> · {p}traducir <idioma> | <texto> · {p}fecha · {p}zona <Area/Ciudad>",
             ],

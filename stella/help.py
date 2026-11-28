@@ -62,8 +62,9 @@ def _sections(p: str):
             f"▸ {p}memoria borrar <ID> — Elimina un recuerdo guardado.",
             f"▸ {p}memoria desactivar|activar — Controla tu memoria personal en esta sala.",
             "▸ La memoria personal es independiente del archivo cronológico de actividad de la sala.",
-            "▸ Stella puede recuperar mensajes recientes de esta misma sala cuando le hablan o responden.",
-            "▸ Stella no responde a cada mensaje: interviene cuando la llaman, le responden o se usa un comando.",
+            "▸ Stella recupera el hilo citado o el tema relacionado de la misma sala cuando le hablan.",
+            "▸ Stella también puede participar ante invitaciones claras al chat; no necesitas activar !presencia.",
+            "▸ El roleplay mantiene la escena y el personaje de Stella sin controlar personajes ajenos.",
         ]),
     ]
 

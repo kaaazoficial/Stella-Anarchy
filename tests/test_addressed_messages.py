@@ -788,14 +788,14 @@ def test_sleep_social_action_does_not_assume_the_sender_gender():
     assert "dormida" not in b.platform.sent[0][1]
 
 
-def test_proactive_participation_is_off_by_default():
+def test_proactive_participation_works_without_presence_setting():
     b = bot()
     b._proactive_cooldown = {}
     calls = []
 
     async def fake_ask(prompt, *, system=None):
-        calls.append(prompt)
-        return "Yo empezaría comparando las necesidades del proyecto."
+        calls.append((prompt, system))
+        return "Yo empezaría comparando las necesidades y el presupuesto."
 
     b.ai = SimpleNamespace(ask=fake_ask)
 
@@ -807,14 +807,13 @@ def test_proactive_participation_is_off_by_default():
         {"messageId": "msg-1"},
     ))
 
-    assert calls == []
-    assert b.platform.sent == []
+    assert len(calls) == 1
+    assert len(b.platform.sent) == 1
 
 
 def test_proactive_participation_only_answers_clear_room_invitations_and_respects_cooldown():
     b = bot()
     b._proactive_cooldown = {}
-    b.shared_state.values["stella_proactive:room-a"] = "1"
     calls = []
 
     async def fake_ask(prompt, *, system=None):
@@ -837,7 +836,6 @@ def test_proactive_participation_only_answers_clear_room_invitations_and_respect
 def test_proactive_participation_ignores_ordinary_chat_without_an_invitation():
     b = bot()
     b._proactive_cooldown = {}
-    b.shared_state.values["stella_proactive:room-a"] = "1"
     calls = []
 
     async def fake_ask(prompt, *, system=None):
@@ -855,23 +853,12 @@ def test_proactive_participation_ignores_ordinary_chat_without_an_invitation():
 
 
 
-def test_proactive_presence_setting_is_admin_only_and_persisted():
+def test_presence_command_is_only_an_explanatory_compatibility_alias():
     b = bot()
-    b.settings.additional_admin_uids = ""
-    b.settings.admin_uids = "owner"
-    b._proactive_enabled_cache = {}
-    b._proactive_cooldown = {}
-
     asyncio.run(b._stella_presence("room-a", "member", "Persona", "activar", {}))
-    assert b.shared_state.values.get("stella_proactive:room-a") is None
-
-    asyncio.run(b._stella_presence("room-a", "owner", "Owner", "activar", {}))
-    assert b.shared_state.values["stella_proactive:room-a"] == "1"
-    assert asyncio.run(b._proactive_enabled("room-a")) is True
-
-    asyncio.run(b._stella_presence("room-a", "owner", "Owner", "desactivar", {}))
-    assert b.shared_state.values["stella_proactive:room-a"] == "0"
-    assert asyncio.run(b._proactive_enabled("room-a")) is False
+    assert b.platform.sent
+    assert "no necesitas activar !presencia" in b.platform.sent[-1][1].casefold()
+    assert b.shared_state.values == {}
 
 
 
