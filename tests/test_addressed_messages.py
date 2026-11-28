@@ -837,14 +837,15 @@ def test_proactive_participation_only_answers_clear_room_invitations_and_respect
     assert "presupuesto" in b.platform.sent[0][1].casefold()
 
 
-def test_proactive_participation_ignores_ordinary_chat_without_an_invitation():
+def test_proactive_participation_lets_ai_decide_about_ordinary_chat():
     b = bot()
     b._proactive_cooldown = {}
+    b._proactive_evaluation_cooldown = {}
     calls = []
 
     async def fake_ask(prompt, *, system=None):
-        calls.append(prompt)
-        return "No debería responder."
+        calls.append((prompt, system))
+        return "[NO_INTERVENIR]"
 
     b.ai = SimpleNamespace(ask=fake_ask)
 
@@ -852,7 +853,114 @@ def test_proactive_participation_ignores_ordinary_chat_without_an_invitation():
         "room-a", "member", "Alex", "Hoy estoy jugando Minecraft con mis amigos.", {}
     ))
 
+    assert len(calls) == 1
+    assert "integrante más" in calls[0][1].casefold()
+    assert b.platform.sent == []
+
+
+def test_proactive_participation_reacts_to_social_updates_as_a_peer():
+    b = bot()
+    b._proactive_cooldown = {}
+    b._proactive_evaluation_cooldown = {}
+    calls = []
+
+    async def fake_ask(prompt, *, system=None):
+        calls.append((prompt, system))
+        return "¿En serio? ¿Qué fue lo que más te gustó?"
+
+    b.ai = SimpleNamespace(ask=fake_ask)
+
+    asyncio.run(b._maybe_proactive_reply(
+        "room-a", "member", "Alex",
+        "Ayer descubrí una banda que tiene canciones buenísimas.",
+        {"messageId": "social-1"},
+    ))
+
+    assert len(calls) == 1
+    assert len(b.platform.sent) == 1
+    assert "integrante más" in calls[0][1].casefold() or "integrante más" in calls[0][1].casefold()
+
+
+
+def test_proactive_reply_does_not_enter_a_two_person_reply_chain():
+    b = bot()
+    b._proactive_cooldown = {}
+    b._proactive_evaluation_cooldown = {}
+    calls = []
+
+    class Archive:
+        async def recent_room_context(self, room, *, limit=24):
+            return [{
+                "message_id": "root",
+                "actor_uid": "member-a",
+                "content": "Estoy pensando en cambiar el nombre del proyecto.",
+                "reply_to_message_id": "",
+                "occurred_at_ms": 1_800_000_000_000,
+            }]
+
+    async def fake_ask(prompt, *, system=None):
+        calls.append(prompt)
+        return "[NO_INTERVENIR]"
+
+    b.room_archive = Archive()
+    b.ai = SimpleNamespace(ask=fake_ask)
+
+    asyncio.run(b._maybe_proactive_reply(
+        "room-a", "member-b", "Alex",
+        "La verdad, yo mantendría el nombre actual.",
+        {"messageId": "reply-1", "replyMessageId": "root"},
+    ))
+
     assert calls == []
+    assert b.platform.sent == []
+
+
+def test_proactive_reply_can_consider_a_reply_chain_with_three_members():
+    b = bot()
+    b._proactive_cooldown = {}
+    b._proactive_evaluation_cooldown = {}
+    calls = []
+
+    class Archive:
+        async def recent_room_context(self, room, *, limit=24):
+            return [
+                {
+                    "message_id": "reply-2",
+                    "actor_uid": "member-a",
+                    "content": "Yo elegiría la segunda opción.",
+                    "reply_to_message_id": "reply-1",
+                    "occurred_at_ms": 1_800_000_000_002,
+                },
+                {
+                    "message_id": "reply-1",
+                    "actor_uid": "member-b",
+                    "content": "La primera alternativa tiene más limitaciones.",
+                    "reply_to_message_id": "root",
+                    "occurred_at_ms": 1_800_000_000_001,
+                },
+                {
+                    "message_id": "root",
+                    "actor_uid": "member-a",
+                    "content": "¿Qué opción les parece mejor?",
+                    "reply_to_message_id": "",
+                    "occurred_at_ms": 1_800_000_000_000,
+                },
+            ]
+
+    async def fake_ask(prompt, *, system=None):
+        calls.append((prompt, system))
+        return "[NO_INTERVENIR]"
+
+    b.room_archive = Archive()
+    b.ai = SimpleNamespace(ask=fake_ask)
+
+    asyncio.run(b._maybe_proactive_reply(
+        "room-a", "member-c", "Sam",
+        "Yo también creo que la segunda es más práctica.",
+        {"messageId": "reply-3", "replyMessageId": "reply-2"},
+    ))
+
+    assert len(calls) == 1
     assert b.platform.sent == []
 
 
@@ -1194,4 +1302,4 @@ def test_proactive_participation_accepts_a_natural_opinion_invitation():
     assert len(b.platform.sent) == 1
     assert b.platform.sent[0][1].startswith("[C] ")
     assert b.platform.sent[0][1].endswith("La segunda opción me parece más práctica para empezar.")
-    assert "participante más" in calls[0][1].casefold()
+    assert "integrante más" in calls[0][1].casefold()

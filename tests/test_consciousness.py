@@ -109,5 +109,5 @@ def test_initiative_accepts_natural_opinion_openings():
     mind = StellaConsciousness()
     assert mind.should_initiate("¿Qué les parece esta propuesta para la comunidad?")
     assert mind.should_initiate("Necesito algunas ideas para organizar la actividad.")
-    assert not mind.should_initiate("Hoy jugué Minecraft con mis amigos.")
+    assert mind.should_initiate("Hoy jugué Minecraft con mis amigos.")
     assert not mind.should_initiate("Estoy muy triste y no sé qué hacer.")
