@@ -14,7 +14,7 @@ from typing import Any
 
 from stella.ai import StellaAI
 from stella.consciousness import StellaConsciousness
-from stella.conversation_context import is_clear_invitation, select_conversation_events
+from stella.conversation_context import is_clear_invitation, is_socially_engageable, select_conversation_events
 from stella.vector_memory import VectorMemory
 from stella.room_archive import RoomArchive
 from stella.ai_memory import QdrantConversationMemory
