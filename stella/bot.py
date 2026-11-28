@@ -723,7 +723,8 @@ class StellaBot:
         clock = time.monotonic() if now is None else float(now)
         if await self._global_chat_silenced():
             return False
-        if clock - float(getattr(self, "_social_autonomy_global_last_sent", 0.0)) < 35.0:
+        global_last_sent = float(getattr(self, "_social_autonomy_global_last_sent", 0.0))
+        if global_last_sent > 0.0 and clock - global_last_sent < 35.0:
             return False
 
         rooms = getattr(self, "_social_room_activity", {})
@@ -739,7 +740,8 @@ class StellaBot:
                 continue
             if clock - float(state.get("last_evaluated_at", 0.0)) < 75.0:
                 continue
-            if clock - float(state.get("last_spoke_at", 0.0)) < 240.0:
+            last_spoke_at = float(state.get("last_spoke_at", 0.0))
+            if last_spoke_at > 0.0 and clock - last_spoke_at < 240.0:
                 continue
             if float(getattr(self, "_proactive_cooldown", {}).get(room_id, 0.0)) > clock:
                 continue
