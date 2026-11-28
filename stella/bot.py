@@ -30,10 +30,7 @@ from stella.music_voice import MusicVoice
 from stella.storage import Store
 from stella.shared_state import QdrantSharedState
 from stella.extra_commands import calculate, datetime_text, CalculationError
-from stella.help import (
-    build_commands_help_text, build_commands_help_blocks,
-    build_admin_commands_help_text, filter_commands_help_text,
-)
+from stella.help import build_commands_help_text, build_commands_help_blocks, filter_commands_help_text
 from stella.identity import extract_stella_call, detect_affectionate_expression
 from stella.nexus import interpret_natural_request
 from stella.matching import suggest_command
@@ -77,16 +74,9 @@ def archive_event_type(event_type: str) -> str:
     return _ARCHIVE_EVENT_TYPES.get(normalized, f"anarchy.{normalized or 'unknown'}")
 
 _PRIVATE_ADMIN_COMMANDS = AI_ADMIN_COMMANDS | frozenset({
-    "admin", "centro", "nexus", "paneladmin",
-    "estado", "status", "sistema", "diagnostico",
-    "fuentes", "saludfuentes", "metricas", "rendimiento",
-    "autotest", "laboratorio",
-    "advertir", "warn", "advertencias", "warnings",
-    "quitaradvertencia", "unwarn", "antispam",
-    "respuesta", "respuestas", "perfilbot", "avatarbot",
-    "eliminarmensajes", "historial",
-    "idbot", "botid", "identidadbot", "salas",
-    "silenciarchat", "hablarchat", "despertar", "mencionar", "mention",
+    "status", "warn", "warnings", "unwarn", "idbot", "botid",
+    "identidadbot", "salas", "silenciarchat", "hablarchat",
+    "despertar", "saludfuentes",
 })
 
 
@@ -2501,12 +2491,8 @@ class StellaBot:
         handler = routes.get(command)
         if command in _PRIVATE_ADMIN_COMMANDS:
             authorized = self._is_admin(uid)
+            message["_stella_admin_silent"] = True
             _audit_admin_operation(command, room_id, authorized)
-            # Admin commands must remain usable by their authorized operator.
-            # Anarchy has no private bot-DM endpoint, so authorized results are
-            # returned in the invoking room; unauthorized attempts stay silent.
-            if not authorized:
-                message["_stella_admin_silent"] = True
         if handler is None:
             suggestion = suggest_command(command, set(routes) | social_actions)
             if suggestion:
@@ -3396,18 +3382,14 @@ class StellaBot:
 
     async def _help_command(self, room_id, uid, name, args, message):
         prefix = self.settings.command_prefix
-        topic = args.strip().casefold()
-        if topic in {"admin", "administracion", "administración", "moderacion", "moderación"}:
-            if not self._is_admin(uid):
-                await self._reply(room_id, "La sección administrativa solo está disponible para UIDs autorizados.", message)
-                return
-            await self._reply(room_id, build_admin_commands_help_text(prefix), message)
-            return
+        # Never publish the administrative catalogue into a shared room,
+        # even when an administrator requests the public help menu.
+        include_admin = False
         if args.strip():
             text = build_commands_help_text(prefix)
             await self._reply(
                 room_id,
-                filter_commands_help_text(text, args),
+                filter_commands_help_text(text, args, include_admin=include_admin),
                 message,
             )
             return
@@ -3415,12 +3397,6 @@ class StellaBot:
         await self._reply(room_id, blocks[0], message)
         for block in blocks[1:]:
             await self.platform.send_message(room_id, format_stella_text(block)[:1800])
-        # The public six-page guide stays public; only an authorized operator
-        # receives the additional administration catalogue.
-        if self._is_admin(uid):
-            await self.platform.send_message(
-                room_id, format_stella_text(build_admin_commands_help_text(prefix))[:1800]
-            )
 
     async def _ping(self, room_id, uid, name, args, message):
         await self._reply(room_id, "Pong. Stella está activa.", message)

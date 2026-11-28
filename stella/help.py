@@ -88,7 +88,7 @@ def build_admin_commands_help_text(prefix: str = "!") -> str:
         f"▸ {p}miuid — Consulta tu UID para verificar la autorización.",
         "▸ Los resultados administrativos se muestran en la sala donde se ejecuta el comando. Los intentos no autorizados no reciben respuesta.",
     ]
-    return "\\n".join([
+    return "\n".join([
         "[CB] ✦ STELLA · ADMINISTRACIÓN ✦",
         "[C] Solo visible para UIDs autorizados.",
         SEPARATOR,
