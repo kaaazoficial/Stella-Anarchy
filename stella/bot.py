@@ -3159,7 +3159,7 @@ class StellaBot:
             prefix = getattr(getattr(self, "settings", None), "command_prefix", "!")
             await self._reply(
                 room_id,
-                f"Uso: {prefix}regalarpuntos @usuario <cantidad>. No tiene límite de economía; solo el máximo entero de la base de datos.",
+                f"Uso: {prefix}regalarpuntos @usuario <cantidad>. Puedes regalar una cantidad arbitrariamente grande de puntos.",
                 message,
             )
             return
@@ -3169,9 +3169,6 @@ class StellaBot:
         amount = int(amount_match.group(1))
         if amount <= 0:
             await self._reply(room_id, "La cantidad debe ser mayor que cero.", message)
-            return
-        if amount > 9223372036854775807:
-            await self._reply(room_id, "La cantidad supera el máximo entero que admite el almacenamiento.", message)
             return
         status, balance = self.store.grant_points(target[0], target[1], amount)
         if status == "overflow":

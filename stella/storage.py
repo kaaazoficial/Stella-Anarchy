@@ -1,12 +1,17 @@
 from __future__ import annotations
 
 import sqlite3
+import sys
 import time
 from datetime import date
 from pathlib import Path
 from typing import Any
 
 WARNING_RETENTION_DAYS = 90
+MAX_SQLITE_INTEGER = 9223372036854775807
+
+if hasattr(sys, "set_int_max_str_digits"):
+    sys.set_int_max_str_digits(0)
 
 
 class Store:
@@ -45,6 +50,7 @@ class Store:
                     bio TEXT NOT NULL DEFAULT '',
                     status TEXT NOT NULL DEFAULT '',
                     points INTEGER NOT NULL DEFAULT 0,
+                    points_text TEXT NOT NULL DEFAULT '0',
                     created_at REAL NOT NULL,
                     last_seen REAL NOT NULL,
                     profile_updated_at REAL
@@ -193,6 +199,33 @@ class Store:
                 CREATE INDEX IF NOT EXISTS idx_point_wagers_pending ON point_wagers(room_id,status,expires_at);
                 """
             )
+            columns = {row["name"] for row in db.execute("PRAGMA table_info(users)")}
+            if "points_text" not in columns:
+                db.execute("ALTER TABLE users ADD COLUMN points_text TEXT NOT NULL DEFAULT '0'")
+                db.execute("UPDATE users SET points_text=CAST(points AS TEXT)")
+            db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_users_points_text ON users(length(points_text) DESC, points_text DESC)"
+            )
+
+    @staticmethod
+    def _read_points(row: sqlite3.Row | dict[str, Any]) -> int:
+        exact = str(row["points_text"]) if "points_text" in row.keys() else "0"
+        legacy = int(row["points"]) if "points" in row.keys() else 0
+        if exact == "0" and legacy != 0:
+            return legacy
+        return int(exact or "0")
+
+    @staticmethod
+    def _write_points(db: sqlite3.Connection, uid: str, value: int, *, now: float | None = None) -> None:
+        exact = int(value)
+        legacy = min(exact, MAX_SQLITE_INTEGER)
+        if now is None:
+            db.execute("UPDATE users SET points=?,points_text=? WHERE uid=?", (legacy, str(exact), str(uid)))
+        else:
+            db.execute(
+                "UPDATE users SET points=?,points_text=?,last_seen=? WHERE uid=?",
+                (legacy, str(exact), float(now), str(uid)),
+            )
 
     def cleanup_expired(self, now: float | None = None) -> dict[str, int]:
         from stella.retention import cleanup_database_retention
@@ -215,10 +248,14 @@ class Store:
     def get_profile(self, uid: str) -> dict[str, Any] | None:
         with self._session(self.connect()) as db:
             row = db.execute(
-                "SELECT uid,nickname,bio,status,points,created_at,last_seen FROM users WHERE uid=?",
+                "SELECT uid,nickname,bio,status,points,points_text,created_at,last_seen FROM users WHERE uid=?",
                 (str(uid),),
             ).fetchone()
-            return dict(row) if row else None
+            if not row:
+                return None
+            profile = dict(row)
+            profile["points"] = self._read_points(row)
+            return profile
 
     def update_profile(self, uid: str, *, bio: str | None = None, status: str | None = None) -> bool:
         fields = []
@@ -239,92 +276,83 @@ class Store:
 
     def points_balance(self, uid: str) -> int:
         with self._session(self.connect()) as db:
-            row = db.execute("SELECT points FROM users WHERE uid=?", (str(uid),)).fetchone()
-            return int(row["points"]) if row else 0
+            row = db.execute("SELECT points,points_text FROM users WHERE uid=?", (str(uid),)).fetchone()
+            return self._read_points(row) if row else 0
 
     def claim_reward(self, uid: str, action: str, amount: int, cooldown: float) -> tuple[bool, int]:
-        """Atomically claim a positive reward once per cooldown.
-
-        A missing profile returns (False, -1); an overflowing balance returns
-        (False, -2). Positive cooldowns and rewards are required.
-        """
         try:
-            reward = int(amount)
-            wait = float(cooldown)
+            reward, wait = int(amount), float(cooldown)
         except (TypeError, ValueError, OverflowError):
             return False, -1
         if not str(uid).strip() or not str(action).strip() or reward <= 0 or wait <= 0:
             return False, -1
-        if reward > 9223372036854775807:
-            return False, -2
         now = time.time()
         with self._session(self.connect()) as db:
             db.execute("BEGIN IMMEDIATE")
-            user = db.execute("SELECT points FROM users WHERE uid=?", (str(uid),)).fetchone()
+            user = db.execute("SELECT points,points_text FROM users WHERE uid=?", (str(uid),)).fetchone()
             if not user:
                 return False, -1
-            balance = int(user["points"])
-            if balance > 9223372036854775807 - reward:
-                return False, -2
+            balance = self._read_points(user)
             row = db.execute(
                 "SELECT claimed_at FROM reward_claims WHERE uid=? AND action=?",
                 (str(uid), str(action)),
             ).fetchone()
             if row and now - float(row["claimed_at"]) < wait:
                 return False, max(1, int(wait - (now - float(row["claimed_at"]))))
+            new_balance = balance + reward
             db.execute(
                 """INSERT INTO reward_claims(uid,action,claimed_at) VALUES(?,?,?)
                    ON CONFLICT(uid,action) DO UPDATE SET claimed_at=excluded.claimed_at""",
                 (str(uid), str(action), now),
             )
-            db.execute(
-                "UPDATE users SET points=points+?,last_seen=? WHERE uid=?",
-                (reward, now, str(uid)),
-            )
-            return True, balance + reward
+            self._write_points(db, uid, new_balance, now=now)
+            return True, new_balance
 
     def grant_points(self, uid: str, nickname: str, amount: int) -> tuple[str, int]:
-        """Atomically create/update a member balance with owner-granted points."""
         try:
             value = int(amount)
         except (TypeError, ValueError, OverflowError):
             return "invalid", 0
-        if not str(uid).strip() or value <= 0 or value > 9223372036854775807:
+        if not str(uid).strip() or value <= 0:
             return "invalid", 0
         now = time.time()
         with self._session(self.connect()) as db:
             db.execute("BEGIN IMMEDIATE")
-            row = db.execute("SELECT points FROM users WHERE uid=?", (str(uid),)).fetchone()
+            row = db.execute("SELECT points,points_text FROM users WHERE uid=?", (str(uid),)).fetchone()
             if row:
-                balance = int(row["points"])
-                if balance > 9223372036854775807 - value:
-                    return "overflow", balance
-                balance += value
+                balance = self._read_points(row) + value
                 db.execute(
-                    "UPDATE users SET points=?,nickname=?,last_seen=? WHERE uid=?",
-                    (balance, str(nickname)[:80] or "Usuario", now, str(uid)),
+                    "UPDATE users SET nickname=?,last_seen=? WHERE uid=?",
+                    (str(nickname)[:80] or "Usuario", now, str(uid)),
                 )
+                self._write_points(db, uid, balance, now=now)
                 return "ok", balance
             db.execute(
-                """INSERT INTO users(uid,nickname,points,created_at,last_seen)
-                   VALUES(?,?,?,?,?)""",
-                (str(uid), str(nickname)[:80] or "Usuario", value, now, now),
+                """INSERT INTO users(uid,nickname,points,points_text,created_at,last_seen)
+                   VALUES(?,?,?,?,?,?)""",
+                (str(uid), str(nickname)[:80] or "Usuario",
+                 min(value, MAX_SQLITE_INTEGER), str(value), now, now),
             )
             return "ok", value
 
     def transfer_points(self, sender_uid: str, target_uid: str, amount: int) -> str:
-        if amount <= 0 or sender_uid == target_uid:
+        try:
+            value = int(amount)
+        except (TypeError, ValueError, OverflowError):
+            return "invalid"
+        if value <= 0 or sender_uid == target_uid:
             return "invalid"
         with self._session(self.connect()) as db:
             db.execute("BEGIN IMMEDIATE")
-            sender = db.execute("SELECT points FROM users WHERE uid=?", (str(sender_uid),)).fetchone()
-            target = db.execute("SELECT uid FROM users WHERE uid=?", (str(target_uid),)).fetchone()
+            sender = db.execute("SELECT points,points_text FROM users WHERE uid=?", (str(sender_uid),)).fetchone()
+            target = db.execute("SELECT points,points_text FROM users WHERE uid=?", (str(target_uid),)).fetchone()
             if not sender or not target:
                 return "missing"
-            if int(sender["points"]) < amount:
+            sender_balance = self._read_points(sender)
+            if sender_balance < value:
                 return "insufficient"
-            db.execute("UPDATE users SET points=points-? WHERE uid=?", (amount, str(sender_uid)))
-            db.execute("UPDATE users SET points=points+? WHERE uid=?", (amount, str(target_uid)))
+            self._write_points(db, sender_uid, sender_balance - value)
+            self._write_points(db, target_uid, self._read_points(target) + value)
             return "ok"
 
     @staticmethod
@@ -334,7 +362,11 @@ class Store:
             (now,),
         ).fetchall()
         for row in rows:
-            db.execute("UPDATE users SET points=points+? WHERE uid=?", (int(row["stake"]), row["challenger_uid"]))
+            user = db.execute(
+                "SELECT points,points_text FROM users WHERE uid=?", (str(row["challenger_uid"]),)
+            ).fetchone()
+            if user:
+                Store._write_points(db, row["challenger_uid"], Store._read_points(user) + int(row["stake"]))
             db.execute("UPDATE point_wagers SET status='expired',settled_at=? WHERE id=?", (now, int(row["id"])))
         return len(rows)
 
@@ -346,14 +378,14 @@ class Store:
         with self._session(self.connect()) as db:
             db.execute("BEGIN IMMEDIATE")
             self._expire_point_wagers(db, now)
-            challenger = db.execute("SELECT points FROM users WHERE uid=?", (str(challenger_uid),)).fetchone()
+            challenger = db.execute("SELECT points,points_text FROM users WHERE uid=?", (str(challenger_uid),)).fetchone()
             target = db.execute("SELECT uid FROM users WHERE uid=?", (str(target_uid),)).fetchone()
             if not challenger or not target:
-                return "missing", 0, int(challenger["points"]) if challenger else 0
-            balance = int(challenger["points"])
+                return "missing", 0, self._read_points(challenger) if challenger else 0
+            balance = self._read_points(challenger)
             if balance < stake:
                 return "insufficient", 0, balance
-            db.execute("UPDATE users SET points=points-?,last_seen=? WHERE uid=?", (stake, now, str(challenger_uid)))
+            self._write_points(db, challenger_uid, balance - stake, now=now)
             cursor = db.execute(
                 """INSERT INTO point_wagers(room_id,challenger_uid,challenger_name,target_uid,target_name,stake,created_at,expires_at)
                    VALUES(?,?,?,?,?,?,?,?)""",
@@ -376,21 +408,27 @@ class Store:
                 return "closed", wager
             if str(wager["target_uid"]) != str(target_uid):
                 return "not_target", wager
-            target = db.execute("SELECT points FROM users WHERE uid=?", (str(target_uid),)).fetchone()
+            target = db.execute("SELECT points,points_text FROM users WHERE uid=?", (str(target_uid),)).fetchone()
             if not target:
                 return "missing_user", wager
-            if int(target["points"]) < int(wager["stake"]):
-                return "insufficient", wager
             stake = int(wager["stake"])
-            db.execute("UPDATE users SET points=points-?,last_seen=? WHERE uid=?", (stake, now, str(target_uid)))
+            target_balance = self._read_points(target)
+            if target_balance < stake:
+                return "insufficient", wager
+            challenger_uid = str(wager["challenger_uid"])
+            challenger = db.execute("SELECT points,points_text FROM users WHERE uid=?", (challenger_uid,)).fetchone()
+            if not challenger:
+                return "missing_user", wager
+            self._write_points(db, target_uid, target_balance - stake, now=now)
+            challenger_balance = self._read_points(challenger)
             if challenger_roll == target_roll:
-                db.execute("UPDATE users SET points=points+? WHERE uid IN (?,?)",
-                           (stake, str(wager["challenger_uid"]), str(target_uid)))
-                winner_uid = None
-                status = "tie"
+                self._write_points(db, challenger_uid, challenger_balance + stake, now=now)
+                self._write_points(db, target_uid, target_balance, now=now)
+                winner_uid, status = None, "tie"
             else:
-                winner_uid = str(wager["challenger_uid"] if challenger_roll > target_roll else target_uid)
-                db.execute("UPDATE users SET points=points+? WHERE uid=?", (stake * 2, winner_uid))
+                winner_uid = challenger_uid if challenger_roll > target_roll else str(target_uid)
+                winning_balance = challenger_balance if winner_uid == challenger_uid else target_balance - stake
+                self._write_points(db, winner_uid, winning_balance + stake * 2, now=now)
                 status = "settled"
             db.execute(
                 """UPDATE point_wagers SET status=?,challenger_roll=?,target_roll=?,winner_uid=?,settled_at=? WHERE id=?""",
@@ -413,7 +451,9 @@ class Store:
                 return "closed", wager
             if str(wager["target_uid"]) != str(target_uid):
                 return "not_target", wager
-            db.execute("UPDATE users SET points=points+? WHERE uid=?", (int(wager["stake"]), wager["challenger_uid"]))
+            user = db.execute("SELECT points,points_text FROM users WHERE uid=?", (str(wager["challenger_uid"]),)).fetchone()
+            if user:
+                self._write_points(db, wager["challenger_uid"], self._read_points(user) + int(wager["stake"]))
             db.execute("UPDATE point_wagers SET status='rejected',settled_at=? WHERE id=?", (now, int(wager_id)))
             wager["status"] = "rejected"
             return "ok", wager
@@ -428,31 +468,28 @@ class Store:
             return [dict(row) for row in rows]
 
     def settle_roulette(self, uid: str, wager: int, payout: int) -> tuple[str, int]:
-        """Atomically debit a roulette stake and credit its gross payout."""
         if wager <= 0 or payout < 0 or wager > 100000 or payout > 3600000:
             return "invalid", self.points_balance(uid)
         with self._session(self.connect()) as db:
             db.execute("BEGIN IMMEDIATE")
-            row = db.execute("SELECT points FROM users WHERE uid=?", (str(uid),)).fetchone()
+            row = db.execute("SELECT points,points_text FROM users WHERE uid=?", (str(uid),)).fetchone()
             if not row:
                 return "missing", 0
-            balance = int(row["points"])
+            balance = self._read_points(row)
             if balance < wager:
                 return "insufficient", balance
             new_balance = balance - wager + payout
-            db.execute(
-                "UPDATE users SET points=?,last_seen=? WHERE uid=?",
-                (new_balance, time.time(), str(uid)),
-            )
+            self._write_points(db, uid, new_balance, now=time.time())
             return "ok", new_balance
 
     def points_ranking(self, limit: int = 10) -> list[dict[str, Any]]:
         with self._session(self.connect()) as db:
             rows = db.execute(
-                "SELECT nickname,points FROM users ORDER BY points DESC,last_seen DESC LIMIT ?",
+                """SELECT nickname,points,points_text FROM users
+                   ORDER BY length(points_text) DESC,points_text DESC,last_seen DESC LIMIT ?""",
                 (max(1, min(20, int(limit))),),
             ).fetchall()
-            return [dict(row) for row in rows]
+            return [{"nickname": row["nickname"], "points": self._read_points(row)} for row in rows]
 
     def add_affinity(self, uid: str, target_uid: str, amount: int = 1) -> int:
         if uid == target_uid:
