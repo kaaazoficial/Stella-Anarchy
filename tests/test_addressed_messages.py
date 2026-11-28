@@ -837,14 +837,15 @@ def test_proactive_participation_only_answers_clear_room_invitations_and_respect
     assert "presupuesto" in b.platform.sent[0][1].casefold()
 
 
-def test_proactive_participation_ignores_ordinary_chat_without_an_invitation():
+def test_proactive_participation_lets_ai_decide_about_ordinary_chat():
     b = bot()
     b._proactive_cooldown = {}
+    b._proactive_evaluation_cooldown = {}
     calls = []
 
     async def fake_ask(prompt, *, system=None):
-        calls.append(prompt)
-        return "No debería responder."
+        calls.append((prompt, system))
+        return "[NO_INTERVENIR]"
 
     b.ai = SimpleNamespace(ask=fake_ask)
 
@@ -852,8 +853,32 @@ def test_proactive_participation_ignores_ordinary_chat_without_an_invitation():
         "room-a", "member", "Alex", "Hoy estoy jugando Minecraft con mis amigos.", {}
     ))
 
-    assert calls == []
+    assert len(calls) == 1
+    assert "integrante más" in calls[0][1].casefold()
     assert b.platform.sent == []
+
+
+def test_proactive_participation_reacts_to_social_updates_as_a_peer():
+    b = bot()
+    b._proactive_cooldown = {}
+    b._proactive_evaluation_cooldown = {}
+    calls = []
+
+    async def fake_ask(prompt, *, system=None):
+        calls.append((prompt, system))
+        return "¿En serio? ¿Qué fue lo que más te gustó?"
+
+    b.ai = SimpleNamespace(ask=fake_ask)
+
+    asyncio.run(b._maybe_proactive_reply(
+        "room-a", "member", "Alex",
+        "Ayer descubrí una banda que tiene canciones buenísimas.",
+        {"messageId": "social-1"},
+    ))
+
+    assert len(calls) == 1
+    assert len(b.platform.sent) == 1
+    assert "participante más" in calls[0][1].casefold() or "integrante más" in calls[0][1].casefold()
 
 
 
