@@ -705,23 +705,45 @@ class StellaBot:
             message.get(key) for key in reply_keys
         )
         if has_reply:
-            # A direct two-person exchange is private in practice. Stella may
-            # join a reply chain only when several members are already active.
+            # Count participants in this exact reply chain, not in unrelated
+            # room traffic, so Stella does not enter a private two-person chat.
+            parent_id = ""
+            for key in reply_keys:
+                parent_id = str(message.get(key) or "").strip()
+                if parent_id:
+                    break
+            if not parent_id:
+                for reference in self._reply_reference_objects(message):
+                    parent_id = str(
+                        reference.get("messageId") or reference.get("message_id")
+                        or reference.get("id") or ""
+                    ).strip()
+                    if parent_id:
+                        break
+            if not parent_id:
+                return
             archive = getattr(self, "room_archive", None)
             reader = getattr(archive, "recent_room_context", None)
             if not callable(reader):
                 return
             try:
                 recent = await asyncio.wait_for(
-                    reader(str(room_id), limit=18),
+                    reader(str(room_id), limit=24),
                     timeout=0.45,
                 )
             except Exception as exc:
                 log.debug("Proactive group context unavailable (%s).", type(exc).__name__)
                 return
+            chain = select_conversation_events(
+                recent if isinstance(recent, list) else [],
+                query=text,
+                actor_uid=str(uid),
+                reply_to_message_id=parent_id,
+                limit=12,
+            )
             participants = {
                 str(item.get("actor_uid") or "").strip()
-                for item in recent if isinstance(item, dict)
+                for item in chain if isinstance(item, dict)
                 and str(item.get("actor_uid") or "").strip()
             }
             participants.add(str(uid))
