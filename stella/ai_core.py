@@ -801,8 +801,13 @@ def compact_provider_messages(
 ) -> list[dict[str, str]]:
     """Compact request history only; preserve the current user turn and all tools."""
     is_groq = str(provider or "").casefold() == "groq"
-    env_name = "GROQ_MAX_INPUT_TOKENS" if is_groq else "GEMINI_MAX_INPUT_TOKENS"
-    default_budget = 3600 if is_groq else 5200
+    is_zai = str(provider or "").casefold() in {"z.ai", "zai"}
+    env_name = (
+        "GROQ_MAX_INPUT_TOKENS" if is_groq
+        else "ZAI_MAX_INPUT_TOKENS" if is_zai
+        else "GEMINI_MAX_INPUT_TOKENS"
+    )
+    default_budget = 3600 if (is_groq or is_zai) else 5200
     try:
         budget = int(max_input_tokens or os.getenv(env_name, str(default_budget)))
     except (TypeError, ValueError):
@@ -814,7 +819,7 @@ def compact_provider_messages(
         if not isinstance(turn, dict) or turn.get("role") not in {"user", "assistant"}:
             continue
         content = str(turn.get("content") or "")
-        if is_groq:
+        if is_groq or is_zai:
             content = _compact_untrusted_context_blocks(content, max_chars=700)
         normalized.append({"role": str(turn["role"]), "content": content})
     if not normalized:
@@ -1163,8 +1168,19 @@ class StellaAICore:
             ).strip(),
         }
 
+    def _zai_provider_config(self) -> dict[str, str]:
+        return {
+            "name": "Z.AI",
+            "key": os.getenv("ZAI_API_KEY", "").strip(),
+            "url": (
+                os.getenv("ZAI_API_URL")
+                or "https://api.z.ai/api/paas/v4"
+            ).strip(),
+            "model": (os.getenv("ZAI_MODEL") or "glm-4.7-flash").strip(),
+        }
+
     def _primary_provider_config(self) -> dict[str, str]:
-        """Choose Gemini whenever its credential is present; Groq is fallback only."""
+        """Choose Gemini first, Groq second and Z.AI when no earlier key exists."""
         gemini = self._gemini_provider_config()
         if gemini["key"] and gemini["url"] and gemini["model"]:
             # A stale STELLA_AI_PRIMARY_PROVIDER=groq must never silently
@@ -1180,6 +1196,10 @@ class StellaAICore:
         groq = self._groq_provider_config()
         if primary_setting == "groq" or groq["key"]:
             return groq
+
+        zai = self._zai_provider_config()
+        if primary_setting in {"zai", "z.ai"} or zai["key"]:
+            return zai
 
         # Backward compatibility for deployments with one legacy STELLA_AI_* provider.
         legacy_url = (
@@ -1209,15 +1229,36 @@ class StellaAICore:
             "model": (os.getenv("STELLA_AI_MODEL") or "gpt-5.4-mini").strip(),
         }
 
-    def _fallback_provider_config(self) -> dict[str, str] | None:
+    def _fallback_provider_configs(self) -> list[dict[str, str]]:
+        """Return every configured alternative in deterministic fallback order."""
         primary = self._primary_provider_config()
-        if primary["name"] == "Google Gemini":
-            fallback = self._groq_provider_config()
-        elif primary["name"] == "Groq":
-            fallback = self._gemini_provider_config()
-        else:
-            return None
-        return fallback if fallback["key"] and fallback["url"] and fallback["model"] else None
+        candidates = [
+            self._groq_provider_config(),
+            self._zai_provider_config(),
+            self._gemini_provider_config(),
+        ]
+        # Keep the existing Gemini -> Groq order, then add Z.AI as a third option.
+        if primary["name"] == "Groq":
+            candidates = [self._gemini_provider_config(), self._zai_provider_config()]
+        elif primary["name"] == "Z.AI":
+            candidates = [self._gemini_provider_config(), self._groq_provider_config()]
+        elif primary["name"] == "Google Gemini":
+            candidates = [self._groq_provider_config(), self._zai_provider_config()]
+        configured: list[dict[str, str]] = []
+        seen = {primary["name"]}
+        for config in candidates:
+            name = config.get("name", "")
+            if name in seen:
+                continue
+            if config.get("key") and config.get("url") and config.get("model"):
+                configured.append(config)
+                seen.add(name)
+        return configured
+
+    def _fallback_provider_config(self) -> dict[str, str] | None:
+        """Backwards-compatible first fallback accessor."""
+        candidates = self._fallback_provider_configs()
+        return candidates[0] if candidates else None
 
     def _active_provider_config(self) -> dict[str, str]:
         return self._provider_override.get() or self._primary_provider_config()
@@ -1225,6 +1266,10 @@ class StellaAICore:
     def _provider_request_url(self) -> str:
         """Build the native Gemini generateContent URL; keep legacy env values compatible."""
         configured = self.api_url.strip()
+        if self.is_zai:
+            if configured.rstrip("/").endswith("/chat/completions"):
+                return configured.rstrip("/")
+            return f"{configured.rstrip('/')}/chat/completions"
         if not self.is_gemini:
             return configured
         if "{model}" in configured:
@@ -1260,6 +1305,8 @@ class StellaAICore:
             return "Groq"
         if host == "generativelanguage.googleapis.com":
             return "Google Gemini"
+        if host == "api.z.ai" or host.endswith(".z.ai"):
+            return "Z.AI"
         if host == "api.openai.com" or host.endswith(".openai.com"):
             return "OpenAI"
         return self._active_provider_config()["name"]
@@ -1273,19 +1320,23 @@ class StellaAICore:
         return self.provider_name == "Google Gemini"
 
     @property
+    def is_zai(self) -> bool:
+        return self.provider_name.casefold() in {"z.ai", "zai"}
+
+    @property
     def uses_groq_strict_schema(self) -> bool:
         return self.is_groq and self.model.casefold() in GROQ_STRICT_JSON_MODELS
 
     @property
     def is_enabled(self) -> bool:
         primary = self._primary_provider_config()
-        fallback = self._fallback_provider_config()
+        fallbacks = self._fallback_provider_configs()
         override = self._provider_override.get()
         if override:
             return bool(override.get("key") and override.get("url") and override.get("model"))
         return bool(
             (primary["key"] and primary["url"] and primary["model"])
-            or (fallback and fallback["key"] and fallback["url"] and fallback["model"])
+            or bool(fallbacks)
         )
 
     @property
@@ -1335,25 +1386,31 @@ class StellaAICore:
         primary = self._primary_provider_config()
         gemini = self._gemini_provider_config()
         groq = self._groq_provider_config()
+        zai = self._zai_provider_config()
         gemini_state = self._provider_runtime_state.get("Google Gemini", {})
         groq_state = self._provider_runtime_state.get("Groq", {})
+        zai_state = self._provider_runtime_state.get("Z.AI", {})
         last = self._last_provider_summary or self._last_provider_context.get()
         return {
             "primary": primary["name"],
             "primary_model": primary["model"],
             "gemini_configured": bool(gemini["key"] and gemini["url"] and gemini["model"]),
             "groq_configured": bool(groq["key"] and groq["url"] and groq["model"]),
+            "zai_configured": bool(zai["key"] and zai["url"] and zai["model"]),
             "last_successful_provider": str(last.get("name")) if last else None,
             "gemini_successes": int(gemini_state.get("successes", 0) or 0),
             "gemini_failures": int(gemini_state.get("failures", 0) or 0),
             "groq_successes": int(groq_state.get("successes", 0) or 0),
             "groq_failures": int(groq_state.get("failures", 0) or 0),
+            "zai_successes": int(zai_state.get("successes", 0) or 0),
+            "zai_failures": int(zai_state.get("failures", 0) or 0),
             "failovers": int(self.metrics.get("ai_provider_failovers", 0) or 0),
         }
 
     def status(self, thread_id: str | None = None) -> str:
         primary = self._primary_provider_config()
         groq = self._groq_provider_config()
+        zai = self._zai_provider_config()
         last = self._last_provider_summary or self._last_provider_context.get()
         lines = [
             "STELLA · ESTADO",
@@ -1361,6 +1418,7 @@ class StellaAICore:
             "PROVEEDORES:",
             self._provider_status_line(primary),
             self._provider_status_line(groq),
+            self._provider_status_line(zai),
             (
                 f"Última respuesta completada: {last['name']} · {last['model']}."
                 if last else "Última respuesta completada: ninguna en este proceso."
@@ -2024,6 +2082,23 @@ class StellaAICore:
         return "\n".join(part for part in chunks if part).strip()
 
     @staticmethod
+    def _extract_zai_chat_completion_text(payload: dict[str, Any]) -> str:
+        choices = payload.get("choices") or []
+        if not choices or not isinstance(choices[0], dict):
+            raise RuntimeError("Z.AI no devolvió ninguna opción.")
+        message = choices[0].get("message") or {}
+        content = message.get("content", "")
+        if isinstance(content, str):
+            return content.strip()
+        if isinstance(content, list):
+            return "\\n".join(
+                str(part.get("text") or "")
+                for part in content
+                if isinstance(part, dict) and part.get("type") in {"text", "output_text"}
+            ).strip()
+        return ""
+
+    @staticmethod
     def _extract_output_text(payload: dict[str, Any]) -> str:
         direct = payload.get("output_text")
         if isinstance(direct, str) and direct.strip():
@@ -2054,13 +2129,13 @@ class StellaAICore:
         self._enforce_user_rate_limit(rate_key)
         if str(provider_order or "").casefold() == "gemini_first":
             primary = self._gemini_provider_config()
-            fallback = self._groq_provider_config()
+            candidates = [primary, self._groq_provider_config(), self._zai_provider_config()]
         else:
             primary = self._primary_provider_config()
-            fallback = self._fallback_provider_config()
+            candidates = [primary, *self._fallback_provider_configs()]
         tier = str(difficulty or "standard").upper()
-        prefixes = {"Google Gemini": "GEMINI", "Groq": "GROQ"}
-        for config in (primary, fallback):
+        prefixes = {"Google Gemini": "GEMINI", "Groq": "GROQ", "Z.AI": "ZAI"}
+        for config in candidates:
             if not config:
                 continue
             prefix = prefixes.get(config.get("name", ""))
@@ -2070,14 +2145,14 @@ class StellaAICore:
         providers: list[dict[str, str]] = []
         if primary["key"] and primary["url"] and primary["model"]:
             providers.append(primary)
-        if (
-            fallback
-            and fallback["key"]
-            and fallback["url"]
-            and fallback["model"]
-            and fallback["name"] not in {item["name"] for item in providers}
-        ):
-            providers.append(fallback)
+        for fallback in candidates[1:]:
+            if (
+                fallback["key"]
+                and fallback["url"]
+                and fallback["model"]
+                and fallback["name"] not in {item["name"] for item in providers}
+            ):
+                providers.append(fallback)
         if not providers:
             raise RuntimeError(
                 "IA_NO_CONFIGURADA: configura GEMINI_API_KEY y GROQ_API_KEY."
@@ -2191,6 +2266,11 @@ class StellaAICore:
             GEMINI_ANSWER_SCHEMA if schema_mode == "answer" else GEMINI_ACTION_SCHEMA
         )
         prompt_instructions = instructions
+        if self.is_zai:
+            prompt_instructions += (
+                "\n\nDevuelve exclusivamente un objeto JSON válido. "
+                "Respeta el esquema y no incluyas Markdown ni texto fuera del JSON."
+            )
         if self.is_groq and not self.uses_groq_strict_schema:
             if schema_mode == "answer":
                 prompt_instructions += (
@@ -2256,6 +2336,22 @@ class StellaAICore:
                 ],
                 "generationConfig": generation_config,
             }
+        elif self.is_zai:
+            try:
+                zai_output_limit = int(os.getenv("ZAI_MAX_OUTPUT_TOKENS", "900"))
+            except (TypeError, ValueError):
+                zai_output_limit = 900
+            zai_output_limit = output_limit or max(256, min(2048, zai_output_limit))
+            body = {
+                "model": self.model,
+                "messages": [
+                    {"role": "system", "content": prompt_instructions},
+                    *recent_messages,
+                ],
+                "response_format": {"type": "json_object"},
+                "max_tokens": zai_output_limit,
+                "temperature": 0.6,
+            }
         else:
             body = {
                 "model": self.model,
@@ -2287,7 +2383,7 @@ class StellaAICore:
             output_limit
             if output_limit is not None
             else max(256, min(2048, configured_estimate))
-            if self.is_groq
+            if (self.is_groq or self.is_zai)
             else 900
         )
         estimated_request_tokens = (
@@ -2457,7 +2553,7 @@ class StellaAICore:
                 status_code = getattr(response, "status_code", None)
                 if status_code in {408, 500, 502, 503, 504}:
                     # Skip another slow generation when a secondary provider is ready.
-                    fallback_ready = bool(self._fallback_provider_config()) and (
+                    fallback_ready = bool(self._fallback_provider_configs()) and (
                         self.provider_name == self._primary_provider_config()["name"]
                     )
                     if fallback_ready:
@@ -2500,7 +2596,7 @@ class StellaAICore:
                         self.provider_name,
                     )
                     raise RuntimeError("IA_CUOTA_DIARIA_AGOTADA")
-                fallback_ready = bool(self._fallback_provider_config()) and (
+                fallback_ready = bool(self._fallback_provider_configs()) and (
                     self.provider_name == self._primary_provider_config()["name"]
                 )
                 if fallback_ready:
@@ -2598,6 +2694,8 @@ class StellaAICore:
         raw = (
             self._extract_gemini_generate_content_text(payload)
             if self.is_gemini
+            else self._extract_zai_chat_completion_text(payload)
+            if self.is_zai
             else self._extract_output_text(payload)
         )
         if not raw:
