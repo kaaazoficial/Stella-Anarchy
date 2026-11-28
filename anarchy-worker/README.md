@@ -1,40 +1,46 @@
-# Anarchy — Cloudflare Worker
+# Stella · Cloudflare Workers AI Gateway
 
-Proyecto separado de Stella y Katheryne. Recibe eventos de un bot de comunidad, valida la firma del webhook y genera respuestas con Cloudflare Workers AI.
+Este Worker es un proveedor de inferencia privado para Stella. No es un segundo bot de Anarchy y no recibe webhooks de salas.
 
-## Lo que incluye
+## Arquitectura
 
-- Worker independiente con binding `env.AI` (no requiere clave de Z.AI).
-- Modelo predeterminado `@cf/zai-org/glm-4.7-flash`.
-- Verificación HMAC-SHA256 del cuerpo original y protección contra timestamps antiguos.
-- Modo de respuesta directa y modo REST asíncrono opcional.
-- Sin base de datos, memoria persistente ni almacenamiento de conversaciones.
-- Pruebas automáticas sin llamadas reales a Anarchy o Workers AI.
+`Anarchy → Stella (Render) → este Worker → env.AI.run(GLM-4.7-Flash)`
 
-## Importante antes de conectar el webhook real
+Stella mantiene su identidad, personalidad, memoria, comandos, permisos y lógica de conversación. Render envía el prompt completo a `POST /internal/infer`; el Worker ejecuta el modelo mediante el binding `AI` y devuelve un objeto compatible con OpenAI Chat Completions para que el motor actual de Stella lo procese.
 
-La capa de autenticación es configurable, pero los siguientes detalles deben confirmarse con la documentación oficial de Anarchy antes de habilitar tráfico real: nombre del header de firma, header de timestamp, bytes firmados, URL/ruta de envío y esquema de autorización. No se deben copiar estos valores de otra plataforma.
+## Cloudflare
 
-## Cloudflare Workers Builds desde este monorepo
+- Worker: `anarchy-worker`
+- Directorio raíz: `anarchy-worker`
+- Build command: vacío
+- Deploy command: `npx wrangler deploy`
+- Rama de producción tras fusionar el PR: `main`
+- Binding: Workers AI con nombre `AI`
+- Modelo por defecto: `@cf/zai-org/glm-4.7-flash`
 
-Después de fusionar este cambio, conecta el repositorio `kaaazoficial/Stella-Anarchy` en Cloudflare Workers y configura:
+El binding `env.AI` no requiere una API key de Cloudflare. La única credencial adicional es un secreto compartido propio para impedir que terceros utilicen el endpoint público.
 
-- **Worker name:** `anarchy-worker`
-- **Root directory:** `anarchy-worker`
-- **Build command:** vacío (no hay compilación requerida)
-- **Deploy command:** `npx wrangler deploy`
-- **Branch:** `main`
+## Configuración de secretos
 
-El archivo `wrangler.jsonc` se encuentra dentro de esta carpeta. La configuración define el binding de Workers AI como `AI`.
+Crea un secreto de Worker llamado `STELLA_GATEWAY_TOKEN`. En Render configura:
 
-## Variables y secretos
+- `CLOUDFLARE_AI_GATEWAY_URL=https://anarchy-worker.jeanblanco774.workers.dev/internal/infer`
+- `CLOUDFLARE_AI_GATEWAY_TOKEN`: exactamente el mismo valor del secreto del Worker.
+- `STELLA_AI_PRIMARY_PROVIDER=cloudflare` para usar Cloudflare como proveedor principal.
 
-No subas secretos al repositorio. En Cloudflare, añade `ANARCHY_WEBHOOK_SECRET` como secret del Worker. El token del bot y los ajustes de API solo serán necesarios si se confirma el modo REST. El secreto real se debe cargar después de contrastar el formato de firma de Anarchy.
+No uses una API key de Cloudflare ni publiques este token en GitHub. Conserva Gemini, Groq y Z.AI como proveedores de respaldo.
 
 ## Rutas
 
-- `GET /` estado básico.
-- `GET /health` comprobación de salud.
-- `POST /webhook` recepción de eventos firmados.
+- `GET /health`: comprueba que el Worker y sus bindings estén presentes.
+- `POST /internal/infer`: endpoint privado autenticado para inferencia.
+- Las demás rutas devuelven 404. No se debe configurar este Worker como webhook de Anarchy.
 
-El starter no debe considerarse integrado con Anarchy hasta validar el esquema real de eventos y la respuesta HTTP que espera su webhook.
+Las solicitudes están limitadas por tamaño, número de mensajes, roles y tokens de salida. El modelo no se puede seleccionar desde Render: el Worker usa el valor controlado por `AI_MODEL`.
+
+## Pruebas
+
+```bash
+npm test
+npm run check
+```
