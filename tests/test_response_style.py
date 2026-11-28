@@ -1,4 +1,5 @@
 import asyncio
+import time
 
 import pytest
 
@@ -108,7 +109,7 @@ def test_ai_utility_path_includes_style_only_anti_repetition_context(monkeypatch
             {"role": "user", "content": "Cuéntame un dato."},
             {"role": "assistant", "content": "Por supuesto, aquí tienes el dato."},
         ],
-        "updated_at": 0,
+        "updated_at": time.monotonic(),
     }
     captured = {}
 
