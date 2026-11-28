@@ -48,7 +48,7 @@ ANTISPAM_WINDOW_SECONDS = 8
 ANTISPAM_WARNING_COOLDOWN = 60
 _GLOBAL_CHAT_SILENCE_KEY = "chat_silence"
 _GLOBAL_CHAT_SILENCE_EXPIRY_KEY = "chat_silence_until"
-GLOBAL_CHAT_SILENCE_CACHE_SECONDS = 5.0
+GLOBAL_CHAT_SILENCE_CACHE_SECONDS = 1.0
 GLOBAL_CHAT_SILENCE_MAX_SECONDS = 1800
 
 _ARCHIVE_EVENT_TYPES = {
@@ -796,7 +796,7 @@ class StellaBot:
             snapshot.append({
                 "room_id": str(room_id)[:128],
                 "last_user_activity": int(now_wall - age),
-                "last_spoke_at": int(now_wall - (now_mono - spoke)) if spoke > 0 else 0,
+                "last_spoke_at": int(now_wall - (now_mono - spoke)) if spoke != 0 else 0,
             })
         snapshot.sort(key=lambda item: item["last_user_activity"], reverse=True)
         encoded = json.dumps(
@@ -840,7 +840,7 @@ class StellaBot:
             if last_evaluated_at > 0.0 and clock - last_evaluated_at < 75.0:
                 continue
             last_spoke_at = float(state.get("last_spoke_at", 0.0))
-            if last_spoke_at > 0.0 and clock - last_spoke_at < 240.0:
+            if last_spoke_at != 0.0 and clock - last_spoke_at < 240.0:
                 continue
             if float(getattr(self, "_proactive_cooldown", {}).get(room_id, 0.0)) > clock:
                 continue

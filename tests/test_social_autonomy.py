@@ -249,7 +249,7 @@ def test_social_activity_checkpoint_restores_recent_room_timestamps_without_memb
         state = bot._social_room_activity["room-restored"]
         assert time.monotonic() - state["last_user_activity"] >= 149
         assert state["member_uids"] == {"__restored_activity__"}
-        assert state["last_spoke_at"] > 0
+        assert abs((time.monotonic() - state["last_spoke_at"]) - 400) < 2
 
     asyncio.run(scenario())
 
