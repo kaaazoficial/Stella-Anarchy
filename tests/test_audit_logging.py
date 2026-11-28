@@ -29,7 +29,7 @@ def test_chat_log_is_readable_and_hides_identifiers_by_default(caplog, monkeypat
     record = _last_record(caplog)
     assert record.startswith("[CHAT] ")
     assert "Sala room-1" in record
-    assert "Usuario: [contenido omitido]" in record
+    assert "Usuario ↪: [contenido omitido]" in record
     assert "Nombre visible" not in record
     assert "Hola Stella" not in record
     assert "actor-1" not in record
