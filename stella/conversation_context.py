@@ -132,10 +132,16 @@ _SOCIAL_REACTION_RE = re.compile(
     r"me dio risa|me hizo gracia|estoy feliz|que buena|qué buena)\b",
     re.IGNORECASE,
 )
+_PERSONAL_SHARING_RE = re.compile(
+    r"\b(?:descubri|me encontre|acabo de|me paso|por fin|les cuento|"
+    r"no saben lo que|hoy logre|me di cuenta de que|estoy viendo|"
+    r"estoy escuchando|termine)\b",
+    re.IGNORECASE,
+)
 
 
 def is_socially_engageable(content: str) -> bool:
-    """Identify substantive, ordinary chat messages worth an optional social read."""
+    """Require a genuine social cue; ordinary status updates are not invitations."""
     text = " ".join(str(content or "").split())
     if not text or len(text) > 700 or text.startswith(("!", "-", "/")):
         return False
@@ -144,9 +150,10 @@ def is_socially_engageable(content: str) -> bool:
     if _ROLEPLAY_RE.search(text):
         return False
     normalized = _normalize(text)
-    if len(text) >= 12 and _SOCIAL_REACTION_RE.search(normalized):
-        return True
-    return len(_tokens(text)) >= 3
+    return len(text) >= 12 and bool(
+        _SOCIAL_REACTION_RE.search(normalized)
+        or _PERSONAL_SHARING_RE.search(normalized)
+    )
 
 
 def _message_id(event: dict[str, Any]) -> str:
@@ -173,11 +180,9 @@ def _is_follow_up(query: str) -> bool:
     # A fresh, specific question may contain only a few meaningful words once
     # Spanish stopwords are removed (for example: "¿Qué ventajas tiene X?").
     # Do not classify it as a follow-up solely by token count.
-    is_short_fragment = len(normalized) <= 32 and len(_tokens(query)) <= 3
-    is_explicit_follow_up = len(normalized) <= 72 and bool(
-        _FOLLOW_UP_RE.search(normalized)
-    )
-    return is_short_fragment or is_explicit_follow_up
+    # A short sentence is not automatically a follow-up: in a group room it
+    # may be a new topic or belong to another member's conversation.
+    return len(normalized) <= 96 and bool(_FOLLOW_UP_RE.search(normalized))
 
 
 def _looks_roleplay(query: str) -> bool:

@@ -97,14 +97,25 @@ def test_natural_opening_detector_does_not_trigger_on_every_question_or_statemen
     assert not is_clear_invitation("!menu")
 
 
-def test_social_participation_considers_ordinary_chat_without_replying_to_noise():
-    assert is_socially_engageable("Hoy jugué Minecraft con mis amigos.")
+def test_social_participation_requires_a_reaction_or_personal_share():
+    assert not is_socially_engageable("Hoy jugué Minecraft con mis amigos.")
     assert is_socially_engageable("Me encanta cómo quedó el diseño del grupo.")
     assert is_socially_engageable("Ayer descubrí una banda que tiene canciones buenísimas.")
     assert not is_socially_engageable("jajaja")
     assert not is_socially_engageable("ok")
     assert not is_socially_engageable("!menu")
     assert not is_socially_engageable("*Stella entra en la habitación.*")
+
+
+def test_short_unlinked_question_does_not_inherit_the_entire_room_transcript():
+    events = [
+        event("a", "Estamos organizando una actividad para el sábado.", actor="u2"),
+        event("b", "La base de datos necesita una copia de seguridad.", actor="u3"),
+    ]
+    selected = select_conversation_events(
+        events, query="¿Qué tal?", actor_uid="u1", now_ms=NOW
+    )
+    assert selected == []
 
 
 def test_natural_opening_detector_handles_collective_opinions():
