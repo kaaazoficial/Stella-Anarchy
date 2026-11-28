@@ -1128,3 +1128,70 @@ def test_local_comeback_is_used_only_when_ai_generation_fails():
     assert b.platform.sent[0][1].removeprefix("[C] ") in _STELLA_INSULT_COMEBACKS
     assert fake.saved[0] == ("user", "Stella, putita")
     assert fake.saved[1][0] == "assistant"
+
+
+
+def test_proactive_participation_does_not_enter_a_reply_between_members():
+    b = bot()
+    b._proactive_cooldown = {}
+    calls = []
+
+    async def fake_ask(prompt, *, system=None):
+        calls.append(prompt)
+        return "Podrían probar otra alternativa."
+
+    b.ai = SimpleNamespace(ask=fake_ask)
+
+    asyncio.run(b._maybe_proactive_reply(
+        "room-a", "member", "Alex",
+        "¿Qué les parece esta propuesta para el grupo?",
+        {"messageId": "msg-1", "replyMessageId": "other-member-message"},
+    ))
+
+    assert calls == []
+    assert b.platform.sent == []
+
+
+def test_proactive_participation_does_not_enter_a_message_with_mentions():
+    b = bot()
+    b._proactive_cooldown = {}
+    calls = []
+
+    async def fake_ask(prompt, *, system=None):
+        calls.append(prompt)
+        return "Podrían probar otra alternativa."
+
+    b.ai = SimpleNamespace(ask=fake_ask)
+
+    asyncio.run(b._maybe_proactive_reply(
+        "room-a", "member", "Alex",
+        "¿Qué les parece esta propuesta para el grupo?",
+        {"messageId": "msg-1", "mentions": [{"uid": "other-member"}]},
+    ))
+
+    assert calls == []
+    assert b.platform.sent == []
+
+
+def test_proactive_participation_accepts_a_natural_opinion_invitation():
+    b = bot()
+    b._proactive_cooldown = {}
+    calls = []
+
+    async def fake_ask(prompt, *, system=None):
+        calls.append((prompt, system))
+        return "La segunda opción me parece más práctica para empezar."
+
+    b.ai = SimpleNamespace(ask=fake_ask)
+
+    asyncio.run(b._maybe_proactive_reply(
+        "room-a", "member", "Alex",
+        "¿Cuál elegirían para el próximo evento?",
+        {"messageId": "msg-1"},
+    ))
+
+    assert len(calls) == 1
+    assert len(b.platform.sent) == 1
+    assert b.platform.sent[0][1].startswith("[C] ")
+    assert b.platform.sent[0][1].endswith("La segunda opción me parece más práctica para empezar.")
+    assert "participante más" in calls[0][1].casefold()

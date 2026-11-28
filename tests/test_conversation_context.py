@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from stella.conversation_context import select_conversation_events
+from stella.conversation_context import is_clear_invitation, select_conversation_events
 
 
 NOW = 1_800_000_000_000
@@ -81,3 +81,23 @@ def test_roleplay_continuation_preserves_scene_and_excludes_other_chat():
     )
     ids = [item["message_id"] for item in selected]
     assert ids == ["rp1", "rp2", "rp3"]
+
+
+def test_natural_group_openings_include_opinions_and_choices():
+    assert is_clear_invitation("¿Qué les parece esta propuesta para la comunidad?")
+    assert is_clear_invitation("¿Con cuál se quedan, la primera o la segunda?")
+    assert is_clear_invitation("Necesito algunas ideas para organizar la actividad.")
+    assert is_clear_invitation("Tengo una duda sobre cómo organizar el evento.")
+
+
+def test_natural_opening_detector_does_not_trigger_on_every_question_or_statement():
+    assert not is_clear_invitation("¿A qué hora empieza la película?")
+    assert not is_clear_invitation("Hoy jugué Minecraft con mis amigos.")
+    assert not is_clear_invitation("¿Dónde está la estación de tren?")
+    assert not is_clear_invitation("!menu")
+
+
+def test_natural_opening_detector_handles_collective_opinions():
+    assert is_clear_invitation("¿Qué opinan de cambiar el sistema de roles?")
+    assert is_clear_invitation("¿Cuál elegirían para el próximo evento?")
+    assert is_clear_invitation("Busco recomendaciones de juegos cooperativos.")

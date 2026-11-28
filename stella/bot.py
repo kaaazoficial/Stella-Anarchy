@@ -683,10 +683,28 @@ class StellaBot:
     async def _maybe_proactive_reply(
         self, room_id: str, uid: str, name: str, content: str, message: dict[str, Any]
     ) -> None:
-        """Join only clear, room-wide invitations; no !presencia switch is required."""
+        """Join natural group openings without interrupting direct exchanges."""
         text = " ".join(str(content or "").split())
         if not is_clear_invitation(text):
             return
+
+        # A reply or structured mention aimed at another member is a direct
+        # exchange, not an invitation for Stella to enter it.
+        if self._reply_reference_objects(message):
+            return
+        reply_keys = (
+            "replyMessageId", "reply_message_id", "replyToMessageId",
+            "reply_to_message_id", "referencedMessageId", "referenced_message_id",
+            "quotedMessageId", "quoted_message_id",
+        )
+        if any(message.get(key) for key in reply_keys):
+            return
+        mentions = message.get("mentions") or []
+        if isinstance(mentions, dict):
+            mentions = mentions.get("users") or mentions.get("items") or list(mentions.values())
+        if isinstance(mentions, (list, tuple)) and mentions:
+            return
+
         consciousness = getattr(self, "consciousness", None)
         if consciousness is not None and not consciousness.should_initiate(text):
             return
@@ -695,9 +713,8 @@ class StellaBot:
         cooldowns = getattr(self, "_proactive_cooldown", {})
         if cooldowns.get(room_id, 0.0) > now:
             return
-        # Explicit invitations are allowed automatically, but a room-wide
-        # cooldown prevents Stella from turning the group into a stream of replies.
-        cooldowns[room_id] = now + 180
+        # A room-wide pause keeps Stella from monopolizing a lively conversation.
+        cooldowns[room_id] = now + 120
         if len(cooldowns) > 1000:
             cooldowns = {
                 key: expiry for key, expiry in cooldowns.items() if expiry > now
@@ -708,15 +725,21 @@ class StellaBot:
             STELLA_IDENTITY_GUIDANCE
             + "\n\n"
             + build_response_mode_guidance(text, intent="conversation")
-            + "\n\nINVITACIÓN ABIERTA AL CHAT: participa solo si puedes aportar algo "
-            "concreto y distinto a lo que ya dijeron. Lee el hilo de esta sala, no inventes "
-            "datos ni experiencias personales reales, no ejecutes comandos y no sugieras "
-            "herramientas internas. No anuncies que estás interviniendo. Si no tienes una "
-            "aportación útil, responde exactamente [NO_INTERVENIR]."
+            + "\n\nPARTICIPACIÓN NATURAL EN EL CHAT: eres una participante más, no "
+            "un servicio que responde por obligación. Lee el intercambio reciente y aporta "
+            "una opinión, reacción, idea o comentario breve que encaje con el tema y añada "
+            "algo nuevo. No repitas lo que ya dijeron, no conviertas una charla casual en "
+            "una explicación ni termines siempre con una pregunta. Si otras personas ya "
+            "resolvieron el tema, si el mensaje parece dirigido a alguien concreto o si no "
+            "tienes nada útil o natural que añadir, responde exactamente [NO_INTERVENIR]. "
+            "No entres espontáneamente en escenas de roleplay: espera una mención o respuesta "
+            "dirigida a Stella. No inventes datos ni experiencias personales reales, no "
+            "ejecutes comandos ni sugieras herramientas internas. No anuncies que estás "
+            "interviniendo."
         )
         internal_context = consciousness.context(room_id) if consciousness is not None else ""
         room_prompt = await self._room_history_prompt(
-            room_id, uid, f"Invitación del chat: {text}", message
+            room_id, uid, f"Apertura de conversación del chat: {text}", message
         )
         answer = await self.ai.ask(
             f"{internal_context}\n\n{room_prompt}",

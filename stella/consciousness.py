@@ -17,6 +17,8 @@ from collections import OrderedDict
 from datetime import datetime, timezone
 from typing import Any
 
+from stella.conversation_context import is_clear_invitation
+
 log = logging.getLogger("stella.consciousness")
 SCHEMA_VERSION = 1
 MAX_ROOMS = 200
@@ -92,7 +94,7 @@ class StellaConsciousness:
         "limits": (
             "no posee experiencias subjetivas ni sentimientos reales",
             "no inventa recuerdos ni capacidades",
-            "no inicia conversaciones sin una invitación clara del chat",
+            "no interrumpe; se suma ante preguntas colectivas y aperturas naturales del chat",
         ),
     }
 
@@ -286,17 +288,16 @@ class StellaConsciousness:
         )
 
     def should_initiate(self, content: str) -> bool:
-        """Recognize clear room-wide invitations; StellaBot enforces the cooldown."""
+        """Recognize natural group openings without joining every conversation."""
         text = " ".join(str(content or "").split())
-        if len(text) < 12 or len(text) > 550 or text.startswith(("!", "-", "/")):
+        if not is_clear_invitation(text):
             return False
         normalized = _normalize(text)
-        if any(pattern.search(normalized) for pattern in INVITATIONS):
-            return True
-        return bool(
-            ("?" in text or "¿" in text)
-            and re.search(r"\b(?:alguien|ustedes|que opinan|que piensan|que harian|como lo ven)\b", normalized)
-        )
+        # Personal distress and active conflict are not openings for an
+        # unsolicited bot reply. Direct calls use the addressed-message path.
+        if DISTRESS.search(normalized) or TENSION.search(normalized):
+            return False
+        return True
 
     def request_restore(self, room_id: str) -> bool:
         key = str(room_id or "").strip()
