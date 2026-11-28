@@ -800,14 +800,17 @@ def compact_provider_messages(
     max_input_tokens: int | None = None,
 ) -> list[dict[str, str]]:
     """Compact request history only; preserve the current user turn and all tools."""
-    is_groq = str(provider or "").casefold() == "groq"
-    is_zai = str(provider or "").casefold() in {"z.ai", "zai"}
+    provider_key = str(provider or "").casefold()
+    is_groq = provider_key == "groq"
+    is_zai = provider_key in {"z.ai", "zai"}
+    is_cloudflare = provider_key in {"cloudflare workers ai", "cloudflare", "workers ai"}
     env_name = (
         "GROQ_MAX_INPUT_TOKENS" if is_groq
         else "ZAI_MAX_INPUT_TOKENS" if is_zai
+        else "CLOUDFLARE_AI_MAX_INPUT_TOKENS" if is_cloudflare
         else "GEMINI_MAX_INPUT_TOKENS"
     )
-    default_budget = 3600 if (is_groq or is_zai) else 5200
+    default_budget = 3600 if (is_groq or is_zai or is_cloudflare) else 5200
     try:
         budget = int(max_input_tokens or os.getenv(env_name, str(default_budget)))
     except (TypeError, ValueError):
@@ -819,7 +822,7 @@ def compact_provider_messages(
         if not isinstance(turn, dict) or turn.get("role") not in {"user", "assistant"}:
             continue
         content = str(turn.get("content") or "")
-        if is_groq or is_zai:
+        if is_groq or is_zai or is_cloudflare:
             content = _compact_untrusted_context_blocks(content, max_chars=700)
         normalized.append({"role": str(turn["role"]), "content": content})
     if not normalized:
@@ -1090,6 +1093,7 @@ class StellaAICore:
     """Provider client and temporary memory isolated per room/user."""
 
     provider_default_min_interval = {
+        "Cloudflare Workers AI": 0.25,
         "Google Gemini": 1.0,
         "Groq": 2.1,
     }
@@ -1131,6 +1135,21 @@ class StellaAICore:
             f"stella_ai_last_provider_{id(self)}", default=None
         )
         self.metrics: dict[str, float] = defaultdict(float)
+
+    def _cloudflare_provider_config(self) -> dict[str, str]:
+        """Private HTTP gateway to the Cloudflare Worker; no Cloudflare API key is used."""
+        return {
+            "name": "Cloudflare Workers AI",
+            "key": os.getenv("CLOUDFLARE_AI_GATEWAY_TOKEN", "").strip(),
+            "url": (
+                os.getenv("CLOUDFLARE_AI_GATEWAY_URL")
+                or "https://anarchy-worker.jeanblanco774.workers.dev/internal/infer"
+            ).strip(),
+            "model": (
+                os.getenv("CLOUDFLARE_AI_MODEL")
+                or "@cf/zai-org/glm-4.7-flash"
+            ).strip(),
+        }
 
     def _gemini_provider_config(self) -> dict[str, str]:
         return {
@@ -1180,16 +1199,26 @@ class StellaAICore:
         }
 
     def _primary_provider_config(self) -> dict[str, str]:
-        """Choose Gemini first, Groq second and Z.AI when no earlier key exists."""
-        gemini = self._gemini_provider_config()
-        if gemini["key"] and gemini["url"] and gemini["model"]:
-            # A stale STELLA_AI_PRIMARY_PROVIDER=groq must never silently
-            # override an available Gemini key in the production bot.
-            return gemini
-
+        """Prefer the private Cloudflare gateway when configured; preserve explicit overrides."""
         primary_setting = (
             os.getenv("STELLA_AI_PRIMARY_PROVIDER") or ""
         ).strip().casefold()
+        cloudflare = self._cloudflare_provider_config()
+        cloudflare_ready = bool(
+            cloudflare["key"] and cloudflare["url"] and cloudflare["model"]
+        )
+        explicit_non_cloudflare = primary_setting in {
+            "gemini", "google", "google-gemini", "groq", "zai", "z.ai"
+        }
+        if primary_setting in {"cloudflare", "workers-ai", "workers ai"}:
+            return cloudflare
+        if cloudflare_ready and not explicit_non_cloudflare:
+            return cloudflare
+
+        gemini = self._gemini_provider_config()
+        if gemini["key"] and gemini["url"] and gemini["model"]:
+            # Keep Gemini as the primary when explicitly selected.
+            return gemini
         if primary_setting in {"gemini", "google", "google-gemini"}:
             return gemini
 
@@ -1232,18 +1261,20 @@ class StellaAICore:
     def _fallback_provider_configs(self) -> list[dict[str, str]]:
         """Return every configured alternative in deterministic fallback order."""
         primary = self._primary_provider_config()
-        candidates = [
-            self._groq_provider_config(),
-            self._zai_provider_config(),
-            self._gemini_provider_config(),
-        ]
-        # Keep the existing Gemini -> Groq order, then add Z.AI as a third option.
-        if primary["name"] == "Groq":
-            candidates = [self._gemini_provider_config(), self._zai_provider_config()]
+        cloudflare = self._cloudflare_provider_config()
+        gemini = self._gemini_provider_config()
+        groq = self._groq_provider_config()
+        zai = self._zai_provider_config()
+        if primary["name"] == "Cloudflare Workers AI":
+            candidates = [gemini, groq, zai]
+        elif primary["name"] == "Groq":
+            candidates = [gemini, zai, cloudflare]
         elif primary["name"] == "Z.AI":
-            candidates = [self._gemini_provider_config(), self._groq_provider_config()]
+            candidates = [gemini, groq, cloudflare]
         elif primary["name"] == "Google Gemini":
-            candidates = [self._groq_provider_config(), self._zai_provider_config()]
+            candidates = [groq, zai, cloudflare]
+        else:
+            candidates = [cloudflare, gemini, groq, zai]
         configured: list[dict[str, str]] = []
         seen = {primary["name"]}
         for config in candidates:
@@ -1266,6 +1297,8 @@ class StellaAICore:
     def _provider_request_url(self) -> str:
         """Build the native Gemini generateContent URL; keep legacy env values compatible."""
         configured = self.api_url.strip()
+        if self.is_cloudflare:
+            return configured
         if self.is_zai:
             if configured.rstrip("/").endswith("/chat/completions"):
                 return configured.rstrip("/")
@@ -1300,6 +1333,9 @@ class StellaAICore:
 
     @property
     def provider_name(self) -> str:
+        active_name = str(self._active_provider_config().get("name") or "")
+        if active_name == "Cloudflare Workers AI":
+            return active_name
         host = (urlsplit(self.api_url).hostname or "").casefold()
         if host == "api.groq.com" or host.endswith(".groq.com") or host == "api.groq.ai":
             return "Groq"
@@ -1322,6 +1358,10 @@ class StellaAICore:
     @property
     def is_zai(self) -> bool:
         return self.provider_name.casefold() in {"z.ai", "zai"}
+
+    @property
+    def is_cloudflare(self) -> bool:
+        return self.provider_name == "Cloudflare Workers AI"
 
     @property
     def uses_groq_strict_schema(self) -> bool:
@@ -1384,9 +1424,11 @@ class StellaAICore:
     def provider_diagnostics(self) -> dict[str, Any]:
         """Return privacy-safe provider configuration and actual usage counters."""
         primary = self._primary_provider_config()
+        cloudflare = self._cloudflare_provider_config()
         gemini = self._gemini_provider_config()
         groq = self._groq_provider_config()
         zai = self._zai_provider_config()
+        cloudflare_state = self._provider_runtime_state.get("Cloudflare Workers AI", {})
         gemini_state = self._provider_runtime_state.get("Google Gemini", {})
         groq_state = self._provider_runtime_state.get("Groq", {})
         zai_state = self._provider_runtime_state.get("Z.AI", {})
@@ -1394,6 +1436,9 @@ class StellaAICore:
         return {
             "primary": primary["name"],
             "primary_model": primary["model"],
+            "cloudflare_configured": bool(cloudflare["key"] and cloudflare["url"] and cloudflare["model"]),
+            "cloudflare_successes": int(cloudflare_state.get("successes", 0) or 0),
+            "cloudflare_failures": int(cloudflare_state.get("failures", 0) or 0),
             "gemini_configured": bool(gemini["key"] and gemini["url"] and gemini["model"]),
             "groq_configured": bool(groq["key"] and groq["url"] and groq["model"]),
             "zai_configured": bool(zai["key"] and zai["url"] and zai["model"]),
@@ -1409,6 +1454,7 @@ class StellaAICore:
 
     def status(self, thread_id: str | None = None) -> str:
         primary = self._primary_provider_config()
+        cloudflare = self._cloudflare_provider_config()
         groq = self._groq_provider_config()
         zai = self._zai_provider_config()
         last = self._last_provider_summary or self._last_provider_context.get()
@@ -1417,6 +1463,7 @@ class StellaAICore:
             f"Principal: {primary['name']} · {primary['model']}.",
             "PROVEEDORES:",
             self._provider_status_line(primary),
+            self._provider_status_line(cloudflare if primary["name"] != "Cloudflare Workers AI" else self._gemini_provider_config()),
             self._provider_status_line(groq),
             self._provider_status_line(zai),
             (
@@ -2129,12 +2176,20 @@ class StellaAICore:
         self._enforce_user_rate_limit(rate_key)
         if str(provider_order or "").casefold() == "gemini_first":
             primary = self._gemini_provider_config()
-            candidates = [primary, self._groq_provider_config(), self._zai_provider_config()]
+            candidates = [
+                primary, self._groq_provider_config(), self._zai_provider_config(),
+                self._cloudflare_provider_config(),
+            ]
         else:
             primary = self._primary_provider_config()
             candidates = [primary, *self._fallback_provider_configs()]
         tier = str(difficulty or "standard").upper()
-        prefixes = {"Google Gemini": "GEMINI", "Groq": "GROQ", "Z.AI": "ZAI"}
+        prefixes = {
+            "Cloudflare Workers AI": "CLOUDFLARE_AI",
+            "Google Gemini": "GEMINI",
+            "Groq": "GROQ",
+            "Z.AI": "ZAI",
+        }
         for config in candidates:
             if not config:
                 continue
@@ -2266,7 +2321,7 @@ class StellaAICore:
             GEMINI_ANSWER_SCHEMA if schema_mode == "answer" else GEMINI_ACTION_SCHEMA
         )
         prompt_instructions = instructions
-        if self.is_zai:
+        if self.is_zai or self.is_cloudflare:
             prompt_instructions += (
                 "\n\nDevuelve exclusivamente un objeto JSON válido. "
                 "Respeta el esquema y no incluyas Markdown ni texto fuera del JSON."
@@ -2336,12 +2391,16 @@ class StellaAICore:
                 ],
                 "generationConfig": generation_config,
             }
-        elif self.is_zai:
+        elif self.is_zai or self.is_cloudflare:
+            output_env = (
+                "CLOUDFLARE_AI_MAX_OUTPUT_TOKENS"
+                if self.is_cloudflare else "ZAI_MAX_OUTPUT_TOKENS"
+            )
             try:
-                zai_output_limit = int(os.getenv("ZAI_MAX_OUTPUT_TOKENS", "900"))
+                provider_output_limit = int(os.getenv(output_env, "900"))
             except (TypeError, ValueError):
-                zai_output_limit = 900
-            zai_output_limit = output_limit or max(256, min(2048, zai_output_limit))
+                provider_output_limit = 900
+            provider_output_limit = output_limit or max(256, min(2048, provider_output_limit))
             body = {
                 "model": self.model,
                 "messages": [
@@ -2349,7 +2408,7 @@ class StellaAICore:
                     *recent_messages,
                 ],
                 "response_format": {"type": "json_object"},
-                "max_tokens": zai_output_limit,
+                "max_completion_tokens": provider_output_limit,
                 "temperature": 0.6,
             }
         else:
@@ -2696,6 +2755,8 @@ class StellaAICore:
             if self.is_gemini
             else self._extract_zai_chat_completion_text(payload)
             if self.is_zai
+            else self._extract_chat_completion_text(payload)
+            if self.is_cloudflare
             else self._extract_output_text(payload)
         )
         if not raw:
