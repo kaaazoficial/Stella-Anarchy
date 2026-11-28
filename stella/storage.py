@@ -248,7 +248,7 @@ class Store:
     def get_profile(self, uid: str) -> dict[str, Any] | None:
         with self._session(self.connect()) as db:
             row = db.execute(
-                "SELECT uid,nickname,bio,status,points,created_at,last_seen FROM users WHERE uid=?",
+                "SELECT uid,nickname,bio,status,points,points_text,created_at,last_seen FROM users WHERE uid=?",
                 (str(uid),),
             ).fetchone()
             if not row:
