@@ -19,7 +19,7 @@ Stella is an independent Python bot for Anarchy Apps. It has its own codebase, c
 - Exact-match automatic replies, configured by administrators: `!respuesta añadir|quitar|lista`.
 - Preliminary link inspection: `!analizar`, with domain, redirect-format, suspicious-TLD and adult-content signals. It is heuristic, not an antivirus verdict.
 - Multimedia search: `!multimedia imagen|video|audio`, `!imagen`, `!video`, and `!audio` using Wikimedia Commons and Internet Archive. Image results include license attribution where available.
-- Advanced AI command router with Gemini-first/Groq fallback, provider pacing, retry handling, structured tool calls, command permissions, safe multi-step plans, temporary context and research synthesis. Multilingual insult guidance distinguishes direct attacks on Stella from quotations, language questions and insults aimed at others. Commands: `!ia`, `!ia ayuda`, `!ia estado`, `!ia olvidar`, `!ia guardian`, `!ia diagnostico`, `!ia resumir`, `!traducir`, `!investigar` with general, comparison, verification, chronology and report modes. AI context is limited to two recent exchanges per room/user, expires after five minutes and can be cleared immediately.
+- Advanced AI command router with Gemini-first, Groq-second and Z.AI-third fallback, provider pacing, retry handling, structured tool calls, command permissions, safe multi-step plans, temporary context and research synthesis. Multilingual insult guidance distinguishes direct attacks on Stella from quotations, language questions and insults aimed at others. Commands: `!ia`, `!ia ayuda`, `!ia estado`, `!ia olvidar`, `!ia guardian`, `!ia diagnostico`, `!ia resumir`, `!traducir`, `!investigar` with general, comparison, verification, chronology and report modes. AI context is limited to two recent exchanges per room/user, expires after five minutes and can be cleared immediately.
 - LiveKit voice-room connection for active Anarchy calls: `!join`, `!salirsala`, `!salas`, and `!voz participantes|hablando|estado`. Participant state is volatile and expires.
 - Per-user, per-room music playlists and favorites: `!playlist crear|lista|agregar|ver|reproducir|borrar` and `!dj favorito|favoritos`. Playlists only save results from the supported music catalogues.
 - Text-to-speech with Edge TTS, Spanish voices, speed and volume controls: `!leer`, `!noleer`, `!tts voces`, `!tts voz`, `!tts velocidad`, `!tts volumen`.
@@ -87,13 +87,18 @@ Set these variables in the hosting provider. Never commit real credentials.
 | `GROQ_API_KEY` | No | Groq fallback provider key |
 | `GROQ_MODEL` | No | Defaults to `openai/gpt-oss-20b` |
 | `GROQ_API_URL` | No | Groq Responses API base URL |
-| `STELLA_AI_PRIMARY_PROVIDER` | No | `gemini` (default) or `groq` |
+| `ZAI_API_KEY` | No | Optional Z.AI API key; keep secret |
+| `ZAI_MODEL` | No | Defaults to `glm-4.7-flash` |
+| `ZAI_API_URL` | No | Z.AI Chat Completions API base URL |
+| `ZAI_MAX_INPUT_TOKENS` | No | Context budget; defaults to `3600` |
+| `ZAI_MAX_OUTPUT_TOKENS` | No | Output budget; defaults to `900` |
+| `STELLA_AI_PRIMARY_PROVIDER` | No | `gemini` (default), `groq` or `zai` when earlier providers are absent |
 | `ANARCHY_COMMUNITY_BOT_TOKEN` | No | Optional separate token for LiveKit voice endpoints; defaults to the bot token |
 | `JAMENDO_CLIENT_ID` | No | Optional Jamendo catalogue access |
 | `TTS_VOICE` | No | Defaults to Chilean Spanish Catalina |
 | `PROMETHEUS_METRICS_TOKEN` | No | Optional Bearer token protecting `/metrics` |
 
-AI uses Gemini first and automatically tries Groq if Gemini fails. Both provider keys are optional, but at least one is required for `!ia` and `!traducir`. Persistent conversation memory, when explicitly enabled by a member, is stored in the separate `stella_ai_memory` Qdrant collection and expires after the configured retention period. It is not stored in SQLite. The external providers' own processing and retention policies still apply. Web search uses DuckDuckGo's HTML search endpoint and may be unavailable if the provider blocks the request.
+AI uses Gemini first, then Groq, then Z.AI when each provider is configured and an earlier provider is unavailable or fails. The Z.AI default model is GLM-4.7-Flash; confirm the free-tier quotas and model availability in your Z.AI account. All provider keys are optional, but at least one is required for `!ia` and `!traducir`. Persistent conversation memory, when explicitly enabled by a member, is stored in the separate `stella_ai_memory` Qdrant collection and expires after the configured retention period. It is not stored in SQLite. The external providers' own processing and retention policies still apply. Web search uses DuckDuckGo's HTML search endpoint and may be unavailable if the provider blocks the request.
 
 Voice commands require an active Anarchy call and working LiveKit credentials from the Anarchy voice API. TTS additionally requires Edge TTS, PyAV and NumPy. Music playback uses only validated tracks from open-license catalogues (Internet Archive, Wikimedia Commons, Openverse, ccMixter, Audius and optionally Jamendo via `JAMENDO_CLIENT_ID`). YouTube is not used as a LiveKit audio source because its API policies prohibit downloading or relaying copies of audiovisual content without written permission. Voice rooms, TTS queues, music queues, search selections and downloaded audio are temporary and are removed on room exit or process shutdown.
 
