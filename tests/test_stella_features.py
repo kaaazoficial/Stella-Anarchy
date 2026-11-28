@@ -213,17 +213,51 @@ async def test_admin_replies_are_suppressed_in_public_rooms():
 
 
 @pytest.mark.asyncio
-async def test_public_admin_command_is_audited_but_not_replied_to(monkeypatch):
+async def test_authorized_admin_command_is_audited_and_replied_to(monkeypatch):
     from types import SimpleNamespace
     from stella.bot import StellaBot
 
     calls = []
     sent = []
 
-    async def hidden_send(*args, **kwargs):
+    async def send(*args, **kwargs):
         sent.append((args, kwargs))
 
-    async def hidden_admin_handler(room_id, uid, name, args, message):
+    async def admin_handler(room_id, uid, name, args, message):
+        await bot._reply(room_id, "panel disponible", message)
+
+    monkeypatch.setattr(
+        "stella.bot._audit_admin_operation",
+        lambda command, room_id, authorized: calls.append((command, room_id, authorized)),
+    )
+
+    bot = object.__new__(StellaBot)
+    bot.settings = SimpleNamespace(command_prefix="!")
+    bot.platform = SimpleNamespace(send_message=send)
+    bot._is_admin = lambda uid: uid == "admin-1"
+    bot._admin_panel = admin_handler
+
+    message = {"messageId": "msg-1"}
+    await bot._command("room-1", "admin-1", "Admin", "admin resumen", message)
+
+    assert "_stella_admin_silent" not in message
+    assert calls == [("admin", "room-1", True)]
+    assert len(sent) == 1
+    assert sent[0][0][1] == "panel disponible"
+
+
+@pytest.mark.asyncio
+async def test_unauthorized_admin_command_is_audited_and_silent(monkeypatch):
+    from types import SimpleNamespace
+    from stella.bot import StellaBot
+
+    calls = []
+    sent = []
+
+    async def send(*args, **kwargs):
+        sent.append((args, kwargs))
+
+    async def admin_handler(room_id, uid, name, args, message):
         await bot._reply(room_id, "esto no debe aparecer", message)
 
     monkeypatch.setattr(
@@ -233,13 +267,13 @@ async def test_public_admin_command_is_audited_but_not_replied_to(monkeypatch):
 
     bot = object.__new__(StellaBot)
     bot.settings = SimpleNamespace(command_prefix="!")
-    bot.platform = SimpleNamespace(send_message=hidden_send)
-    bot._is_admin = lambda uid: uid == "admin-1"
-    bot._admin_panel = hidden_admin_handler
+    bot.platform = SimpleNamespace(send_message=send)
+    bot._is_admin = lambda uid: False
+    bot._admin_panel = admin_handler
 
-    message = {"messageId": "msg-1"}
-    await bot._command("room-1", "admin-1", "Admin", "admin resumen", message)
+    message = {"messageId": "msg-2"}
+    await bot._command("room-1", "member-1", "Member", "admin resumen", message)
 
     assert message["_stella_admin_silent"] is True
-    assert calls == [("admin", "room-1", True)]
+    assert calls == [("admin", "room-1", False)]
     assert sent == []
