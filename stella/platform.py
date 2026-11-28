@@ -1,0 +1,353 @@
+from __future__ import annotations
+
+import asyncio
+import logging
+from email.utils import parsedate_to_datetime
+import re
+import time
+from collections import defaultdict, deque
+from typing import Any
+from urllib.parse import quote
+
+import httpx
+
+from stella.text import normalize_message_text
+from stella.audit import audit_event
+
+log = logging.getLogger("stella.platform")
+
+
+class AnarchyClient:
+    """Small client for the documented Anarchy bot API."""
+
+    def __init__(self, api_base: str, token: str) -> None:
+        self.api_base = api_base.rstrip("/")
+        self.token = token
+        self._client = httpx.AsyncClient(timeout=httpx.Timeout(15.0))
+        # Anarchy limits message creation per bot. Serialize sends and keep
+        # enough distance between requests so multi-page replies are delivered.
+        self._message_send_lock = asyncio.Lock()
+        self._last_message_send_at = 0.0
+        self._message_min_interval = 1.25
+        self._message_max_attempts = 4
+        self._message_backoff_until = 0.0
+        # IDs only; message text and conversation content are never retained.
+        self._sent_message_ids: dict[str, deque[tuple[float, str]]] = defaultdict(deque)
+        self._sent_message_ttl = 7 * 24 * 60 * 60
+        self._sent_message_limit = 500
+        self.identity: dict[str, Any] = {}
+        self.room_archive: Any | None = None
+
+    async def close(self) -> None:
+        await self._client.aclose()
+
+    async def request(
+        self, method: str, path: str, *, json_body: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
+        if not self.token:
+            log.error("ANARCHY_BOT_TOKEN is not configured.")
+            return {"ok": False, "status": 503, "data": {}}
+        try:
+            response = await self._client.request(
+                method,
+                f"{self.api_base}{path}",
+                headers={
+                    "Authorization": f"Bot {self.token}",
+                    "Accept": "application/json",
+                },
+                json=json_body,
+            )
+            try:
+                data = response.json()
+            except ValueError:
+                data = {"message": response.text[:500]}
+            return {
+                "ok": response.is_success,
+                "status": response.status_code,
+                "data": data,
+                "retry_after": response.headers.get("retry-after"),
+            }
+        except httpx.HTTPError as exc:
+            log.warning("Anarchy API request failed: %s", type(exc).__name__)
+            return {"ok": False, "status": 502, "data": {}}
+
+    async def upload_bytes(
+        self, path: str, content: bytes, content_type: str
+    ) -> dict[str, Any]:
+        """Upload bounded binary data to an Anarchy bot API endpoint."""
+        if not self.token:
+            return {"ok": False, "status": 503, "data": {}}
+        if not isinstance(content, bytes) or not content or len(content) > 512 * 1024:
+            return {"ok": False, "status": 413, "data": {"error": "Invalid upload size"}}
+        try:
+            response = await self._client.put(
+                f"{self.api_base}{path}",
+                headers={
+                    "Authorization": f"Bot {self.token}",
+                    "Accept": "application/json",
+                    "Content-Type": str(content_type),
+                },
+                content=content,
+            )
+            try:
+                data = response.json()
+            except ValueError:
+                data = {"message": response.text[:500]}
+            return {"ok": response.is_success, "status": response.status_code, "data": data}
+        except httpx.HTTPError as exc:
+            log.warning("Anarchy binary upload failed: %s", type(exc).__name__)
+            return {"ok": False, "status": 502, "data": {}}
+
+    async def get_message(self, thread_id: str, message_id: str) -> dict[str, Any] | None:
+        """Read one message that Anarchy says this bot is allowed to see."""
+        room_id = str(thread_id or "").strip()
+        target_id = str(message_id or "").strip()
+        if not room_id or not target_id or not target_id.isdigit():
+            return None
+        result = await self.request(
+            "GET",
+            f"/threads/{quote(room_id, safe='')}/messages/{quote(target_id, safe='')}",
+        )
+        if not result.get("ok"):
+            return None
+        data = result.get("data")
+        if not isinstance(data, dict):
+            return None
+        message = data.get("message")
+        if isinstance(message, dict):
+            return message
+        return data if isinstance(data.get("author"), dict) else None
+
+    async def get_bot_identity(self) -> dict[str, Any] | None:
+        """Return the authenticated bot identity from Anarchy GET /me."""
+        result = await self.request("GET", "/me")
+        if not result.get("ok"):
+            log.warning("Anarchy identity lookup failed with status %s", result.get("status"))
+            return None
+        data = result.get("data")
+        if not isinstance(data, dict):
+            return None
+        identity = data.get("bot") or data.get("profile") or data
+        if not isinstance(identity, dict):
+            return None
+        self.identity = dict(identity)
+        return self.identity
+
+    @staticmethod
+    def _extract_message_id(payload: Any) -> str | None:
+        if not isinstance(payload, dict):
+            return None
+        for key in ("messageId", "message_id", "id"):
+            value = payload.get(key)
+            if isinstance(value, (str, int)) and str(value).strip():
+                return str(value).strip()
+        for key in ("message", "data", "result", "item"):
+            found = AnarchyClient._extract_message_id(payload.get(key))
+            if found:
+                return found
+        return None
+
+    def _remember_sent_message(self, thread_id: str, message_id: str) -> None:
+        now = time.time()
+        history = self._sent_message_ids[str(thread_id)]
+        cutoff = now - self._sent_message_ttl
+        while history and history[0][0] < cutoff:
+            history.popleft()
+        if not any(existing_id == message_id for _, existing_id in history):
+            history.append((now, message_id))
+        while len(history) > self._sent_message_limit:
+            history.popleft()
+        if not history:
+            self._sent_message_ids.pop(str(thread_id), None)
+
+    def has_sent_message(self, thread_id: str, message_id: str) -> bool:
+        """Check a referenced message against the bounded, content-free send ledger."""
+        room_id = str(thread_id or "").strip()
+        target_id = str(message_id or "").strip()
+        history = self._sent_message_ids.get(room_id) if room_id and target_id else None
+        if not history:
+            return False
+        cutoff = time.time() - self._sent_message_ttl
+        while history and history[0][0] < cutoff:
+            history.popleft()
+        found = any(item_id == target_id for _, item_id in history)
+        if not history:
+            self._sent_message_ids.pop(room_id, None)
+        return found
+
+    async def delete_tracked_messages(self, thread_id: str) -> dict[str, int]:
+        """Delete only recent IDs returned by this client's successful sends."""
+        room_id = str(thread_id or "").strip()
+        history = self._sent_message_ids.get(room_id)
+        if not room_id or not history:
+            return {"attempted": 0, "deleted": 0, "failed": 0}
+        cutoff = time.time() - self._sent_message_ttl
+        active = [(stamp, item_id) for stamp, item_id in history if stamp >= cutoff]
+        deleted = failed = 0
+        remaining: deque[tuple[float, str]] = deque()
+        for stamp, message_id in active:
+            result = await self.request(
+                "DELETE",
+                f"/threads/{quote(room_id, safe='')}/messages/{quote(message_id, safe='')}",
+            )
+            if result.get("ok") or result.get("status") == 404:
+                deleted += 1
+            else:
+                failed += 1
+                remaining.append((stamp, message_id))
+        if remaining:
+            self._sent_message_ids[room_id] = remaining
+        else:
+            self._sent_message_ids.pop(room_id, None)
+        return {"attempted": len(active), "deleted": deleted, "failed": failed}
+
+    @staticmethod
+    def _retry_after_seconds(value: Any, fallback: float) -> float:
+        raw = str(value or "").strip()
+        try:
+            delay = float(raw)
+        except (TypeError, ValueError):
+            try:
+                parsed = parsedate_to_datetime(raw)
+                delay = parsed.timestamp() - time.time()
+            except (TypeError, ValueError, OverflowError):
+                delay = fallback
+        # Respect server Retry-After values up to five minutes; never retry early.
+        return min(300.0, max(0.5, delay))
+
+    async def send_message(
+        self,
+        thread_id: str,
+        content: str,
+        *,
+        reply_id: str | None = None,
+        buttons: list[dict[str, str]] | None = None,
+        return_message_id: bool = False,
+    ) -> bool | str:
+        """Send a paced Anarchy message; optionally return its ID for interactive buttons."""
+        room_id = str(thread_id)
+        body: dict[str, Any] = {"content": normalize_message_text(content)[:1900]}
+        if reply_id:
+            body["replyMessageId"] = reply_id
+        if buttons is not None:
+            if len(buttons) > 5 or any(
+                not isinstance(button, dict)
+                or not re.fullmatch(r"[A-Za-z0-9_-]{1,32}", str(button.get("id") or ""))
+                or not 1 <= len(str(button.get("label") or "")) <= 40
+                for button in buttons
+            ):
+                log.warning("Refusing invalid Anarchy button payload.")
+                return False
+            body["buttons"] = [
+                {"id": str(button["id"]), "label": str(button["label"])}
+                for button in buttons
+            ]
+
+        async with self._message_send_lock:
+            for attempt in range(self._message_max_attempts):
+                cooldown = self._message_backoff_until - time.monotonic()
+                if cooldown > 0:
+                    await asyncio.sleep(cooldown)
+                elapsed = time.monotonic() - self._last_message_send_at
+                wait_for_slot = self._message_min_interval - elapsed
+                if wait_for_slot > 0:
+                    await asyncio.sleep(wait_for_slot)
+
+                self._last_message_send_at = time.monotonic()
+                result = await self.request(
+                    "POST", f"/threads/{quote(room_id, safe='')}/messages",
+                    json_body=body,
+                )
+                if result.get("ok"):
+                    message_id = self._extract_message_id(result.get("data"))
+                    identity = getattr(self, "identity", {}) or {}
+                    audit_event(
+                        "chat.message.out",
+                        room_id=room_id,
+                        message_id=message_id,
+                        actor_uid=(
+                            identity.get("uid") or identity.get("userId")
+                            or identity.get("botId")
+                        ),
+                        actor_name=(
+                            identity.get("nickname") or identity.get("displayName")
+                            or identity.get("name") or "Stella"
+                        ),
+                        reply_to_message_id=reply_id,
+                        content=body.get("content", ""),
+                    )
+                    if message_id:
+                        self._remember_sent_message(room_id, message_id)
+                    archive = getattr(self, "room_archive", None)
+                    enqueue_archive_event = getattr(archive, "enqueue_event", None)
+                    record_archive_event = getattr(archive, "record_event", None)
+                    archive_writer = enqueue_archive_event if callable(enqueue_archive_event) else record_archive_event
+                    if callable(archive_writer):
+                        await archive_writer(
+                            room_id,
+                            "chat.message.out",
+                            actor_uid=(
+                                str(self.identity.get("uid") or self.identity.get("botId") or "")
+                                or None
+                            ),
+                            actor_name=str(
+                                self.identity.get("nickname")
+                                or self.identity.get("displayName")
+                                or self.identity.get("name")
+                                or "Stella"
+                            ),
+                            message_id=message_id,
+                            reply_to_message_id=reply_id,
+                            content=body.get("content", ""),
+                            metadata={
+                                "origin": "anarchy.send_message",
+                                "buttons": body.get("buttons") or [],
+                            },
+                        )
+                    if return_message_id:
+                        return message_id or False
+                    return True
+
+                if int(result.get("status") or 0) != 429:
+                    return False
+
+                if attempt + 1 >= self._message_max_attempts:
+                    log.error(
+                        "Anarchy rejected a message after %s attempts (HTTP 429).",
+                        self._message_max_attempts,
+                    )
+                    return False
+
+                fallback = 2.0 * (2 ** attempt)
+                retry_delay = self._retry_after_seconds(
+                    result.get("retry_after"), fallback
+                )
+                self._message_backoff_until = max(
+                    self._message_backoff_until,
+                    time.monotonic() + retry_delay,
+                )
+                log.warning(
+                    "Anarchy message rate limit reached; retrying in %.2f seconds "
+                    "(attempt %s/%s).",
+                    retry_delay,
+                    attempt + 1,
+                    self._message_max_attempts,
+                )
+                await asyncio.sleep(retry_delay)
+
+        return False
+
+    async def edit_message(
+        self, thread_id: str, message_id: str, *, remove_buttons: bool = True
+    ) -> bool:
+        """Remove native buttons from one of this bot's messages."""
+        room_id = str(thread_id or "").strip()
+        target_id = str(message_id or "").strip()
+        if not room_id or not target_id:
+            return False
+        result = await self.request(
+            "PATCH",
+            f"/threads/{quote(room_id, safe='')}/messages/{quote(target_id, safe='')}",
+            json_body={"removeButtons": True} if remove_buttons else {},
+        )
+        return bool(result.get("ok"))
