@@ -1302,4 +1302,4 @@ def test_proactive_participation_accepts_a_natural_opinion_invitation():
     assert len(b.platform.sent) == 1
     assert b.platform.sent[0][1].startswith("[C] ")
     assert b.platform.sent[0][1].endswith("La segunda opción me parece más práctica para empezar.")
-    assert "participante más" in calls[0][1].casefold()
+    assert "integrante más" in calls[0][1].casefold()
