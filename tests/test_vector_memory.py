@@ -1,0 +1,198 @@
+from __future__ import annotations
+
+import asyncio
+import httpx
+import pytest
+
+from stella.vector_memory import VectorMemory
+
+
+class UnauthorizedGeminiClient:
+    def __init__(self):
+        self.calls = 0
+        self.is_closed = False
+
+    async def get(self, url, *, headers=None):
+        request = httpx.Request("GET", url)
+        return httpx.Response(200, request=request, json={
+            "result": {
+                "config": {"params": {"vectors": {"size": 768}}},
+                "payload_schema": {
+                    "room_id": {"data_type": "keyword"},
+                    "uid": {"data_type": "keyword"},
+                    "expires_at": {"data_type": "integer"},
+                },
+            }
+        })
+
+    async def post(self, url, *, headers=None, json=None):
+        self.calls += 1
+        request = httpx.Request("POST", url)
+        return httpx.Response(401, request=request, json={"error": {"message": "invalid key"}})
+
+    async def aclose(self):
+        self.is_closed = True
+
+
+@pytest.mark.asyncio
+async def test_gemini_auth_failure_opens_circuit_and_stops_repeated_requests(monkeypatch, caplog):
+    monkeypatch.setenv("QDRANT_URL", "https://qdrant.example")
+    monkeypatch.setenv("QDRANT_API_KEY", "qdrant-test")
+    monkeypatch.setenv("GEMINI_API_KEY", "gemini-test")
+
+    memory = VectorMemory()
+    fake_client = UnauthorizedGeminiClient()
+    memory.client = fake_client
+
+    await memory.index_message("room-1", "user-1", "Persona", "Este es un mensaje de prueba.")
+    await memory.index_message("room-1", "user-1", "Persona", "Otro mensaje de prueba.")
+    results = await memory.search("room-1", "consulta semántica", "user-1")
+
+    assert fake_client.calls == 1
+    assert results == []
+    assert memory.embedding_blocked_status == 401
+    assert "HTTP 401" in memory.status
+    assert "invalid key" not in caplog.text.casefold()
+    await memory.close()
+
+
+@pytest.mark.asyncio
+async def test_missing_credentials_make_vector_memory_a_noop(monkeypatch):
+    monkeypatch.delenv("QDRANT_URL", raising=False)
+    monkeypatch.delenv("QDRANT_API_KEY", raising=False)
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+
+    memory = VectorMemory()
+    await memory.index_message("room-1", "user-1", "Persona", "Mensaje suficientemente largo.")
+    assert memory.status.startswith("sin configurar")
+    assert memory.client is None
+
+
+class QdrantCollectionClient:
+    def __init__(self):
+        self.is_closed = False
+        self.indexes = []
+
+    async def get(self, url, *, headers=None):
+        request = httpx.Request("GET", url)
+        return httpx.Response(
+            200,
+            request=request,
+            json={
+                "result": {
+                    "config": {"params": {"vectors": {"size": 768}}},
+                    "payload_schema": {},
+                }
+            },
+        )
+
+    async def put(self, url, *, headers=None, json=None):
+        request = httpx.Request("PUT", url)
+        self.indexes.append((url, json))
+        return httpx.Response(200, request=request, json={"result": {"operation_id": 1}})
+
+    async def aclose(self):
+        self.is_closed = True
+
+
+@pytest.mark.asyncio
+async def test_qdrant_creates_payload_indexes_required_by_room_and_expiry_filters(monkeypatch):
+    monkeypatch.setenv("QDRANT_URL", "https://qdrant.example")
+    monkeypatch.setenv("QDRANT_API_KEY", "qdrant-test")
+    monkeypatch.setenv("GEMINI_API_KEY", "gemini-test")
+    monkeypatch.setenv("GEMINI_EMBEDDING_DIMENSIONS", "768")
+
+    memory = VectorMemory()
+    fake_client = QdrantCollectionClient()
+    memory.client = fake_client
+
+    await memory.ensure_collection()
+
+    indexes = {item[1]["field_name"]: item[1]["field_schema"] for item in fake_client.indexes}
+    assert indexes == {
+        "room_id": "keyword",
+        "uid": "keyword",
+        "expires_at": "integer",
+    }
+    assert memory.ready is True
+    await memory.close()
+
+
+
+class ScopedSearchClient:
+    def __init__(self):
+        self.is_closed = False
+        self.payload = None
+
+    async def post(self, url, *, headers=None, json=None):
+        self.payload = json
+        request = httpx.Request("POST", url)
+        return httpx.Response(200, request=request, json={"result": []})
+
+    async def aclose(self):
+        self.is_closed = True
+
+
+@pytest.mark.asyncio
+async def test_vector_search_is_scoped_to_the_requesting_user(monkeypatch):
+    monkeypatch.setenv("QDRANT_URL", "https://qdrant.example")
+    monkeypatch.setenv("QDRANT_API_KEY", "qdrant-test")
+    monkeypatch.setenv("GEMINI_API_KEY", "gemini-test")
+
+    memory = VectorMemory()
+    memory.ready = True
+    memory._embed = lambda text, query=False: _fake_embedding()
+    fake_client = ScopedSearchClient()
+    memory.client = fake_client
+
+    await memory.search("room-1", "mi consulta", "user-42")
+
+    must = fake_client.payload["filter"]["must"]
+    assert {"key": "room_id", "match": {"value": "room-1"}} in must
+    assert {"key": "uid", "match": {"value": "user-42"}} in must
+    await memory.close()
+
+
+async def _fake_embedding():
+    return [0.0] * 768
+
+
+
+@pytest.mark.asyncio
+async def test_concurrent_collection_initialization_is_serialized(monkeypatch):
+    monkeypatch.setenv("QDRANT_URL", "https://qdrant.example")
+    monkeypatch.setenv("QDRANT_API_KEY", "qdrant-test")
+    monkeypatch.setenv("GEMINI_API_KEY", "gemini-test")
+    memory = VectorMemory()
+    calls = 0
+    gate = asyncio.Event()
+
+    async def initialize():
+        nonlocal calls
+        calls += 1
+        await gate.wait()
+        memory.ready = True
+
+    memory._ensure_collection_locked = initialize
+    first = asyncio.create_task(memory.ensure_collection())
+    second = asyncio.create_task(memory.ensure_collection())
+    await asyncio.sleep(0)
+    gate.set()
+    await asyncio.gather(first, second)
+    assert calls == 1
+    await memory.close()
+
+
+
+def test_vector_memory_prefers_dedicated_embedding_key(monkeypatch):
+    monkeypatch.setenv("QDRANT_URL", "https://qdrant.example")
+    monkeypatch.setenv("QDRANT_API_KEY", "qdrant-test")
+    monkeypatch.setenv("GOOGLE_API_KEY", "stale-general-key")
+    monkeypatch.setenv("GEMINI_API_KEY", "chat-key")
+    monkeypatch.setenv("GEMINI_EMBEDDING_API_KEY", "dedicated-embedding-key")
+
+    memory = VectorMemory()
+
+    assert memory.gemini_key == "dedicated-embedding-key"
+    assert memory.gemini_key_source == "GEMINI_EMBEDDING_API_KEY"
+    assert "dedicated-embedding-key" not in str(memory.diagnostics)

@@ -1,0 +1,1 @@
+This project is an independent integration starter. It is not affiliated with Cloudflare, Z.AI, or the Anarchy platform.

@@ -1,0 +1,18 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "anarchy-worker",
+  "main": "src/index.js",
+  "compatibility_date": "2026-11-28",
+  "workers_dev": true,
+  "ai": { "binding": "AI" },
+  "vars": {
+    "AI_MODEL": "@cf/zai-org/glm-4.7-flash",
+    "ANARCHY_COMMAND_PREFIX": "!",
+    "ANARCHY_REPLY_MODE": "direct",
+    "ANARCHY_SIGNATURE_HEADER": "X-Anarchy-Signature",
+    "ANARCHY_TIMESTAMP_HEADER": "X-Anarchy-Timestamp",
+    "ANARCHY_SIGNATURE_FORMAT": "timestamp-dot-body",
+    "ANARCHY_AUTH_SCHEME": "Bot",
+    "ANARCHY_SEND_MESSAGE_PATH": "/rooms/{thread_id}/messages"
+  }
+}
