@@ -101,7 +101,14 @@ def _timestamp(event: dict[str, Any]) -> int:
 
 def _is_follow_up(query: str) -> bool:
     normalized = " ".join(_normalize(query).split())
-    return len(_tokens(query)) <= 4 or bool(_FOLLOW_UP_RE.search(normalized))
+    # A fresh, specific question may contain only a few meaningful words once
+    # Spanish stopwords are removed (for example: "¿Qué ventajas tiene X?").
+    # Do not classify it as a follow-up solely by token count.
+    is_short_fragment = len(normalized) <= 32 and len(_tokens(query)) <= 3
+    is_explicit_follow_up = len(normalized) <= 72 and bool(
+        _FOLLOW_UP_RE.search(normalized)
+    )
+    return is_short_fragment or is_explicit_follow_up
 
 
 def _looks_roleplay(query: str) -> bool:
