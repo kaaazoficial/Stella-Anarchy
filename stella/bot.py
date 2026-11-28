@@ -782,9 +782,9 @@ class StellaBot:
         return (
             str(prompt or "")
             + ROOM_CONTEXT_MARKER
-            + "HILO O TEMA SELECCIONADO DE ESTA SALA:\\n"
-            + "\\n".join(transcript)
-            + "\\n</STELLA_ROOM_CONTEXT_UNTRUSTED>"
+            + "HILO O TEMA SELECCIONADO DE ESTA SALA:\n"
+            + "\n".join(transcript)
+            + "\n</STELLA_ROOM_CONTEXT_UNTRUSTED>"
         )
 
     async def _room_history_command(
