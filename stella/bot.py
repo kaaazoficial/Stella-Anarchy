@@ -46,6 +46,9 @@ MAX_TRACKED_USERS = 5000
 ANTISPAM_WINDOW_SECONDS = 8
 ANTISPAM_WARNING_COOLDOWN = 60
 _GLOBAL_CHAT_SILENCE_KEY = "chat_silence"
+_GLOBAL_CHAT_SILENCE_EXPIRY_KEY = "chat_silence_until"
+GLOBAL_CHAT_SILENCE_CACHE_SECONDS = 1.0
+GLOBAL_CHAT_SILENCE_MAX_SECONDS = 1800
 
 _ARCHIVE_EVENT_TYPES = {
     "message": "chat.message.in",
@@ -497,6 +500,7 @@ class StellaBot:
         self.ai_memory = QdrantConversationMemory()
         self.consciousness = StellaConsciousness()
         self._proactive_cooldown: dict[str, float] = {}
+        self._global_chat_silence_cache: tuple[float, bool] | None = None
         community_token = settings.community_bot_token or settings.bot_token
         self.voice_platform = (
             AnarchyClient(settings.api_base, community_token)
@@ -607,8 +611,7 @@ class StellaBot:
         memory = getattr(self, "ai_memory", None)
         if memory is None or self._ai_memory_locally_blocked(room_id, uid):
             return False
-        if not await memory.is_enabled(room_id, uid):
-            return False
+        # save() checks the durable opt-out tombstone under the same identity lock.
         return await memory.save(room_id, uid, self.ai_core._history(session_key))
 
     def _observe_consciousness(
@@ -964,6 +967,7 @@ class StellaBot:
         message: dict[str, Any], playful_kind: str | None = None,
     ) -> None:
         session_key = str(room_id) + ":" + str(uid)
+        original_request = str(prompt or "").strip()
         if playful_kind:
             consciousness = getattr(self, "consciousness", None)
             _, prompt = await asyncio.gather(
@@ -995,8 +999,8 @@ class StellaBot:
                 )
                 answer = ""
             if not answer:
-                answer = build_stella_comeback(playful_kind, prompt)
-                self.ai_core._append_history(session_key, "user", prompt[:1500])
+                answer = build_stella_comeback(playful_kind, original_request)
+                self.ai_core._append_history(session_key, "user", original_request[:1500])
                 self.ai_core._append_history(session_key, "assistant", answer[:700])
             await self._reply(room_id, answer[:700], message)
             self._schedule_background(self._save_ai_memory(room_id, uid, session_key), label="memory-save")
@@ -1091,16 +1095,50 @@ class StellaBot:
         """Only SINNER_UID can change Stella's global speaking state."""
         return bool(uid) and uid in _uid_set(getattr(self.settings, "sinner_uid", ""))
 
+    def _cache_global_chat_silence(self, silenced: bool) -> None:
+        """Cache an authoritative shared setting for a very short interval."""
+        self._global_chat_silence_cache = (time.monotonic(), bool(silenced))
+
     async def _global_chat_silenced(self) -> bool:
-        """Read the global silence flag from Qdrant so every Render instance agrees."""
+        """Read Qdrant, expire stale mutes and avoid a remote read for every event."""
+        now_mono = time.monotonic()
+        cached = getattr(self, "_global_chat_silence_cache", None)
+        if isinstance(cached, tuple) and len(cached) == 2:
+            try:
+                age = now_mono - float(cached[0])
+                if 0.0 <= age < GLOBAL_CHAT_SILENCE_CACHE_SECONDS:
+                    return bool(cached[1])
+            except (TypeError, ValueError, OverflowError):
+                self._global_chat_silence_cache = None
+
         try:
-            value = await self.shared_state.get_setting(_GLOBAL_CHAT_SILENCE_KEY)
-            # Never import a local SQLite value here: a different Render instance
-            # may hold a stale value. The shared store is the only source of truth.
-            return value == "1"
+            value = await asyncio.wait_for(
+                self.shared_state.get_setting(_GLOBAL_CHAT_SILENCE_KEY),
+                timeout=1.5,
+            )
+            silenced = value == "1"
+            if silenced:
+                expiry_raw = await asyncio.wait_for(
+                    self.shared_state.get_setting(_GLOBAL_CHAT_SILENCE_EXPIRY_KEY),
+                    timeout=1.0,
+                )
+                try:
+                    expires_at = int(expiry_raw or 0)
+                except (TypeError, ValueError, OverflowError):
+                    expires_at = 0
+                if expires_at <= int(time.time()):
+                    # Older releases stored a permanent mute without an expiry.
+                    # Clear that legacy state once so it cannot leave Stella silent forever.
+                    await self.shared_state.set_setting(_GLOBAL_CHAT_SILENCE_KEY, "0")
+                    await self.shared_state.set_setting(_GLOBAL_CHAT_SILENCE_EXPIRY_KEY, "0")
+                    log.warning("Expired or legacy global chat silence was cleared.")
+                    silenced = False
+            self._cache_global_chat_silence(silenced)
+            return silenced
         except Exception:
-            # Fail closed: never let an instance speak when shared state is uncertain.
+            # Fail closed if the shared control plane is unavailable.
             log.exception("Unable to read shared global chat-silence state; suppressing replies.")
+            self._cache_global_chat_silence(True)
             return True
 
     @staticmethod
@@ -1134,6 +1172,11 @@ class StellaBot:
             return
         try:
             await self.shared_state.set_setting(_GLOBAL_CHAT_SILENCE_KEY, "1")
+            await self.shared_state.set_setting(
+                _GLOBAL_CHAT_SILENCE_EXPIRY_KEY,
+                str(int(time.time()) + GLOBAL_CHAT_SILENCE_MAX_SECONDS),
+            )
+            self._cache_global_chat_silence(True)
         except Exception as exc:
             log.warning("Unable to persist global chat silence (%s).", type(exc).__name__)
             _audit_admin_operation("global_silence_failed", room_id, True)
@@ -1149,6 +1192,8 @@ class StellaBot:
             return
         try:
             await self.shared_state.set_setting(_GLOBAL_CHAT_SILENCE_KEY, "0")
+            await self.shared_state.set_setting(_GLOBAL_CHAT_SILENCE_EXPIRY_KEY, "0")
+            self._cache_global_chat_silence(False)
         except Exception as exc:
             log.warning("Unable to clear global chat silence (%s).", type(exc).__name__)
             _audit_admin_operation("global_silence_resume_failed", room_id, True)
