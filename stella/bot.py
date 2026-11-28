@@ -796,10 +796,18 @@ class StellaBot:
         room_prompt = await self._room_history_prompt(
             room_id, uid, f"Conversación en curso: {text}", message
         )
-        answer = await self.ai.ask(
-            f"{internal_context}\n\n{room_prompt}",
-            system=system,
-        )
+        ai_client = getattr(self, "ai", None)
+        ask = getattr(ai_client, "ask", None)
+        if not callable(ask):
+            return
+        try:
+            answer = await ask(
+                f"{internal_context}\n\n{room_prompt}",
+                system=system,
+            )
+        except Exception as exc:
+            log.warning("Spontaneous chat response unavailable (%s).", type(exc).__name__)
+            return
         answer = str(answer or "").strip()
         if (
             not answer
