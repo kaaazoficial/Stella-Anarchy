@@ -29,6 +29,7 @@ _GENERIC_CONTEXT_RE = re.compile(
     re.IGNORECASE,
 )
 _INVITATION_RE = (
+    # Explicit invitations addressed to the whole room.
     re.compile(
         r"\b(?:alguien|algun[oa]s?|ustedes|que opinan|que piensan|que creen)\b.*"
         r"\b(?:sabe|conoce|recomienda|opina|piensa|cree|ayuda|sugiere|consejo|idea|propuesta)\b",
@@ -40,6 +41,42 @@ _INVITATION_RE = (
         re.IGNORECASE,
     ),
 )
+
+# Natural openings do not always contain an explicit "alguien" or "ustedes".
+# These patterns cover collective opinions, choices and recommendations.
+_OPEN_QUESTION_RE = (
+    re.compile(
+        r"\b(?:que|cual|como)\s+(?:opinan|piensan|les parece|prefieren|"
+        r"elegirian|recomiendan|sugieren|harian|estan viendo|estan jugando|"
+        r"estan escuchando|les gusta)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\b(?:que les parece|que tal les parece|con cual se quedan|"
+        r"cual elegirian|como lo ven|que opcion prefieren)\b",
+        re.IGNORECASE,
+    ),
+)
+
+_SOFT_INVITATION_RE = (
+    re.compile(
+        r"\b(?:tengo|me surgio|me surge|traigo)\s+(?:una\s+)?"
+        r"(?:duda|pregunta|idea)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\b(?:necesito|busco|acepto|se agradecen|me vendria bien)\s+"
+        r"(?:(?:una|algunas|algunos|un par de)\s+)?"
+        r"(?:ideas|opiniones|opinion|sugerencias|recomendaciones|consejos|ayuda)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\b(?:estoy entre|no se si elegir|no tengo claro si|"
+        r"me cuesta decidir|no me decido entre)\b",
+        re.IGNORECASE,
+    ),
+)
+
 _ROLEPLAY_RE = re.compile(
     r"(?:\*[^*\n]{2,}\*|^\s*[—–-]\s*\S|"
     r"\b(?:roleplay|rolear|hagamos rol|modo rol|escena de rol|"
@@ -66,17 +103,18 @@ def _tokens(value: str) -> set[str]:
 
 
 def is_clear_invitation(content: str) -> bool:
-    """Return True only for a clear invitation addressed to the group."""
+    """Return True when a message naturally opens the conversation to the room."""
     text = " ".join(str(content or "").split())
     if len(text) < 12 or len(text) > 550 or text.startswith(("!", "-", "/")):
         return False
     normalized = _normalize(text)
-    return any(pattern.search(normalized) for pattern in _INVITATION_RE) or bool(
+    if any(pattern.search(normalized) for pattern in _INVITATION_RE):
+        return True
+    if any(pattern.search(normalized) for pattern in _SOFT_INVITATION_RE):
+        return True
+    return bool(
         ("?" in text or "¿" in text)
-        and re.search(
-            r"\b(?:alguien|ustedes|que opinan|que piensan|que harian|como lo ven)\b",
-            normalized,
-        )
+        and any(pattern.search(normalized) for pattern in _OPEN_QUESTION_RE)
     )
 
 
