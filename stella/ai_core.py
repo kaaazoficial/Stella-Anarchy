@@ -2846,16 +2846,10 @@ class StellaAICore:
                 "No los confundas con palabras escritas por la persona actual."
             )
         if not self.is_enabled:
+            self.metrics["ai_silent_provider_outages"] += 1
             return {
-                "kind": "answer",
-                "answer": (
-                    "La conversación inteligente todavía no está conectada, pero mis "
-                    "funciones habituales siguen disponibles. Cuéntame qué necesitas y te "
-                    "orientaré con mucho gusto dentro de las herramientas que tengo activas."
-                ),
-                "command": "",
-                "args": "",
-                "fallback": True,
+                "kind": "silent", "answer": "", "command": "", "args": "",
+                "fallback": True, "reason": "provider_unavailable",
             }
         messages = [*history, {"role": "user", "content": text}]
         # Never reuse a shared cached natural-language answer: it made
@@ -2879,39 +2873,28 @@ class StellaAICore:
             )
         except RuntimeError as exc:
             reason = str(exc)
-            if reason == "IA_NO_CONFIGURADA":
-                answer = "Mi función de conversación no está disponible en este momento."
-            elif reason == "IA_CUOTA_DIARIA_AGOTADA":
-                answer = (
-                    "Mi servicio de conversación alcanzó su límite temporal. "
-                    "La conexión se reintentará cuando se restablezcan; "
-                    "los comandos clásicos siguen disponibles."
-                )
-            elif reason == "IA_LIMITE_USUARIO":
-                answer = (
-                    "Alcanzaste el límite temporal de consultas de IA. "
-                    "Espera un minuto y vuelve a intentarlo; los comandos clásicos siguen disponibles."
-                )
-            elif reason.startswith("IA_PROVEEDORES_EN_ESPERA:"):
-                answer = (
-                    "Mi servicio de conversación se está recuperando de un problema temporal. "
-                    "Inténtalo de nuevo en un momento; los comandos clásicos siguen disponibles."
-                )
-            else:
-                answer = "No pude completar la consulta de IA. Los comandos clásicos siguen disponibles."
-            self._append_history(key, "user", text)
+            if reason == "IA_LIMITE_USUARIO":
+                return {
+                    "kind": "answer",
+                    "answer": (
+                        "Alcanzaste el límite temporal de consultas de IA. "
+                        "Espera un minuto y vuelve a intentarlo."
+                    ),
+                    "command": "", "args": "", "fallback": True,
+                }
+            # Upstream outages, quota resets and open circuit breakers are not
+            # useful answers. Do not publish a generic message or save the
+            # unanswered user turn as if the conversation had continued.
+            self.metrics["ai_silent_provider_outages"] += 1
             return {
-                "kind": "answer", "answer": answer, "command": "", "args": "",
-                "fallback": reason != "IA_NO_CONFIGURADA",
+                "kind": "silent", "answer": "", "command": "", "args": "",
+                "fallback": True, "reason": "provider_unavailable",
             }
         except Exception:
-            self._append_history(key, "user", text)
+            self.metrics["ai_silent_provider_outages"] += 1
             return {
-                "kind": "answer",
-                "answer": "Ahora mismo no puedo responder con mi función de conversación. Inténtalo más tarde; los comandos habituales siguen disponibles.",
-                "command": "",
-                "args": "",
-                "fallback": True,
+                "kind": "silent", "answer": "", "command": "", "args": "",
+                "fallback": True, "reason": "provider_unavailable",
             }
 
         invocation = (
