@@ -5,7 +5,7 @@ import asyncio
 from stella.ai_core import StellaAICore
 
 
-def test_cloudflare_is_primary_when_gateway_secret_is_configured(monkeypatch):
+def test_cloudflare_is_last_fallback_after_gemini_groq_and_zai(monkeypatch):
     monkeypatch.setenv("CLOUDFLARE_AI_GATEWAY_TOKEN", "gateway-test-secret")
     monkeypatch.delenv("STELLA_AI_PRIMARY_PROVIDER", raising=False)
     monkeypatch.setenv("GOOGLE_API_KEY", "gemini-test")
@@ -14,9 +14,9 @@ def test_cloudflare_is_primary_when_gateway_secret_is_configured(monkeypatch):
 
     core = StellaAICore()
 
-    assert core._primary_provider_config()["name"] == "Cloudflare Workers AI"
+    assert core._primary_provider_config()["name"] == "Google Gemini"
     assert [item["name"] for item in core._fallback_provider_configs()] == [
-        "Google Gemini", "Groq", "Z.AI",
+        "Groq", "Z.AI", "Cloudflare Workers AI",
     ]
     diagnostics = core.provider_diagnostics()
     assert diagnostics["cloudflare_configured"] is True
@@ -96,9 +96,11 @@ def test_cloudflare_gateway_uses_bearer_secret_and_chat_completion_shape(monkeyp
     assert captured["json"]["response_format"] == {"type": "json_object"}
 
 
-def test_cloudflare_falls_back_to_gemini_when_gateway_fails(monkeypatch):
+def test_cloudflare_is_attempted_only_after_gemini_groq_and_zai_fail(monkeypatch):
     monkeypatch.setenv("CLOUDFLARE_AI_GATEWAY_TOKEN", "shared-secret")
     monkeypatch.setenv("GOOGLE_API_KEY", "gemini-test")
+    monkeypatch.setenv("GROQ_API_KEY", "groq-test")
+    monkeypatch.setenv("ZAI_API_KEY", "zai-test")
     monkeypatch.delenv("STELLA_AI_PRIMARY_PROVIDER", raising=False)
     core = StellaAICore()
     attempted = []
@@ -106,11 +108,11 @@ def test_cloudflare_falls_back_to_gemini_when_gateway_fails(monkeypatch):
     async def fake_provider_request(*args, **kwargs):
         provider = core._active_provider_config()["name"]
         attempted.append(provider)
-        if provider == "Cloudflare Workers AI":
-            raise RuntimeError("simulated gateway outage")
+        if provider != "Cloudflare Workers AI":
+            raise RuntimeError(f"simulated {provider} outage")
         return {
             "kind": "answer",
-            "answer": "Respuesta desde Gemini",
+            "answer": "Respuesta desde Cloudflare",
             "command": "",
             "args": "",
             "steps": [],
@@ -125,7 +127,9 @@ def test_cloudflare_falls_back_to_gemini_when_gateway_fails(monkeypatch):
         )
     )
 
-    assert attempted == ["Cloudflare Workers AI", "Google Gemini"]
-    assert result["answer"] == "Respuesta desde Gemini"
-    assert core._last_provider_summary["name"] == "Google Gemini"
+    assert attempted == [
+        "Google Gemini", "Groq", "Z.AI", "Cloudflare Workers AI",
+    ]
+    assert result["answer"] == "Respuesta desde Cloudflare"
+    assert core._last_provider_summary["name"] == "Cloudflare Workers AI"
     assert core.metrics["ai_provider_failovers"] == 1
