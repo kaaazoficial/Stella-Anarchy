@@ -10,6 +10,7 @@ import re
 import sqlite3
 import time
 import uuid
+from collections import OrderedDict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -152,6 +153,10 @@ class RoomArchive:
         self._worker_wakeup = asyncio.Event()
         self.events_enqueued = 0
         self.last_success_at = 0.0
+        # Fast room-local view, updated as soon as messages enter the durable outbox.
+        self._recent_context_cache: OrderedDict[str, list[dict[str, Any]]] = OrderedDict()
+        self._recent_context_cache_limit = 120
+        self._recent_context_cache_rooms = 200
 
     @property
     def enabled(self) -> bool:
@@ -354,6 +359,7 @@ class RoomArchive:
                 queued, ensure_ascii=False, separators=(",", ":"), default=str
             )
             await asyncio.to_thread(self._enqueue_sync, point_id, encoded)
+            self._remember_context_event(queued)
             self.events_enqueued += 1
             self._worker_wakeup.set()
             return True
@@ -616,6 +622,12 @@ class RoomArchive:
                         json=body,
                     )
                     response.raise_for_status()
+                    self._remember_context_event({
+                        "room_id": room, "event_type": kind, "event_time": event_time,
+                        "actor_uid": actor_uid, "actor_name": actor_name,
+                        "message_id": message_id, "reply_to_message_id": reply_to_message_id,
+                        "content": safe_content,
+                    })
                     self.events_written += 1
                     self.last_success_at = time.time()
                     return True
@@ -733,23 +745,106 @@ class RoomArchive:
             limit=limit,
         )
 
+    def _remember_context_event(self, event: dict[str, Any]) -> None:
+        """Keep recent room messages visible before asynchronous Qdrant delivery."""
+        if not isinstance(event, dict):
+            return
+        kind = str(event.get("event_type") or "").casefold()
+        if kind not in {
+            "chat.message.in", "chat.message.out", "chat.message.edited",
+            "message.created", "message.create", "message.edited",
+        }:
+            return
+        content = _safe_text(str(event.get("content") or "")).strip()
+        room = str(event.get("room_id") or "").strip()
+        if not room or not content:
+            return
+        now_ms = int(time.time() * 1000)
+        occurred_ms = _to_epoch_ms(
+            event.get("event_time") or event.get("occurred_at_ms") or event.get("occurred_at"),
+            now_ms,
+        )
+        entry = {
+            "room_id": room,
+            "event_type": kind,
+            "occurred_at": datetime.fromtimestamp(
+                occurred_ms / 1000, tz=timezone.utc
+            ).isoformat(),
+            "occurred_at_ms": occurred_ms,
+            "actor_uid": str(event.get("actor_uid") or "")[:160],
+            "actor_name": _safe_text(str(event.get("actor_name") or ""))[:120],
+            "message_id": str(event.get("message_id") or "")[:160],
+            "reply_to_message_id": str(event.get("reply_to_message_id") or "")[:160],
+            "content": content[:20000],
+        }
+        cache = self._recent_context_cache
+        entries = cache.setdefault(room, [])
+        message_id = entry["message_id"]
+        duplicate_index = next(
+            (
+                index for index, previous in enumerate(entries)
+                if message_id and previous.get("message_id") == message_id
+            ),
+            None,
+        )
+        if duplicate_index is not None:
+            entries[duplicate_index] = entry
+        else:
+            entries.append(entry)
+        entries.sort(
+            key=lambda item: (
+                int(item.get("occurred_at_ms") or 0),
+                str(item.get("message_id") or ""),
+            ),
+            reverse=True,
+        )
+        del entries[self._recent_context_cache_limit:]
+        cache.move_to_end(room)
+        while len(cache) > self._recent_context_cache_rooms:
+            cache.popitem(last=False)
+
     async def recent_room_context(
         self, room_id: str, *, limit: int = 24
     ) -> list[dict[str, Any]]:
-        """Return recent message events newest-first for conversational context."""
-        events = await self.list_room_events(
-            room_id,
+        """Return room context from the immediate cache plus durable Qdrant history."""
+        room = str(room_id or "").strip()
+        safe_limit = max(1, min(120, int(limit)))
+        cached = [
+            dict(item) for item in self._recent_context_cache.get(room, [])
+        ]
+        if len(cached) >= safe_limit:
+            return cached[:safe_limit]
+
+        stored = await self.list_room_events(
+            room,
             reverse=True,
-            limit=max(1, min(80, int(limit))),
+            limit=max(safe_limit, min(120, safe_limit * 2)),
         )
-        return [
-            event for event in events
-            if str(event.get("event_type") or "").casefold() in {
+        merged: dict[str, dict[str, Any]] = {}
+        anonymous: list[dict[str, Any]] = []
+        for event in [*cached, *stored]:
+            kind = str(event.get("event_type") or "").casefold()
+            content = " ".join(str(event.get("content") or "").split())
+            if kind not in {
                 "chat.message.in", "chat.message.out", "chat.message.edited",
                 "message.created", "message.create", "message.edited",
-            }
-            and str(event.get("content") or "").strip()
-        ]
+            } or not content:
+                continue
+            message_id = str(event.get("message_id") or "").strip()
+            if message_id:
+                # Prefer local data, which may already include a normalized reply parent.
+                merged.setdefault(message_id, dict(event))
+            else:
+                anonymous.append(dict(event))
+        combined = list(merged.values()) + anonymous
+        combined.sort(
+            key=lambda item: (
+                int(item.get("occurred_at_ms") or 0),
+                str(item.get("message_id") or ""),
+            ),
+            reverse=True,
+        )
+        return combined[:safe_limit]
 
     async def integrity_check(
         self, room_id: str, *, sample_limit: int = 500
