@@ -2963,15 +2963,15 @@ class StellaBot:
         if len(parts) != 2:
             await self._reply(
                 room_id,
-                "🎰 RULETA EUROPEA · 0–36\\n"
-                f"Uso: {prefix}ruleta <cantidad> <apuesta>\\n"
+                "🎰 RULETA EUROPEA · 0–36\n"
+                f"Uso: {prefix}ruleta <cantidad> <apuesta>\n"
                 "Apuestas: rojo, negro, par, impar, bajo (1–18), alto (19–36) "
-                "o un número del 0 al 36.\\n"
+                "o un número del 0 al 36.\n"
                 "Pagos: número 35:1 · demás apuestas 1:1. Solo puntos virtuales.",
                 message,
             )
             return
-        if not re.fullmatch(r"\\d+", parts[0]):
+        if not re.fullmatch(r"\d+", parts[0]):
             await self._reply(room_id, f"Indica una cantidad válida. Ejemplo: {prefix}ruleta 25 rojo.", message)
             return
         wager = int(parts[0])
@@ -2980,7 +2980,7 @@ class StellaBot:
             return
         bet = parts[1]
         valid = {"rojo", "negro", "par", "impar", "bajo", "alto"}
-        if bet not in valid and not (re.fullmatch(r"\\d{1,2}", bet) and 0 <= int(bet) <= 36):
+        if bet not in valid and not (re.fullmatch(r"\d{1,2}", bet) and 0 <= int(bet) <= 36):
             await self._reply(room_id, "Apuesta no válida. Usa rojo, negro, par, impar, bajo, alto o un número del 0 al 36.", message)
             return
         number = random.randint(0, 36)
@@ -3017,9 +3017,9 @@ class StellaBot:
             outcome = f"Perdiste {wager} puntos."
         await self._reply(
             room_id,
-            f"🎰 RULETA · {number} {color}\\n"
-            f"Apuesta: {label} · cuota {odds} · {wager} puntos\\n"
-            f"{outcome}\\nSaldo: {balance} puntos.",
+            f"🎰 RULETA · {number} {color}\n"
+            f"Apuesta: {label} · cuota {odds} · {wager} puntos\n"
+            f"{outcome}\nSaldo: {balance} puntos.",
             message,
         )
 
