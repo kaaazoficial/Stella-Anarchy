@@ -9,7 +9,7 @@
     "test": "node --test",
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
-    "tail": "wrangler tail anarchy-worker"
+    "tail": "wrangler tail stella-anarchy"
   },
   "devDependencies": { "wrangler": "4.169.0" }
 }
