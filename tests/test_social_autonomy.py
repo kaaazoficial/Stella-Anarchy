@@ -292,3 +292,41 @@ def test_autonomous_social_step_skips_shared_silence_read_without_candidates():
         assert calls == 0
 
     asyncio.run(scenario())
+
+
+
+def test_successful_social_activity_restore_is_not_scheduled_again():
+    async def scenario():
+        import json
+
+        now = time.time()
+        shared = FakeSharedActivityState(json.dumps({
+            "version": 1,
+            "rooms": [{
+                "room_id": "room-once",
+                "last_user_activity": int(now - 120),
+                "last_spoke_at": 0,
+            }],
+        }))
+        bot = make_bot(recent_events())
+        bot.shared_state = shared
+        bot._social_room_activity = {}
+
+        assert await bot._restore_social_activity() is True
+        assert bot._social_activity_restore_attempted is True
+        assert bot._social_activity_restore_retry_at == float("inf")
+        assert time.monotonic() < bot._social_activity_restore_retry_at
+
+    asyncio.run(scenario())
+
+
+def test_missing_shared_state_does_not_retry_social_restore_every_cycle():
+    async def scenario():
+        bot = make_bot(recent_events())
+        bot.shared_state = object()
+
+        assert await bot._restore_social_activity() is False
+        assert bot._social_activity_restore_attempted is True
+        assert bot._social_activity_restore_retry_at > time.monotonic()
+
+    asyncio.run(scenario())

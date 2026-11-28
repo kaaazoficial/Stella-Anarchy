@@ -730,6 +730,7 @@ class StellaBot:
         shared = getattr(self, "shared_state", None)
         getter = getattr(shared, "get_setting", None)
         if not callable(getter):
+            self._social_activity_restore_retry_at = time.monotonic() + 3600.0
             return False
         try:
             raw = await asyncio.wait_for(getter("social_active_rooms_v1"), timeout=1.2)
@@ -772,6 +773,9 @@ class StellaBot:
                     now_mono - max(0.0, spoke_age) if last_spoke_epoch > 0 else 0.0
                 ),
             }
+        # A successful restore is a one-time startup operation. A failed read
+        # may retry after five minutes; do not poll Qdrant on every 20s loop.
+        self._social_activity_restore_retry_at = float("inf")
         log.info("Restored autonomous activity for %s recent rooms.", len(rooms))
         return True
 
