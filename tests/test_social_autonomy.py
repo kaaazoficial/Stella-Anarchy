@@ -209,3 +209,86 @@ def test_social_room_activity_tracking_keeps_only_bounded_transient_member_ids()
 
     bot._track_social_room_activity("room-1", "member-2")
     assert bot._social_room_activity["room-1"]["member_uids"] == {"member-1", "member-2"}
+
+
+
+class FakeSharedActivityState:
+    def __init__(self, value=None):
+        self.value = value
+        self.writes = []
+
+    async def get_setting(self, key):
+        assert key == "social_active_rooms_v1"
+        return self.value
+
+    async def set_setting(self, key, value):
+        assert key == "social_active_rooms_v1"
+        self.value = value
+        self.writes.append((key, value))
+        return True
+
+
+def test_social_activity_checkpoint_restores_recent_room_timestamps_without_member_ids():
+    async def scenario():
+        import json
+
+        now = time.time()
+        shared = FakeSharedActivityState(json.dumps({
+            "version": 1,
+            "rooms": [{
+                "room_id": "room-restored",
+                "last_user_activity": int(now - 150),
+                "last_spoke_at": int(now - 400),
+            }],
+        }))
+        bot = make_bot(recent_events())
+        bot.shared_state = shared
+        bot._social_room_activity = {}
+
+        assert await bot._restore_social_activity() is True
+        state = bot._social_room_activity["room-restored"]
+        assert time.monotonic() - state["last_user_activity"] >= 149
+        assert state["member_uids"] == {"__restored_activity__"}
+        assert state["last_spoke_at"] > 0
+
+    asyncio.run(scenario())
+
+
+def test_social_activity_checkpoint_persists_only_room_ids_and_timestamps():
+    async def scenario():
+        import json
+
+        bot = make_bot(recent_events())
+        shared = FakeSharedActivityState()
+        bot.shared_state = shared
+        bot._social_activity_dirty = True
+
+        assert await bot._persist_social_activity() is True
+        assert len(shared.writes) == 1
+        payload = json.loads(shared.value)
+        assert payload["version"] == 1
+        assert payload["rooms"][0]["room_id"] == "room-1"
+        assert "member_uids" not in shared.value
+        assert "member-1" not in shared.value
+        assert "content" not in shared.value
+        assert bot._social_activity_dirty is False
+
+    asyncio.run(scenario())
+
+
+def test_autonomous_social_step_skips_shared_silence_read_without_candidates():
+    async def scenario():
+        bot = make_bot(recent_events())
+        bot._social_room_activity = {}
+        calls = 0
+
+        async def counted_silence_read():
+            nonlocal calls
+            calls += 1
+            return False
+
+        bot._global_chat_silenced = counted_silence_read
+        assert await bot.autonomous_social_step() is False
+        assert calls == 0
+
+    asyncio.run(scenario())

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import hashlib
 import logging
 import random
@@ -47,7 +48,7 @@ ANTISPAM_WINDOW_SECONDS = 8
 ANTISPAM_WARNING_COOLDOWN = 60
 _GLOBAL_CHAT_SILENCE_KEY = "chat_silence"
 _GLOBAL_CHAT_SILENCE_EXPIRY_KEY = "chat_silence_until"
-GLOBAL_CHAT_SILENCE_CACHE_SECONDS = 1.0
+GLOBAL_CHAT_SILENCE_CACHE_SECONDS = 5.0
 GLOBAL_CHAT_SILENCE_MAX_SECONDS = 1800
 
 _ARCHIVE_EVENT_TYPES = {
@@ -503,6 +504,10 @@ class StellaBot:
         self._proactive_evaluation_cooldown: dict[str, float] = {}
         self._social_room_activity: dict[str, dict[str, Any]] = {}
         self._social_autonomy_global_last_sent = 0.0
+        self._social_activity_dirty = False
+        self._social_activity_last_persist = 0.0
+        self._social_activity_restore_attempted = False
+        self._social_activity_restore_retry_at = 0.0
         self._global_chat_silence_cache: tuple[float, bool] | None = None
         community_token = settings.community_bot_token or settings.bot_token
         self.voice_platform = (
@@ -717,12 +722,105 @@ class StellaBot:
             )
             if oldest != room:
                 rooms.pop(oldest, None)
+        self._social_activity_dirty = True
+
+    async def _restore_social_activity(self) -> bool:
+        """Restore recent room timestamps after restart; persist no chat/member data."""
+        self._social_activity_restore_attempted = True
+        shared = getattr(self, "shared_state", None)
+        getter = getattr(shared, "get_setting", None)
+        if not callable(getter):
+            return False
+        try:
+            raw = await asyncio.wait_for(getter("social_active_rooms_v1"), timeout=1.2)
+            payload = json.loads(raw) if raw else {}
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            self._social_activity_restore_retry_at = time.monotonic() + 300.0
+            log.warning("Social room activity restore unavailable (%s).", type(exc).__name__)
+            return False
+        entries = payload.get("rooms", []) if isinstance(payload, dict) else []
+        if not isinstance(entries, list):
+            return True
+        now_wall = time.time()
+        now_mono = time.monotonic()
+        rooms = getattr(self, "_social_room_activity", None)
+        if not isinstance(rooms, dict):
+            rooms = {}
+            self._social_room_activity = rooms
+        for item in entries[:200]:
+            if not isinstance(item, dict):
+                continue
+            room_id = str(item.get("room_id") or "").strip()
+            if not room_id or len(room_id) > 128:
+                continue
+            try:
+                last_user_epoch = float(item.get("last_user_activity") or 0)
+                last_spoke_epoch = float(item.get("last_spoke_at") or 0)
+            except (TypeError, ValueError, OverflowError):
+                continue
+            age = now_wall - last_user_epoch
+            if age < -300 or age > 3600:
+                continue
+            spoke_age = now_wall - last_spoke_epoch if last_spoke_epoch > 0 else 0.0
+            rooms[room_id] = {
+                "last_user_activity": now_mono - max(0.0, age),
+                "member_uids": {"__restored_activity__"},
+                "last_evaluated_at": 0.0,
+                "last_spoke_at": (
+                    now_mono - max(0.0, spoke_age) if last_spoke_epoch > 0 else 0.0
+                ),
+            }
+        log.info("Restored autonomous activity for %s recent rooms.", len(rooms))
+        return True
+
+    async def _persist_social_activity(self) -> bool:
+        """Persist room IDs and timestamps only, never message text or member UIDs."""
+        shared = getattr(self, "shared_state", None)
+        setter = getattr(shared, "set_setting", None)
+        if not callable(setter):
+            return False
+        now_mono = time.monotonic()
+        now_wall = time.time()
+        snapshot = []
+        rooms = getattr(self, "_social_room_activity", {})
+        for room_id, state in list(rooms.items()):
+            if not isinstance(state, dict):
+                continue
+            activity = float(state.get("last_user_activity", 0.0) or 0.0)
+            age = now_mono - activity
+            if age < 0 or age > 3600:
+                continue
+            spoke = float(state.get("last_spoke_at", 0.0) or 0.0)
+            snapshot.append({
+                "room_id": str(room_id)[:128],
+                "last_user_activity": int(now_wall - age),
+                "last_spoke_at": int(now_wall - (now_mono - spoke)) if spoke > 0 else 0,
+            })
+        snapshot.sort(key=lambda item: item["last_user_activity"], reverse=True)
+        encoded = json.dumps(
+            {"version": 1, "rooms": snapshot[:200]},
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+        try:
+            await asyncio.wait_for(
+                setter("social_active_rooms_v1", encoded),
+                timeout=2.0,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            log.warning("Social room activity checkpoint failed (%s).", type(exc).__name__)
+            return False
+        self._social_activity_dirty = False
+        self._social_activity_last_persist = now_mono
+        return True
 
     async def autonomous_social_step(self, *, now: float | None = None) -> bool:
         """Give Stella a chance to start a conversation without a new mention or message."""
         clock = time.monotonic() if now is None else float(now)
-        if await self._global_chat_silenced():
-            return False
         global_last_sent = float(getattr(self, "_social_autonomy_global_last_sent", 0.0))
         if global_last_sent > 0.0 and clock - global_last_sent < 35.0:
             return False
@@ -755,6 +853,8 @@ class StellaBot:
                 state,
             ))
         if not candidates:
+            return False
+        if await self._global_chat_silenced():
             return False
 
         # Evaluate one room per tick. Older unevaluated rooms get priority so a
@@ -890,15 +990,28 @@ class StellaBot:
         spoke_at = time.monotonic()
         current["last_spoke_at"] = spoke_at
         current["last_evaluated_at"] = spoke_at
+        self._social_activity_dirty = True
         self._social_autonomy_global_last_sent = spoke_at
         self._proactive_cooldown[room_id] = spoke_at + 240.0
         return True
 
     async def social_autonomy_loop(self) -> None:
-        """Run social initiative independently of incoming webhooks."""
+        """Run social initiative and checkpoint room activity independently of webhooks."""
         while True:
             try:
+                now = time.monotonic()
+                if (
+                    not getattr(self, "_social_activity_restore_attempted", False)
+                    or now >= float(getattr(self, "_social_activity_restore_retry_at", 0.0))
+                ):
+                    await self._restore_social_activity()
                 await self.autonomous_social_step()
+                last_persist = float(getattr(self, "_social_activity_last_persist", 0.0))
+                if (
+                    getattr(self, "_social_activity_dirty", False)
+                    and (last_persist <= 0.0 or time.monotonic() - last_persist >= 15.0)
+                ):
+                    await self._persist_social_activity()
             except asyncio.CancelledError:
                 raise
             except Exception as exc:

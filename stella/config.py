@@ -14,6 +14,11 @@ def get_gemini_api_key() -> str:
     return os.getenv("GOOGLE_API_KEY", "").strip() or os.getenv("GEMINI_API_KEY", "").strip()
 
 
+def get_gemini_embedding_api_key() -> str:
+    """Allow semantic embeddings to use a dedicated key without changing chat."""
+    return os.getenv("GEMINI_EMBEDDING_API_KEY", "").strip() or get_gemini_api_key()
+
+
 class StellaSettings(BaseSettings):
     """Validate only stable process settings; secrets remain outside the model."""
 
